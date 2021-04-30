@@ -19,6 +19,8 @@ import pathlib
 import pdb
 import subprocess as spc
 import sys
+# import warnings
+# warnings.filterwarnings("error")
 
 #------------------------------------------------------------------------------
 ### Paths and variables ###
@@ -55,15 +57,23 @@ class CardConvert_parser():
         
         """Check for unparsed TOB3 files in TMP directory"""
         
-        target_path = self.get_data_path()
-        file_list = []
-        for f in os.listdir(target_path):
-            site = f.split('_')[0]
-            if site != self.SiteName: continue
-            file_list.append(f)
-        if not file_list: 
-            raise RuntimeError('No files in TMP directory to parse!')
-        return file_list
+        all_files = _get_files_of_type(site=self.SiteName)
+        files = _get_files_of_type(site=self.SiteName, file_type='TOB3')
+        if not len(all_files) == len(files):
+            raise RuntimeError('Non-TOB3 files present in TMP directory! '
+                               'Please remove these files and try again!')
+        return files
+        # return check_unparsed_files(self.SiteName)
+    
+        # target_path = self.get_data_path()
+        # file_list = []
+        # for f in os.listdir(target_path):
+        #     site = f.split('_')[0]
+        #     if site != self.SiteName: continue
+        #     file_list.append(f)
+        # if not file_list: 
+        #     raise RuntimeError('No files in TMP directory to parse!')
+        # return file_list
 
     def get_bale_interval(self):
         
@@ -247,8 +257,9 @@ def _set_check_path(path, subdirs=[], error_if_missing=True):
     for item in subdirs: fmt_path = fmt_path / item
     if not error_if_missing: return fmt_path
     if not fmt_path.exists():
-        raise FileNotFoundError('Specified file path does not exist! '
-                                'Check site name or specified subdirectories!')
+        raise FileNotFoundError('Specified file path ({}) does not exist! '
+                                'Check site name or specified subdirectories!'
+                                .format(str(fmt_path)))
     return fmt_path
 #------------------------------------------------------------------------------
 
@@ -288,6 +299,62 @@ def _test_format(fmt_str):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def _get_files_of_type(site:str, file_type=None, error_if_zero=True) -> list:
+
+    """
+    Return a list of the files contained in the TMP directory
+    
+    The list can be for files of a given format, or None (returns all)
+    
+    Parameters
+    ----------
+    * site (str) : site to process
+    * file_type (None or str) : format of files to be returned
+    * error_if_zero (bool) : raise error if no files (default True)"""    
+
+    files = [x.name for x in _set_check_path(path=base_data_path.format(site), 
+                                             subdirs=['TMP']).glob('*.dat')]
+    if not file_type: 
+        subset_files = files
+    elif file_type == 'TOB3':
+        subset_files = [x for x in files if x.split('_')[0] == site]
+    else:
+        _test_format(fmt_str=file_type)
+        subset_files = [x.name for x in files if x.name.split('_')[0] == file_type]
+    if not subset_files and error_if_zero():
+        raise RuntimeError('Directory contains no files of type {} to parse!'
+                           .format(file_type))
+    return subset_files    
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# def check_unparsed_files(site):
+        
+    # all_files = _get_files_of_type(site=site)
+    # files = _get_files_of_type(site=site, file_type='TOB3')
+    # if not len(all_files) == len(files):
+    #     raise RuntimeError('Non-TOB3 files present in TMP directory! '
+    #                        'Please remove these files and try again!')
+    # return files
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_cardconvert_parsed_files(site, fmt, interval):
+    
+    bale_dict = {'TOA5': int(1440 / int(interval)), 'TOB1': 1}
+    raw_files = _get_files_of_type(site=site, file_type='TOB3')
+    fmt_files = _get_files_of_type(site=site, file_type=fmt)
+    if not fmt_files: raise RuntimeError('CardConvert produced no output!')
+    n_parsed_files = len(fmt_files)
+    n_expected_files = len(raw_files) * bale_dict[fmt]
+    if not n_parsed_files == n_expected_files:
+        raise RuntimeWarning('Expected {0} {1} files; got only {2}!'
+                             .format(str(n_expected_files), fmt, 
+                                     str(n_parsed_files)))
+    return fmt_files
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### Main ###
 #------------------------------------------------------------------------------
 
@@ -296,20 +363,25 @@ if __name__ == "__main__":
 
     site, interval = sys.argv[1], sys.argv[2]
     logger = _set_logger(site=site)
-    base_site_path = _set_check_path(path=base_data_path.format(site), 
-                                     subdirs=['TMP'])
-    pdb.set_trace()
-    files = [f for f in base_site_path.glob('*.dat') if 'TOA5' or 'TOB1' in f]
-    logger.info()
+    logger.info('Begin processing for site {}'.format(site))
+    try:
+        check_unparsed_files(site=site)
+    except (RuntimeError, FileNotFoundError) as e:
+        logger.error(e); sys.exit()
     for out_format in ['TOA5', 'TOB1']:
+        logger.info('Running {} format conversion'.format(out_format))
         try:
             x = CardConvert_parser(sitename=site, fmt=out_format, 
                                    data_intvl_mins=interval)
             x.run_ccf_file()
-            logger.info()
         except Exception as e:
-            logger.error(e)
-            sys.exit()
+            logger.error('CardConvert processing failed! Message: {}'
+                         .format(e)); sys.exit()
+        try:
+            get_cardconvert_parsed_files(site=site, fmt=out_format, 
+                                         interval=interval)
+        except RuntimeError as e:
+            logger.error(e); sys.exit()
         try:
             x = file_parser(sitename=site, fmt=out_format, 
                             data_intvl_mins=interval)
