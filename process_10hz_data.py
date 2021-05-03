@@ -14,7 +14,6 @@ To add:
 import datetime as dt
 import logging
 import numpy as np
-import os
 import pathlib
 import pdb
 import subprocess as spc
@@ -48,32 +47,26 @@ class CardConvert_parser():
         _test_format(fmt)
         self.format = fmt
         self.SiteName = sitename        
-        self.files_to_process = self.check_unparsed_files()
         self.overwrite_ccf = overwrite_ccf
+        self.process_flag = 0
         if fmt == 'TOA5': self.bale_interval = int(data_intvl_mins)
         if fmt == 'TOB1': self.bale_interval = 1440
 
-    def check_unparsed_files(self):
+    #-------------------------------------------------------------------------
+    ### Class methods tied to CardConvert ###
+    #-------------------------------------------------------------------------
+
+    def get_unparsed_files(self):
         
         """Check for unparsed TOB3 files in TMP directory"""
         
+        raw_files = _get_files_of_type(site=self.SiteName, file_type='TOB3')
+        if self.process_flag: return raw_files
         all_files = _get_files_of_type(site=self.SiteName)
-        files = _get_files_of_type(site=self.SiteName, file_type='TOB3')
-        if not len(all_files) == len(files):
+        if not len(all_files) == len(raw_files):
             raise RuntimeError('Non-TOB3 files present in TMP directory! '
                                'Please remove these files and try again!')
-        return files
-        # return check_unparsed_files(self.SiteName)
-    
-        # target_path = self.get_data_path()
-        # file_list = []
-        # for f in os.listdir(target_path):
-        #     site = f.split('_')[0]
-        #     if site != self.SiteName: continue
-        #     file_list.append(f)
-        # if not file_list: 
-        #     raise RuntimeError('No files in TMP directory to parse!')
-        # return file_list
+        return raw_files
 
     def get_bale_interval(self):
         
@@ -102,31 +95,46 @@ class CardConvert_parser():
 
         """Return the site-specific ccf file path"""        
         
-        return ( _set_check_path(path=base_ccf_path.format(self.SiteName)) / 
+        return ( _check_path(path=base_ccf_path.format(self.SiteName)) / 
                 '{0}_{1}.ccf'.format(self.format, self.SiteName))
 
     def get_data_path(self):
 
         """Return the site-specific data path"""        
 
-        return _set_check_path(path=base_data_path.format(self.SiteName),
-                               subdirs=['TMP'])
+        return _check_path(path=base_data_path.format(self.SiteName),
+                           subdirs=['TMP'])
+
+    def get_n_expected_parsed_files(self):
+        
+        n_input_files = len(self.get_unparsed_files())
+        if self.format == 'TOA5': 
+            return n_input_files * int(1440 / self.bale_interval) 
+        return n_input_files
+
+    def get_parsed_files(self):
+        
+        return _get_files_of_type(self.SiteName, file_type=self.format)
 
     def run_ccf_file(self):
         
         """Run CardConvert"""
         
+        if self.process_flag: raise RuntimeError('Process has already run!')
         self.write_ccf_file()
-        cc_path = str(_set_check_path(CardConvert_path))
+        cc_path = str(_check_path(CardConvert_path))
         spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
         rslt = spc.run(spc_args)
         if not rslt.returncode == 0:
             raise RuntimeError('Command line execution of CardConvert failed!')
+        self.process_flag = 1
 
     def write_ccf_file(self):
 
         """Output constructed ccf file to disk"""        
-
+        
+        if self.process_flag: raise RuntimeError('Process has already run!'
+                                                 'Illegal to change ccf file!')
         write_dict = self.get_ccf_dict()
         output_file = self.get_ccf_filename()
         if not self.overwrite_ccf: 
@@ -139,7 +147,7 @@ class CardConvert_parser():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class file_parser():
+class rename_parser():
     
     def __init__(self, sitename, fmt, data_intvl_mins):
         
@@ -147,32 +155,22 @@ class file_parser():
         self.format = _test_format(fmt)
         self.data_interval = int(data_intvl_mins)
 
-    def check_unparsed_files(self):
+    def get_unparsed_files(self):
         
         """Check for unparsed files of <format> in TMP directory"""
-        
-        target_path = self.get_data_path()
-        file_list = []
-        for f in os.listdir(target_path):
-            fmt, site = f.split('_')[0], f.split('_')[1]
-            if site != self.SiteName: continue
-            if fmt != self.format: continue
-            file_list.append(f)
-        if not file_list: 
-            raise RuntimeError('No {} files in TMP directory to parse!'
-                               .format(self.format))
-        return file_list
+
+        return _get_files_of_type(self.SiteName, file_type=self.format)
         
     def get_data_path(self):
 
         """Return the site-specific data path"""        
 
-        return _set_check_path(path=base_data_path.format(self.SiteName),
-                               subdirs=['TMP'])
+        return _check_path(path=base_data_path.format(self.SiteName),
+                           subdirs=['TMP'])
 
     def get_required_dirs(self):
         
-        file_list = self.check_unparsed_files()
+        file_list = self.get_unparsed_files()
         dirs_list = list(set([_get_dirname(f) for f in file_list]))
         return dirs_list
         return [d for d in dirs_list if not d.exists()]
@@ -181,7 +179,7 @@ class file_parser():
     
         """Get map of old to new file names"""    
     
-        input_file_list = self.check_unparsed_files()
+        input_file_list = self.get_unparsed_files()
         output_file_list = (
             [_get_dirname(f) / _get_filename(f, self.data_interval)
              for f in input_file_list]
@@ -193,11 +191,12 @@ class file_parser():
     def move_files(self):
         
         """Rename and transfer files to final directories"""
+        
         for d in self.get_required_dirs():
-            try: d.mkdirs()
-            except FileExistsError: pass
+            try: d.mkdir(parents=True)
+            except FileExistsError: continue
         change_list = self.get_change_map()
-        for this_pair in change_list: os.rename(this_pair[0], this_pair[1])
+        for this_pair in change_list: this_pair[0].rename(this_pair[1])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -214,8 +213,8 @@ def _get_dirname(file_name):
     month, day = '_'.join(split_list[4:6]), split_list[6]
     sub_dirs_list = [fmt, month]
     if fmt == 'TOA5': sub_dirs_list += [day]
-    return _set_check_path(path=base_data_path.format(site), 
-                           subdirs=sub_dirs_list, error_if_missing=False)
+    return _check_path(path=base_data_path.format(site), 
+                       subdirs=sub_dirs_list, error_if_missing=False)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -247,7 +246,7 @@ def _get_rounded_mins(mins, interval):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _set_check_path(path, subdirs=[], error_if_missing=True):
+def _check_path(path, subdirs=[], error_if_missing=True):
     
     """Check path exists \n
         * args:
@@ -269,13 +268,11 @@ def _set_logger(site, name=None):
     """Create logger and send output to file"""
     
     logger_dir_path = (
-        _set_check_path(path=base_data_path.format(site), subdirs=['LOG'])
+        _check_path(path=base_data_path.format(site), subdirs=['LOG'])
         )
     logger_file_path = logger_dir_path / '{}_fast_data.log'.format(site)
-    if not name: 
-        logger = logging.getLogger(name=__name__)
-    else:
-        logger = logging.getLogger(name=name)
+    if not name: logger = logging.getLogger(name=__name__)
+    else: logger = logging.getLogger(name=name)
     logger.setLevel(logging.DEBUG)
     if not logger.hasHandlers():
         handler = logging.FileHandler(logger_file_path)
@@ -308,50 +305,39 @@ def _get_files_of_type(site:str, file_type=None, error_if_zero=True) -> list:
     
     Parameters
     ----------
-    * site (str) : site to process
-    * file_type (None or str) : format of files to be returned
-    * error_if_zero (bool) : raise error if no files (default True)"""    
+    site : str 
+        site to process
+    file_type : None, str
+        format of files to be returned (default None; otherwise must be
+        TOA5, TOB1, TOB3)
+    error_if_zero : bool
+        raise error if no files (default True)
+    
+    Raises
+    -------
+    RunTimeError
+        if there are no files in the directory, unless error_if_zero set to
+        false
+    
+    Returns
+    -------
+    list
+        list of files of file_type in directory
+    """    
 
-    files = [x.name for x in _set_check_path(path=base_data_path.format(site), 
-                                             subdirs=['TMP']).glob('*.dat')]
+    files = [x.name for x in _check_path(path=base_data_path.format(site), 
+                                         subdirs=['TMP']).glob('*.dat')]
     if not file_type: 
         subset_files = files
     elif file_type == 'TOB3':
         subset_files = [x for x in files if x.split('_')[0] == site]
     else:
         _test_format(fmt_str=file_type)
-        subset_files = [x.name for x in files if x.name.split('_')[0] == file_type]
-    if not subset_files and error_if_zero():
-        raise RuntimeError('Directory contains no files of type {} to parse!'
-                           .format(file_type))
+        subset_files = [x for x in files if x.split('_')[0] == file_type]
+    if not subset_files and error_if_zero:
+        raise FileNotFoundError('Directory contains no files of type {}!'
+                                .format(file_type))
     return subset_files    
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-# def check_unparsed_files(site):
-        
-    # all_files = _get_files_of_type(site=site)
-    # files = _get_files_of_type(site=site, file_type='TOB3')
-    # if not len(all_files) == len(files):
-    #     raise RuntimeError('Non-TOB3 files present in TMP directory! '
-    #                        'Please remove these files and try again!')
-    # return files
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_cardconvert_parsed_files(site, fmt, interval):
-    
-    bale_dict = {'TOA5': int(1440 / int(interval)), 'TOB1': 1}
-    raw_files = _get_files_of_type(site=site, file_type='TOB3')
-    fmt_files = _get_files_of_type(site=site, file_type=fmt)
-    if not fmt_files: raise RuntimeError('CardConvert produced no output!')
-    n_parsed_files = len(fmt_files)
-    n_expected_files = len(raw_files) * bale_dict[fmt]
-    if not n_parsed_files == n_expected_files:
-        raise RuntimeWarning('Expected {0} {1} files; got only {2}!'
-                             .format(str(n_expected_files), fmt, 
-                                     str(n_parsed_files)))
-    return fmt_files
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -364,28 +350,29 @@ if __name__ == "__main__":
     site, interval = sys.argv[1], sys.argv[2]
     logger = _set_logger(site=site)
     logger.info('Begin processing for site {}'.format(site))
-    try:
-        check_unparsed_files(site=site)
-    except (RuntimeError, FileNotFoundError) as e:
-        logger.error(e); sys.exit()
     for out_format in ['TOA5', 'TOB1']:
-        logger.info('Running {} format conversion'.format(out_format))
+        logger.info('Running {} format conversion with CardConvert_parser'
+                    .format(out_format))
         try:
-            x = CardConvert_parser(sitename=site, fmt=out_format, 
-                                   data_intvl_mins=interval)
-            x.run_ccf_file()
+            cc_parser = CardConvert_parser(sitename=site, fmt=out_format, 
+                                           data_intvl_mins=interval)
+            cc_parser.run_ccf_file()
+            n_expected = cc_parser.get_n_expected_parsed_files()
+            n_produced = len(cc_parser.get_parsed_files())
+            msg = ('{0} format conversion complete: expected {1} converted '
+                   'files, got {2}!'.format(out_format, n_expected, n_produced))
+            if n_expected == n_produced: logger.info(msg)
+            else: logger.warning(msg)
         except Exception as e:
             logger.error('CardConvert processing failed! Message: {}'
                          .format(e)); sys.exit()
+        logger.info('Running file renaming with rename_parser')
         try:
-            get_cardconvert_parsed_files(site=site, fmt=out_format, 
-                                         interval=interval)
-        except RuntimeError as e:
-            logger.error(e); sys.exit()
-        try:
-            x = file_parser(sitename=site, fmt=out_format, 
-                            data_intvl_mins=interval)
-            x.move_files()
+            rnm_parser = rename_parser(sitename=site, fmt=out_format, 
+                                       data_intvl_mins=interval)
+            rnm_parser.move_files()
+            logger.info('File renaming complete')
         except Exception as e:
-            print(e)
-            sys.exit()
+            pdb.set_trace()
+            logger.error('File renaming failed! Message: {}'
+                         .format(e)); sys.exit()
