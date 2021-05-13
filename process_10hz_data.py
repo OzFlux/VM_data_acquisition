@@ -144,6 +144,21 @@ class CardConvert_parser():
             f.write('[main]\n')
             for this_item in write_dict:
                 f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
+                
+    def get_change_map(self):
+    
+        """Get map of old to new file names"""    
+    
+        if not self.process_flag: 
+            raise RuntimeError('CardConvert processing has not run yet!')
+        input_file_list = self.get_parsed_files()
+        output_file_list = (
+            [_get_dirname(f) / _get_filename(f, self.data_interval)
+             for f in input_file_list]
+            )
+        data_path = self.get_data_path()
+        input_file_list = ([data_path / f for f in input_file_list])
+        return list(zip(input_file_list, output_file_list))
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -188,7 +203,7 @@ class rename_parser():
         input_file_list = ([data_path / f for f in input_file_list])
         return list(zip(input_file_list, output_file_list))
     
-    def move_files(self):
+    def move_files(self, force_remove=False):
         
         """Rename and transfer files to final directories"""
         
@@ -196,7 +211,15 @@ class rename_parser():
             try: d.mkdir(parents=True)
             except FileExistsError: continue
         change_list = self.get_change_map()
-        for this_pair in change_list: this_pair[0].rename(this_pair[1])
+        for this_pair in change_list:
+            if this_pair[1].is_file():
+                if not force_remove: 
+                    raise FileExistsError(
+                        'File {0} already exists in directory {1}'
+                        .format(this_pair[1].name, this_pair[1].parent)
+                        )
+                this_pair[0].unlink(); continue
+            this_pair[0].rename(this_pair[1])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -341,6 +364,15 @@ def _get_files_of_type(site:str, file_type=None, error_if_zero=True) -> list:
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def move_raw(site):
+    
+    files_to_move = _get_files_of_type(site, file_type='TOB3')
+    from_dir =_check_path(path=base_data_path.format(site), subdirs=['TMP'])
+    to_dir =_check_path(path=base_data_path.format(site), subdirs=['TOB3'])
+    for f in files_to_move: (from_dir / f).rename(to_dir / f)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### Main ###
 #------------------------------------------------------------------------------
 
@@ -373,6 +405,11 @@ if __name__ == "__main__":
             rnm_parser.move_files()
             logger.info('File renaming complete')
         except Exception as e:
-            pdb.set_trace()
             logger.error('File renaming failed! Message: {}'
                          .format(e)); sys.exit()
+    logger.info('Moving TOB3 files to final storage')
+    try:
+        move_raw(site=site)
+        logger.info('Completed move of raw data... sweet dreams')
+    except Exception as e:
+        logger.error('File move failed! Message: {}'.format(e)); sys.exit()
