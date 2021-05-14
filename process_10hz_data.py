@@ -6,9 +6,9 @@ Created on Thu Apr 15 09:16:49 2021
 @author: imchugh
 
 To add:
-    - logger and comments to log file
     - move raw file out of TMP directory (delete? rename and archive?)
-    - cross_check directories to ensure all files copied 
+    - cross_check directories to ensure all files copied
+    - implement flexible file naming patterns
 """
 
 import datetime as dt
@@ -18,8 +18,6 @@ import pathlib
 import pdb
 import subprocess as spc
 import sys
-# import warnings
-# warnings.filterwarnings("error")
 
 #------------------------------------------------------------------------------
 ### Paths and variables ###
@@ -33,40 +31,37 @@ init_dict = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0'
              'ListWidth': '190', 'BaleCheck': '1', 'CSVOptions': '6619599',
              'BaleStart': '38718', 'BaleInterval': '32875',
              'DOY': '0', 'Append': '0', 'ConvertNew': '0'}
+RawFileNameFormat_dict = {'Site': 0, 'Freq': 1, 'Year': 2, 'Month': 3, 
+                          'Day': 4, 'sep': '_'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-### CCF exec class ###
+### Classes ###
 #------------------------------------------------------------------------------
 class CardConvert_parser():
 
     """Creates, writes and runs CardConvert format (CCF) files"""    
 
-    def __init__(self, sitename, fmt, data_intvl_mins, overwrite_ccf=True):
+    def __init__(self, sitename, out_fmt, data_intvl_mins, overwrite_ccf=True,
+                 RawFileNameFormat_dict=RawFileNameFormat_dict):
 
-        _test_format(fmt)
-        self.format = fmt
+        _test_format(out_fmt)
+        self.format = out_fmt
         self.SiteName = sitename        
         self.overwrite_ccf = overwrite_ccf
         self.process_flag = 0
-        if fmt == 'TOA5': self.bale_interval = int(data_intvl_mins)
-        if fmt == 'TOB1': self.bale_interval = 1440
+        self.RawFileNameFormat = RawFileNameFormat_dict
+        self.ProcFileNameFormat = {
+            x: RawFileNameFormat_dict[x] + 1 
+            for x in RawFileNameFormat_dict if not 'sep' in x
+            }
+        self.ProcFileNameFormat.update({'Format': 0,'sep': '_'})
+        if out_fmt == 'TOA5': self.bale_interval = int(data_intvl_mins)
+        if out_fmt == 'TOB1': self.bale_interval = 1440
 
     #-------------------------------------------------------------------------
-    ### Class methods tied to CardConvert ###
+    ### Class methods pre-CardConvert ###
     #-------------------------------------------------------------------------
-
-    def get_unparsed_files(self):
-        
-        """Check for unparsed TOB3 files in TMP directory"""
-        
-        raw_files = _get_files_of_type(site=self.SiteName, file_type='TOB3')
-        if self.process_flag: return raw_files
-        all_files = _get_files_of_type(site=self.SiteName)
-        if not len(all_files) == len(raw_files):
-            raise RuntimeError('Non-TOB3 files present in TMP directory! '
-                               'Please remove these files and try again!')
-        return raw_files
 
     def get_bale_interval(self):
         
@@ -78,7 +73,7 @@ class CardConvert_parser():
             raise RuntimeError('Error! Minutes must sum to less than 1 day!')
         return str(int(init_dict['BaleInterval']) - 1 + round(bale_interval, 10))
 
-    def get_ccf_dict(self):
+    def get_ccf_dict(self) -> dict:
         
         """Return the dictionary with output-ready values"""
         
@@ -105,22 +100,34 @@ class CardConvert_parser():
         return _check_path(path=base_data_path.format(self.SiteName),
                            subdirs=['TMP'])
 
-    def get_n_expected_parsed_files(self):
+    def get_n_expected_converted_files(self) -> int:
         
-        n_input_files = len(self.get_unparsed_files())
+        """Return the expected number of output files based on n_input +
+           bale interval"""
+        
+        n_input_files = len(self.get_raw_files())
         if self.format == 'TOA5': 
             return n_input_files * int(1440 / self.bale_interval) 
         return n_input_files
 
-    def get_parsed_files(self):
+    def get_raw_files(self):
         
-        return _get_files_of_type(self.SiteName, file_type=self.format)
+        """Check for unparsed TOB3 files in TMP directory"""
+        
+        raw_files = _get_files_of_type(site=self.SiteName, file_type='TOB3')
+        if self.process_flag: return raw_files
+        all_files = _get_files_of_type(site=self.SiteName)
+        if not len(all_files) == len(raw_files):
+            raise RuntimeError('Non-TOB3 files present in TMP directory! '
+                               'Please remove these files and try again!')
+        return raw_files
 
-    def run_ccf_file(self):
+    def run_CardConvert(self):
         
         """Run CardConvert"""
         
         if self.process_flag: raise RuntimeError('Process has already run!')
+        self.get_raw_files()
         self.write_ccf_file()
         cc_path = str(_check_path(CardConvert_path))
         spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
@@ -139,136 +146,43 @@ class CardConvert_parser():
         output_file = self.get_ccf_filename()
         if not self.overwrite_ccf: 
             if output_file.exists(): return
-            else: logging.warning('No ccf file found! Creating...')
         with open(output_file, mode='w') as f:
             f.write('[main]\n')
             for this_item in write_dict:
-                f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
-                
-    def get_change_map(self):
-    
-        """Get map of old to new file names"""    
-    
+                f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))      
+
+    #-------------------------------------------------------------------------
+    ### Class methods post-CardConvert ###
+    #-------------------------------------------------------------------------
+
+    def get_converted_files(self):
+        
         if not self.process_flag: 
-            raise RuntimeError('CardConvert processing has not run yet!')
-        input_file_list = self.get_parsed_files()
-        output_file_list = (
-            [_get_dirname(f) / _get_filename(f, self.data_interval)
-             for f in input_file_list]
-            )
-        data_path = self.get_data_path()
-        input_file_list = ([data_path / f for f in input_file_list])
-        return list(zip(input_file_list, output_file_list))
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class rename_parser():
-    
-    def __init__(self, sitename, fmt, data_intvl_mins):
-        
-        self.SiteName = sitename        
-        self.format = _test_format(fmt)
-        self.data_interval = int(data_intvl_mins)
-
-    def get_unparsed_files(self):
-        
-        """Check for unparsed files of <format> in TMP directory"""
-
+            raise RuntimeError('CardConvert Process has not run yet!')
         return _get_files_of_type(self.SiteName, file_type=self.format)
-        
-    def get_data_path(self):
-
-        """Return the site-specific data path"""        
-
-        return _check_path(path=base_data_path.format(self.SiteName),
-                           subdirs=['TMP'])
-
-    def get_required_dirs(self):
-        
-        file_list = self.get_unparsed_files()
-        dirs_list = list(set([_get_dirname(f) for f in file_list]))
-        return dirs_list
-        return [d for d in dirs_list if not d.exists()]
-        
-    def get_change_map(self):
     
-        """Get map of old to new file names"""    
-    
-        input_file_list = self.get_unparsed_files()
-        output_file_list = (
-            [_get_dirname(f) / _get_filename(f, self.data_interval)
-             for f in input_file_list]
-            )
-        data_path = self.get_data_path()
-        input_file_list = ([data_path / f for f in input_file_list])
-        return list(zip(input_file_list, output_file_list))
-    
-    def move_files(self, force_remove=False):
-        
-        """Rename and transfer files to final directories"""
-        
-        for d in self.get_required_dirs():
-            try: d.mkdir(parents=True)
-            except FileExistsError: continue
-        change_list = self.get_change_map()
-        for this_pair in change_list:
-            if this_pair[1].is_file():
-                if not force_remove: 
-                    raise FileExistsError(
-                        'File {0} already exists in directory {1}'
-                        .format(this_pair[1].name, this_pair[1].parent)
-                        )
-                this_pair[0].unlink(); continue
-            this_pair[0].rename(this_pair[1])
-#------------------------------------------------------------------------------
+    def parse_data(self, overwrite_files=False):
 
-#------------------------------------------------------------------------------
+        if not self.process_flag: self.run_CardConvert()
+        path = self.get_data_path()
+        for f in self.get_converted_files():
+            new_path = _get_dirname(f)
+            try: new_path.mkdir(parents=True)
+            except FileExistsError: pass
+            old_file = path / f
+            new_file = new_path / _get_filename(f, self.bale_interval)
+            try:
+                old_file.rename(new_file)
+            except FileExistsError:
+                if not overwrite_files: raise
+                old_file.replace(new_file)
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
 ### File handling functions ###
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _get_dirname(file_name):
-    
-    """Get the required child directory name for the file"""
-    
-    split_list = file_name.split('_')
-    fmt, site = split_list[0], split_list[1]
-    month, day = '_'.join(split_list[4:6]), split_list[6]
-    sub_dirs_list = [fmt, month]
-    if fmt == 'TOA5': sub_dirs_list += [day]
-    return _check_path(path=base_data_path.format(site), 
-                       subdirs=sub_dirs_list, error_if_missing=False)
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _get_filename(file_name, data_interval):
-    
-    """Get the new filename (roll time forward for TOA5 files)"""
-    
-    split_list = file_name.split('_')
-    split_list = split_list[:3] + split_list[4:]
-    fmt, site, freq = split_list[0], split_list[1], split_list[2]
-    if fmt == 'TOB1': return '_'.join(split_list[:-1]) + '.dat'
-    year, month, day = int(split_list[3]), int(split_list[4]), int(split_list[5])
-    time = split_list[-1].split('.')[0]
-    hour, minute = int(time[:2]), int(time[2:])
-    delta_mins = _get_rounded_mins(int(minute), data_interval)
-    py_datetime = (
-        dt.datetime(year, month, day, hour, 0) + dt.timedelta(minutes=delta_mins)
-        )
-    str_datetime = dt.datetime.strftime(py_datetime, '%Y_%m_%d_%H%M')
-    return '_'.join([fmt, site, freq, str_datetime]) + '.dat'
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _get_rounded_mins(mins, interval):
-    
-    """Roll forward minutes to end of relevant interval"""
-    
-    return (mins - np.mod(mins, interval) + interval).item()
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 def _check_path(path, subdirs=[], error_if_missing=True):
     
     """Check path exists \n
@@ -283,42 +197,42 @@ def _check_path(path, subdirs=[], error_if_missing=True):
                                 'Check site name or specified subdirectories!'
                                 .format(str(fmt_path)))
     return fmt_path
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _set_logger(site, name=None):
+#-----------------------------------------------------------------------------
+def _get_dirname(file_name, NameFormat):
     
-    """Create logger and send output to file"""
+    """Get the required child directory name(s) for the file"""
     
-    logger_dir_path = (
-        _check_path(path=base_data_path.format(site), subdirs=['LOG'])
+    split_list = file_name.split('_')
+    fmt, site = split_list[0], split_list[1]
+    month, day = '_'.join(split_list[3:5]), split_list[5]
+    sub_dirs_list = [fmt, month]
+    if fmt == 'TOA5': sub_dirs_list += [day]
+    return _check_path(path=base_data_path.format(site), 
+                       subdirs=sub_dirs_list, error_if_missing=False)
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def _get_filename(file_name, data_interval):
+    
+    """Get the new filename (roll time forward for TOA5 files)"""
+    
+    split_list = file_name.split('_')
+    fmt, site, freq = split_list[0], split_list[1], split_list[2]
+    if fmt == 'TOB1': return '_'.join(split_list[:-1]) + '.dat'
+    year, month, day = int(split_list[3]), int(split_list[4]), int(split_list[5])
+    time = split_list[-1].split('.')[0]
+    hour, minute = int(time[:2]), int(time[2:])
+    delta_mins = _get_rounded_mins(int(minute), data_interval)
+    py_datetime = (
+        dt.datetime(year, month, day, hour, 0) + dt.timedelta(minutes=delta_mins)
         )
-    logger_file_path = logger_dir_path / '{}_fast_data.log'.format(site)
-    if not name: logger = logging.getLogger(name=__name__)
-    else: logger = logging.getLogger(name=name)
-    logger.setLevel(logging.DEBUG)
-    if not logger.hasHandlers():
-        handler = logging.FileHandler(logger_file_path)
-        handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    return logger
-#------------------------------------------------------------------------------
+    str_datetime = dt.datetime.strftime(py_datetime, '%Y_%m_%d_%H%M')
+    return '_'.join([fmt, site, freq, str_datetime]) + '.dat'
+#-----------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _test_format(fmt_str): 
-    
-    """Check the passed format argument is valid (only TOA5 or TOB1)"""
-    
-    try:
-        assert fmt_str in ['TOA5', 'TOB1']
-    except AssertionError:
-        raise TypeError('Error: "fmt" argument must be "TOA5" or "TOB1"')
-    return fmt_str
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 def _get_files_of_type(site:str, file_type=None, error_if_zero=True) -> list:
 
     """
@@ -361,18 +275,59 @@ def _get_files_of_type(site:str, file_type=None, error_if_zero=True) -> list:
         raise FileNotFoundError('Directory contains no files of type {}!'
                                 .format(file_type))
     return subset_files    
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+def _get_rounded_mins(mins, interval):
+    
+    """Roll forward minutes to end of relevant interval"""
+    
+    return (mins - np.mod(mins, interval) + interval).item()
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def _set_logger(site, name=None):
+    
+    """Create logger and send output to file"""
+    
+    logger_dir_path = (
+        _check_path(path=base_data_path.format(site), subdirs=['LOG'])
+        )
+    logger_file_path = logger_dir_path / '{}_fast_data.log'.format(site)
+    if not name: logger = logging.getLogger(name=__name__)
+    else: logger = logging.getLogger(name=name)
+    logger.setLevel(logging.DEBUG)
+    if not logger.hasHandlers():
+        handler = logging.FileHandler(logger_file_path)
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return logger
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def _test_format(fmt_str): 
+    
+    """Check the passed format argument is valid (only TOA5 or TOB1)"""
+    
+    try:
+        assert fmt_str in ['TOA5', 'TOB1']
+    except AssertionError:
+        raise TypeError('Error: "fmt" argument must be "TOA5" or "TOB1"')
+    return fmt_str
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
 def move_raw(site):
     
     files_to_move = _get_files_of_type(site, file_type='TOB3')
     from_dir =_check_path(path=base_data_path.format(site), subdirs=['TMP'])
     to_dir =_check_path(path=base_data_path.format(site), subdirs=['TOB3'])
     for f in files_to_move: (from_dir / f).rename(to_dir / f)
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 ### Main ###
 #------------------------------------------------------------------------------
 
@@ -381,35 +336,34 @@ if __name__ == "__main__":
 
     site, interval = sys.argv[1], sys.argv[2]
     logger = _set_logger(site=site)
-    logger.info('Begin processing for site {}'.format(site))
-    for out_format in ['TOA5', 'TOB1']:
-        logger.info('Running {} format conversion with CardConvert_parser'
-                    .format(out_format))
-        try:
-            cc_parser = CardConvert_parser(sitename=site, fmt=out_format, 
-                                           data_intvl_mins=interval)
-            cc_parser.run_ccf_file()
-            n_expected = cc_parser.get_n_expected_parsed_files()
-            n_produced = len(cc_parser.get_parsed_files())
-            msg = ('{0} format conversion complete: expected {1} converted '
-                   'files, got {2}!'.format(out_format, n_expected, n_produced))
-            if n_expected == n_produced: logger.info(msg)
-            else: logger.warning(msg)
-        except Exception as e:
-            logger.error('CardConvert processing failed! Message: {}'
-                         .format(e)); sys.exit()
-        logger.info('Running file renaming with rename_parser')
-        try:
-            rnm_parser = rename_parser(sitename=site, fmt=out_format, 
-                                       data_intvl_mins=interval)
-            rnm_parser.move_files()
-            logger.info('File renaming complete')
-        except Exception as e:
-            logger.error('File renaming failed! Message: {}'
-                         .format(e)); sys.exit()
-    logger.info('Moving TOB3 files to final storage')
+    logger.info('Raw file received - begin processing for site {}'.format(site))
+    logger.info('Running TOA5 format conversion with CardConvert_parser')
     try:
-        move_raw(site=site)
-        logger.info('Completed move of raw data... sweet dreams')
+        cc_parser = CardConvert_parser(sitename=site, fmt='TOA5', 
+                                       data_intvl_mins=interval)
+        files_to_parse = cc_parser.get_raw_files()
+        logger.info('The following files will be parsed: {}'
+                    .format(', '.join(files_to_parse)))
+        cc_parser.run_CardConvert()
+        n_expected = cc_parser.get_n_expected_converted_files()
+        n_produced = len(cc_parser.get_converted_files())
+        msg = ('TOA5 format conversion complete: expected {0} converted '
+               'files, got {1}!'.format(n_expected, n_produced))
+        if n_expected == n_produced: logger.info(msg)
+        else: logger.warning(msg)
     except Exception as e:
-        logger.error('File move failed! Message: {}'.format(e)); sys.exit()
+        logger.error('CardConvert processing failed! Message: {}'
+                     .format(e)); sys.exit()
+    logger.info('Renaming and moving files...')
+    try:
+        cc_parser.parse_data()
+        logger.info('Files moved successfully!')        
+    except Exception as e:
+        logger.error('Converted file move failed! Message: {}'.format(e))
+        sys.exit()
+    try:
+        logger.info('Moving TOB3 files to final storage')
+        move_raw(site=site)
+        logger.info('Completed move of raw data... enjoy your cornflakes!')
+    except Exception as e:
+        logger.error('Raw file move failed! Message: {}'.format(e)); sys.exit()
