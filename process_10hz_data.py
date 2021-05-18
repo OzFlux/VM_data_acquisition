@@ -253,16 +253,18 @@ def _get_dirname(file_name, NameFormat):
 #-----------------------------------------------------------------------------
 
 #-----------------------------------------------------------------------------
-def _get_filename(file_name, data_interval):
+def _get_filename(file_name, NameFormat, data_interval):
     
     """Get the new filename (roll time forward for TOA5 files)"""
     
-    split_list = file_name.split('_')
-    fmt, site, freq = split_list[0], split_list[1], split_list[2]
-    if fmt == 'TOB1': return '_'.join(split_list[:-1]) + '.dat'
-    year, month, day = int(split_list[3]), int(split_list[4]), int(split_list[5])
-    time = split_list[-1].split('.')[0]
-    hour, minute = int(time[:2]), int(time[2:])
+    split_list = file_name.split('.')[0].split(NameFormat['sep'])
+    fmt, site, freq = (split_list[NameFormat['Format']],
+                       split_list[NameFormat['Site']],
+                       split_list[NameFormat['Freq']])
+    year, month, day = (int(split_list[NameFormat['Year']]),
+                        int(split_list[NameFormat['Month']]),
+                        int(split_list[NameFormat['Day']]))
+    hour, minute = int(split_list[-1][:2]), int(split_list[-1][2:])
     delta_mins = _get_rounded_mins(int(minute), data_interval)
     py_datetime = (
         dt.datetime(year, month, day, hour, 0) + dt.timedelta(minutes=delta_mins)
