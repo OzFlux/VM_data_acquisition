@@ -181,7 +181,8 @@ class CardConvert_parser():
             try: new_path.mkdir(parents=True)
             except FileExistsError: pass
             old_file = path / f
-            new_file = new_path / _get_filename(f, self.bale_interval)
+            new_file = new_path / _get_filename(f, self.ProcFileNameFormat,
+                                                self.bale_interval)
             try:
                 old_file.rename(new_file)
             except FileExistsError:
