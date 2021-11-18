@@ -19,6 +19,8 @@ import pdb
 import subprocess as spc
 import sys
 
+import site_utils as su
+
 #------------------------------------------------------------------------------
 ### Paths and variables ###
 #------------------------------------------------------------------------------
@@ -40,6 +42,159 @@ filename_format = {
 #------------------------------------------------------------------------------
 ### Classes ###
 #------------------------------------------------------------------------------
+
+class file_checker():
+    
+    def __init__(self, sitename, data_interval, understorey=False, 
+                 in_format='TOB3', out_format='TOA5'):
+        
+        _enforce_format_naming(in_format, out_format)
+        self.understorey_flag = False if not 'Under' in sitename else True
+        self.in_format = in_format
+        self.out_format = out_format
+        self.time_step = int(data_interval)
+        self.SiteName = (sitename  if not understorey 
+                         else sitename.replace('Under', ''))
+        
+    #-------------------------------------------------------------------------
+    ### Class methods ###
+    #-------------------------------------------------------------------------
+
+    def get_raw_data_path(self):
+        
+        return (
+            su.get_data_path(site=self.SiteName, 
+                             data='flux_raw_fast', 
+                             check_exists=True) / 'TOB3'
+            )
+        
+    def check_raw_files_not_parsed(self):
+        
+        pass
+
+    def get_base_data_path(self):
+        
+        """Return the site-specific base data path"""
+        
+        site_data_path = base_data_path.format(self.SiteName)
+        if self.understorey_flag:
+            site_data_path = site_data_path.replace('Flux', 'Flux_aux')
+        return get_path(site_data_path)
+
+    def get_raw_data_path(self):
+
+        """Return the site-specific raw data path"""
+
+        return get_path(path_str=self.get_base_data_path(), subdirs=['TMP'])
+        
+    def get_raw_files(self, check_for_other=False):
+
+        """Check for unparsed TOB3 files in TMP directory"""
+
+        files = (
+            get_files_of_type(path=self.get_raw_data_path(), file_type='TOB3', 
+                              error_other_type=check_for_other)
+            )
+        pdb.set_trace()
+        for this_file in files:
+            check_raw_file_name_formatting(
+                this_file, self.in_format, self.SiteName, self.time_step, 
+                self.understorey_flag
+                )
+        return files
+#------------------------------------------------------------------------------    
+
+#------------------------------------------------------------------------------
+# Funcs
+#------------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def check_raw_file_name_formatting(file, fmt, site_name, time_step,
+                                   understorey=False):
+
+    """Check that file conforms to expected naming - no action if true,
+       raise if false
+       Expected name formatting: FMT_SITE_FREQ_YYYY_MM_DD.dat"""        
+
+    if understorey: site_name += 'Under'
+    interval = '100ms' if time_step == 30 else '50ms'
+    format_str = (
+        '{0}_{1}_{2}_year_month_day.dat'.format(fmt, site_name, interval)
+        )
+    file_name, file_ext = file.split('.')
+    if not file_ext == 'dat':
+        raise TypeError('File type unknown for file {}'.format(file))
+    elements = file_name.split('_')
+    if not len(elements) == 6:
+        raise TypeError('File {} does not conform to expected convention '
+                        '({})'.format(file, format_str))
+    if not elements[0] == fmt:
+        raise TypeError('First element in file name is not of specified '
+                        'format for file {0}; expected {1}'
+                        .format(file, format_str))
+    if not elements[1] == site_name:
+        raise TypeError('Second element in file name different to '
+                        'passed file name for file {}'.format(file))
+    if not elements[2] == interval:
+        raise TypeError('Third element in file name is not a recognised '
+                        'data interval for filename {}'.format(file))
+    dt.datetime(int(elements[3]), int(elements[4]), int(elements[5]))  
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def enforce_format_naming(in_format, out_format):
+
+    """Check the file formats passed"""
+
+    if not in_format in ['TOB3', 'TOB1']:
+        raise TypeError('Input format must be either TOB3 or TOB1')
+    if not out_format in ['TOB1', 'TOA5']:
+        raise TypeError('Input format must be either TOB1 or TOA5')
+    if in_format == out_format:
+        raise TypeError('Input format must be different to output format')
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def get_files_of_type(path, file_type=None, error_if_zero=True,
+                      error_other_type=False) -> list:
+
+    """Check for files of type (default None for all files)"""
+    pdb.set_trace()
+    files = [x.name for x in path.glob('*.dat')]
+    if not file_type:
+        subset_files = files
+    else:
+        subset_files = [x for x in files if x.split('_')[0] == file_type]
+    if not subset_files:
+        raise FileNotFoundError('Directory contains no files of type {}!'
+                                .format(file_type))
+    if error_other_type and not len(subset_files) == len(files):
+        raise RuntimeError('Non-{} files present in TMP directory! '
+                           'Please remove these files and try again!'
+                           .format(file_type))            
+    return subset_files
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+def get_path(path_str, subdirs=None, error_if_missing=True):
+
+    """Check path exists and return path object"""
+
+    fmt_path = pathlib.Path(path_str)
+    if subdirs:
+        for item in subdirs: 
+            fmt_path = fmt_path / item
+    if error_if_missing:                
+        if not fmt_path.exists():
+            raise FileNotFoundError(
+                'Specified file path ({}) does not exist! '
+                'Check site name or specified subdirectories!'
+                .format(str(fmt_path))
+                )
+    return fmt_path
+#-----------------------------------------------------------------------------
+
+
 class CardConvert_parser():
 
     """Creates, writes and runs CardConvert format (CCF) files"""
@@ -63,7 +218,7 @@ class CardConvert_parser():
     ### Class methods private ###
     #-------------------------------------------------------------------------
 
-    def _check_path(self, path, subdirs=None, error_if_missing=True):
+    def _get_path(self, path, subdirs=None, error_if_missing=True):
     
         """Check path exists and return path object"""
     
@@ -85,12 +240,6 @@ class CardConvert_parser():
         """Check that file conforms to expected naming - no action if true,
            raise if false"""        
 
-        file_name, file_ext = file.split('.')
-        if not file_ext == 'dat':
-            raise TypeError('File type unknown for file {}'.format(file))
-        elements = file_name.split('_')
-        if not len(elements) == 6:
-            raise TypeError('File {} does not conform to ')
         fmt = self.in_format        
         site_name = self.SiteName
         if self.understorey_flag: site_name += 'Under'
@@ -98,6 +247,13 @@ class CardConvert_parser():
         format_str = (
             '{0}_{1}_{2}_year_month_day.dat'.format(fmt, site_name, interval)
             )
+        file_name, file_ext = file.split('.')
+        if not file_ext == 'dat':
+            raise TypeError('File type unknown for file {}'.format(file))
+        elements = file_name.split('_')
+        if not len(elements) == 6:
+            raise TypeError('File {} does not conform to expected convention '
+                            '({})'.format(file, format_str))
         if not elements[0] == fmt:
             raise TypeError('First element in file name is not of specified '
                             'format for file {0}; expected {1}'
@@ -138,13 +294,16 @@ class CardConvert_parser():
         split_dict = {x: split_list[filename_format[x]] for x in filename_format}
         year_month = '_'.join([split_dict['Year'], split_dict['Month']])
         sub_dirs_list = [split_dict['Format'], year_month]
-        pdb.set_trace()
         if not split_dict['Format'] == 'TOB3':
             sub_dirs_list += [split_dict['Day']]
-        return _check_path(path=base_data_path.format(split_dict['Site']),
-                           subdirs=sub_dirs_list, error_if_missing=False)
-        
-        pass
+        target_path = self._get_path(path=self.get_base_data_path(),
+                                     subdirs=sub_dirs_list, 
+                                     error_if_missing=False)
+        try: 
+            target_path.mkdir(parents=True)
+        except FileExistsError: 
+            pass
+        return target_path
 
     #-------------------------------------------------------------------------
     ### Class methods pre-CardConvert ###
@@ -167,7 +326,7 @@ class CardConvert_parser():
         site_data_path = base_data_path.format(self.SiteName)
         if self.understorey_flag:
             site_data_path = site_data_path.replace('Flux', 'Flux_aux')
-        return self._check_path(site_data_path)
+        return self._get_path(site_data_path)
 
     def get_ccf_dict(self) -> dict:
 
@@ -186,7 +345,7 @@ class CardConvert_parser():
 
         """Return the site-specific ccf file path"""
 
-        path = self._check_path(base_ccf_path.format(self.SiteName))
+        path = self._get_path(base_ccf_path.format(self.SiteName))
         file_name = '{0}_{1}.ccf'.format(self.out_format, self.SiteName)
         return path / file_name    
 
@@ -194,7 +353,7 @@ class CardConvert_parser():
 
         """Return the site-specific raw data path"""
 
-        return self._check_path(path=self.get_base_data_path(), subdirs=['TMP'])
+        return self._get_path(path=self.get_base_data_path(), subdirs=['TMP'])
 
     def get_n_expected_converted_files(self) -> int:
 
@@ -222,14 +381,18 @@ class CardConvert_parser():
 
         if self.CardConvert_process_flag:
             raise RuntimeError('Process has already run!')
-        self.get_raw_files()
+        files_to_convert = self.get_raw_files()
         self.write_ccf_file()
-        cc_path = str(self._check_path(CardConvert_path))
+        cc_path = str(self._get_path(CardConvert_path))
         spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
         rslt = spc.run(spc_args)
         if not rslt.returncode == 0:
             raise RuntimeError('Command line execution of CardConvert failed!')
-        self.CardConvert_process_flag = 1
+        from_dir = self.get_raw_data_path()
+        for f in files_to_convert:
+            to_dir = self._make_dir(f)
+            (from_dir / f).rename(to_dir / f)    
+        self.CardConvert_process_flag = True
 
     def write_ccf_file(self):
 
@@ -270,14 +433,12 @@ class CardConvert_parser():
         path = self.get_raw_data_path()
         for filename in self.get_converted_files():
             new_filename = _demangle_filename(filename)
-            new_path = _get_dirname(new_filename)
+            new_path = self._make_dir(new_filename)
             if self.timestamp_is_end:
                 new_filename = (
                     _roll_filename_datetime(file_name=new_filename,
                                             data_interval=self.time_step)
                     )
-            try: new_path.mkdir(parents=True)
-            except FileExistsError: pass
             old_file = path / filename
             new_file = new_path / new_filename
             try:
@@ -287,51 +448,8 @@ class CardConvert_parser():
                 old_file.replace(new_file)
         self.rename_process_flag = True
 
-    #-------------------------------------------------------------------------
-    ### Class methods post-rename and move ###
-    #-------------------------------------------------------------------------
-
-    def move_raw_files(self):
-
-        """Move the original raw files to final storage"""
-
-        if not self.CardConvert_process_flag:
-            raise RuntimeError('No conversions done yet!')
-        if not self.rename_process_flag:
-            raise RuntimeError('Conversions done but converted files have '
-                               'not been parsed! The following files are yet '
-                               'to be parsed: {}'
-                               .format(self.get_converted_files()))
-        files_to_move = self.get_raw_files()
-        from_dir = self.get_raw_data_path()
-        for f in files_to_move:
-            to_dir = _get_dirname(f)
-            try: to_dir.mkdir(parents=True)
-            except FileExistsError: pass
-            (from_dir / f).rename(to_dir / f)
-
-#-----------------------------------------------------------------------------
-
 #-----------------------------------------------------------------------------
 ### File handling functions ###
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def _check_path(path, subdirs=None, error_if_missing=True):
-
-    """Check path exists \n
-        * args:
-            path (formatted path): """
-
-    fmt_path = pathlib.Path(path)
-    if subdirs:
-        for item in subdirs: fmt_path = fmt_path / item
-    if not error_if_missing: return fmt_path
-    if not fmt_path.exists():
-        raise FileNotFoundError('Specified file path ({}) does not exist! '
-                                'Check site name or specified subdirectories!'
-                                .format(str(fmt_path)))
-    return fmt_path
 #-----------------------------------------------------------------------------
 
 #-----------------------------------------------------------------------------
@@ -347,8 +465,8 @@ def _demangle_filename(file_name):
         )
     split_list = file_name.split('_')
     rebuild_list = [split_list[local_dict[x]] for x in local_dict.keys()]
-    rebuild_list += [split_list[-1].split('.')[0]]
-    return '_'.join(rebuild_list) + '.dat'
+    rebuild_list += [split_list[-1]]
+    return '_'.join(rebuild_list)
 #-----------------------------------------------------------------------------
 
 #-----------------------------------------------------------------------------
@@ -362,21 +480,6 @@ def _enforce_format_naming(from_format, to_format):
         raise TypeError('Input format must be either TOB1 or TOA5')
     if from_format == to_format:
         raise TypeError('Input format must be different to output format')
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def _get_dirname(file_name):
-
-    """Get the required child directory name(s) for the file"""
-
-    split_list = file_name.split('_')
-    split_dict = {x: split_list[filename_format[x]] for x in filename_format}
-    year_month = '_'.join([split_dict['Year'], split_dict['Month']])
-    sub_dirs_list = [split_dict['Format'], year_month]
-    if not split_dict['Format'] == 'TOB3':
-        sub_dirs_list += [split_dict['Day']]
-    return _check_path(path=base_data_path.format(split_dict['Site']),
-                       subdirs=sub_dirs_list, error_if_missing=False)
 #-----------------------------------------------------------------------------
 
 #-----------------------------------------------------------------------------
@@ -413,7 +516,17 @@ def _set_logger(site, name=None):
 
     """Create logger and send output to file"""
 
-    logger_dir_path = _check_path(path=base_logger_path.format(site))
+    understorey_flag = True if 'Under' in site else False 
+    site = site.replace('Under', '')
+    logger_dir_path_str = base_logger_path.format(site)
+    if understorey_flag:
+        logger_dir_path_str = logger_dir_path_str.replace('Flux', 'Flux_aux')
+    logger_dir_path = pathlib.Path(logger_dir_path_str)
+    if not logger_dir_path.exists():
+        raise FileNotFoundError(
+            'Specified file path ({}) does not exist! '
+            'Check site name or specified subdirectories!'
+            )
     logger_file_path = (logger_dir_path /
                         '{}_fast_data_processing.log'.format(site))
     if not name: this_logger = logging.getLogger(name=__name__)
@@ -448,8 +561,8 @@ if __name__ == "__main__":
         files_to_parse = cc_parser.get_raw_files()
         logger.info('The following files will be parsed: {}'
                     .format(', '.join(files_to_parse)))
-        cc_parser.run_CardConvert()
         n_expected = cc_parser.get_n_expected_converted_files()
+        cc_parser.run_CardConvert()
         n_produced = len(cc_parser.get_converted_files())
         msg = ('TOA5 format conversion complete: expected {0} converted '
                'files, got {1}!'.format(n_expected, n_produced))
@@ -458,17 +571,12 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error('CardConvert processing failed! Message: {}'
                      .format(e)); sys.exit()
-        pdb.set_trace()
-    logger.info('Renaming and moving files...')
+    logger.info('Renaming and moving parsed files...')
     try:
         cc_parser.parse_converted_files()
-        logger.info('Files moved successfully!')
+        logger.info('Files renamed and moved successfully!')
+        logger.info('Enjoy your cornflakes!')
     except Exception as e:
         logger.error('Converted file move failed! Message: {}'.format(e))
         sys.exit()
-    try:
-        logger.info('Moving TOB3 files to final storage')
-        cc_parser.move_raw_files()
-        logger.info('Completed move of raw data... enjoy your cornflakes!')
-    except Exception as e:
-        logger.error('Raw file move failed! Message: {}'.format(e)); sys.exit()
+    logging.shutdown()
