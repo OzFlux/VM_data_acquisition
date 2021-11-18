@@ -5,6 +5,7 @@ Created on Fri Sep 10 11:50:27 2021
 @author: jcutern-imchugh
 """
 
+import datetime as dt
 import pandas as pd
 import pathlib
 import pdb
@@ -13,6 +14,22 @@ import sys
 header_list = ['Station', 'Variables', 'Units', 'Operations']
 station_list = ['Format', 'Lgrnet_station_name', 'logger_type', 'serial_num', 
                 'OS', 'prog_name', 'prog_sig', 'table_name']
+
+class TOA5_maker():
+    
+    def __init__(self, dataframe):
+        
+               
+        pass
+    
+
+
+
+
+def dtstr_constructor(pydt):
+    
+    return dt.datetime.strftime(pydt, '"%Y-%m-%d"')
+
 
 class file_grouper():
     
