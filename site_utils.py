@@ -12,13 +12,6 @@ import pdb
 from configparser import ConfigParser
 
 #------------------------------------------------------------------------------
-### CONSTANTS ###
-#------------------------------------------------------------------------------
-BASE_LIST = ['site_details', 'base_data_path', 'base_log_path',
-             'generic_RTMC_file_path']
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 def get_site_details(site):
 
     return get_site_list().loc[site]
@@ -39,23 +32,58 @@ def get_site_list():
     return df.drop('Site', axis=1)
 #------------------------------------------------------------------------------
 
+# #------------------------------------------------------------------------------
+# def get_data_path(site=None, data=None, sub_dirs=None, check_exists=False):
+
+#     """Use initialisation file to extract data path for site and data type"""    
+
+#     config = ConfigParser()
+#     config.read(pathlib.Path(__file__).parent / 'paths.ini')
+#     base_data_path = config['BASE_PATH']['data']
+#     if site:
+#         base_data_path = base_data_path.replace('<site>', site)
+#     out_path = pathlib.Path(base_data_path)
+#     if data:
+#         if not data in config['DATA_PATH']:
+#             raise KeyError('data arg must be one of: {}'
+#                            .format(', '.join(config['DATA_PATH'])))
+#         data_path = config['DATA_PATH'][data]
+#         out_path = out_path / data_path
+#     if sub_dirs:
+#         out_path = out_path / sub_dirs
+#     if not check_exists: return out_path
+#     if not out_path.exists():
+#         raise FileNotFoundError('path does not exist')
+#     else:
+#         return out_path
+# #------------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
-def get_data_path(site=None, data=None, check_exists=False):
+def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
+             check_exists=False):
 
     """Use initialisation file to extract data path for site and data type"""    
 
     config = ConfigParser()
     config.read(pathlib.Path(__file__).parent / 'paths.ini')
-    base_data_path = config['BASE_PATH']['data']
-    if site:
-        base_data_path = base_data_path.replace('<site>', site)
-    out_path = pathlib.Path(base_data_path)
-    if data:
-        if not data in config['DATA_PATH']:
-            raise KeyError('data arg must be one of: {}'
-                           .format(', '.join(config['DATA_PATH'])))
-        data_path = config['DATA_PATH'][data]
-        out_path = out_path / data_path
+    if not base_path in config['BASE_PATH']:
+        raise KeyError('base_path arg must be one of: {}'
+                       .format(', '.join(config['BASE_PATH'])))
+    out_path = pathlib.Path(config['BASE_PATH'][base_path])
+    if base_path == 'data':
+        if site:
+            out_path = pathlib.Path(str(out_path).replace('<site>', site))
+    else:
+        if not out_path.exists():
+            raise FileNotFoundError('path does not exist')
+        return out_path
+    if data_stream:
+        if not data_stream in config['DATA_STREAM']:
+            raise KeyError('data_stream arg must be one of: {}'
+                           .format(', '.join(config['DATA_STREAM'])))
+        out_path = out_path / config['DATA_STREAM'][data_stream]
+        if sub_dirs:
+            out_path = out_path / sub_dirs
     if not check_exists: return out_path
     if not out_path.exists():
         raise FileNotFoundError('path does not exist')
@@ -73,5 +101,5 @@ def get_base_path(to):
     if not to in config['BASE_PATH']:
         raise KeyError('to arg must be one of {}'
                        .format(', '.join(config['BASE_PATH'])))
-    return config['BASE_PATH'][to]
+    return pathlib.Path(config['BASE_PATH'][to])
 #------------------------------------------------------------------------------

@@ -22,19 +22,16 @@ import sys
 import site_utils as su
 
 #------------------------------------------------------------------------------
-### Paths and variables ###
+### CONSTANTS ###
 #------------------------------------------------------------------------------
-CardConvert_path = r'C:/Program Files (x86)/Campbellsci/CardConvert/CardConvert.exe'
-base_ccf_path = r'E:/Cloudstor/Network_documents/CCF_files'
-base_data_path = r'E:/Cloudstor/Shared/EcoSystemProcesses/Sites/{}/Data/Flux/Raw/Fast/'
 base_logger_path = (r'E:/Cloudstor/Shared/EcoSystemProcesses/Sites/{}/Data/Flux/Logs')
-init_dict = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0',
+INIT_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0',
              'Timestamps': '1', 'CreateNew': '0', 'DateTimeNames': '1',
              'Midnight24': '0', 'ColWidth': '263', 'ListHeight': '288',
              'ListWidth': '190', 'BaleCheck': '1', 'CSVOptions': '6619599',
              'BaleStart': '38718', 'BaleInterval': '32875',
              'DOY': '0', 'Append': '0', 'ConvertNew': '0'}
-filename_format = {
+FILENAME_FORMAT = {
     'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4, 'Day': 5
     }
 #------------------------------------------------------------------------------
@@ -43,167 +40,16 @@ filename_format = {
 ### Classes ###
 #------------------------------------------------------------------------------
 
-class file_checker():
-    
-    def __init__(self, sitename, data_interval, understorey=False, 
-                 in_format='TOB3', out_format='TOA5'):
-        
-        _enforce_format_naming(in_format, out_format)
-        self.understorey_flag = False if not 'Under' in sitename else True
-        self.in_format = in_format
-        self.out_format = out_format
-        self.time_step = int(data_interval)
-        self.SiteName = (sitename  if not understorey 
-                         else sitename.replace('Under', ''))
-        
-    #-------------------------------------------------------------------------
-    ### Class methods ###
-    #-------------------------------------------------------------------------
-
-    def get_raw_data_path(self):
-        
-        return (
-            su.get_data_path(site=self.SiteName, 
-                             data='flux_raw_fast', 
-                             check_exists=True) / 'TOB3'
-            )
-        
-    def check_raw_files_not_parsed(self):
-        
-        pass
-
-    def get_base_data_path(self):
-        
-        """Return the site-specific base data path"""
-        
-        site_data_path = base_data_path.format(self.SiteName)
-        if self.understorey_flag:
-            site_data_path = site_data_path.replace('Flux', 'Flux_aux')
-        return get_path(site_data_path)
-
-    def get_raw_data_path(self):
-
-        """Return the site-specific raw data path"""
-
-        return get_path(path_str=self.get_base_data_path(), subdirs=['TMP'])
-        
-    def get_raw_files(self, check_for_other=False):
-
-        """Check for unparsed TOB3 files in TMP directory"""
-
-        files = (
-            get_files_of_type(path=self.get_raw_data_path(), file_type='TOB3', 
-                              error_other_type=check_for_other)
-            )
-        pdb.set_trace()
-        for this_file in files:
-            check_raw_file_name_formatting(
-                this_file, self.in_format, self.SiteName, self.time_step, 
-                self.understorey_flag
-                )
-        return files
-#------------------------------------------------------------------------------    
-
 #------------------------------------------------------------------------------
-# Funcs
-#------------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def check_raw_file_name_formatting(file, fmt, site_name, time_step,
-                                   understorey=False):
-
-    """Check that file conforms to expected naming - no action if true,
-       raise if false
-       Expected name formatting: FMT_SITE_FREQ_YYYY_MM_DD.dat"""        
-
-    if understorey: site_name += 'Under'
-    interval = '100ms' if time_step == 30 else '50ms'
-    format_str = (
-        '{0}_{1}_{2}_year_month_day.dat'.format(fmt, site_name, interval)
-        )
-    file_name, file_ext = file.split('.')
-    if not file_ext == 'dat':
-        raise TypeError('File type unknown for file {}'.format(file))
-    elements = file_name.split('_')
-    if not len(elements) == 6:
-        raise TypeError('File {} does not conform to expected convention '
-                        '({})'.format(file, format_str))
-    if not elements[0] == fmt:
-        raise TypeError('First element in file name is not of specified '
-                        'format for file {0}; expected {1}'
-                        .format(file, format_str))
-    if not elements[1] == site_name:
-        raise TypeError('Second element in file name different to '
-                        'passed file name for file {}'.format(file))
-    if not elements[2] == interval:
-        raise TypeError('Third element in file name is not a recognised '
-                        'data interval for filename {}'.format(file))
-    dt.datetime(int(elements[3]), int(elements[4]), int(elements[5]))  
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def enforce_format_naming(in_format, out_format):
-
-    """Check the file formats passed"""
-
-    if not in_format in ['TOB3', 'TOB1']:
-        raise TypeError('Input format must be either TOB3 or TOB1')
-    if not out_format in ['TOB1', 'TOA5']:
-        raise TypeError('Input format must be either TOB1 or TOA5')
-    if in_format == out_format:
-        raise TypeError('Input format must be different to output format')
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def get_files_of_type(path, file_type=None, error_if_zero=True,
-                      error_other_type=False) -> list:
-
-    """Check for files of type (default None for all files)"""
-    pdb.set_trace()
-    files = [x.name for x in path.glob('*.dat')]
-    if not file_type:
-        subset_files = files
-    else:
-        subset_files = [x for x in files if x.split('_')[0] == file_type]
-    if not subset_files:
-        raise FileNotFoundError('Directory contains no files of type {}!'
-                                .format(file_type))
-    if error_other_type and not len(subset_files) == len(files):
-        raise RuntimeError('Non-{} files present in TMP directory! '
-                           'Please remove these files and try again!'
-                           .format(file_type))            
-    return subset_files
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-def get_path(path_str, subdirs=None, error_if_missing=True):
-
-    """Check path exists and return path object"""
-
-    fmt_path = pathlib.Path(path_str)
-    if subdirs:
-        for item in subdirs: 
-            fmt_path = fmt_path / item
-    if error_if_missing:                
-        if not fmt_path.exists():
-            raise FileNotFoundError(
-                'Specified file path ({}) does not exist! '
-                'Check site name or specified subdirectories!'
-                .format(str(fmt_path))
-                )
-    return fmt_path
-#-----------------------------------------------------------------------------
-
-
 class CardConvert_parser():
 
     """Creates, writes and runs CardConvert format (CCF) files"""
 
     def __init__(self, sitename, in_fmt, out_fmt, data_intvl_mins,
-                 overwrite_ccf=True, timestamp_is_end=True):
+                 overwrite_ccf=True, understorey=False, timestamp_is_end=True):
 
         _enforce_format_naming(from_format=in_fmt, to_format=out_fmt)
-        self.understorey_flag = False if not 'Under' in sitename else True
+        self.understorey_flag = understorey
         self.in_format = in_fmt
         self.out_format = out_fmt
         self.SiteName = (sitename  if not 'Under' in sitename 
@@ -214,119 +60,29 @@ class CardConvert_parser():
         self.time_step = int(data_intvl_mins)
         self.timestamp_is_end = timestamp_is_end
 
-    #-------------------------------------------------------------------------
-    ### Class methods private ###
-    #-------------------------------------------------------------------------
-
-    def _get_path(self, path, subdirs=None, error_if_missing=True):
-    
-        """Check path exists and return path object"""
-    
-        fmt_path = pathlib.Path(path)
-        if subdirs:
-            for item in subdirs: 
-                fmt_path = fmt_path / item
-        if error_if_missing:                
-            if not fmt_path.exists():
-                raise FileNotFoundError(
-                    'Specified file path ({}) does not exist! '
-                    'Check site name or specified subdirectories!'
-                    .format(str(fmt_path))
-                    )
-        return fmt_path
-    
-    def _check_raw_file_name_formatting(self, file):
-
-        """Check that file conforms to expected naming - no action if true,
-           raise if false"""        
-
-        fmt = self.in_format        
-        site_name = self.SiteName
-        if self.understorey_flag: site_name += 'Under'
-        interval = '100ms' if self.time_step == 30 else '50ms'
-        format_str = (
-            '{0}_{1}_{2}_year_month_day.dat'.format(fmt, site_name, interval)
-            )
-        file_name, file_ext = file.split('.')
-        if not file_ext == 'dat':
-            raise TypeError('File type unknown for file {}'.format(file))
-        elements = file_name.split('_')
-        if not len(elements) == 6:
-            raise TypeError('File {} does not conform to expected convention '
-                            '({})'.format(file, format_str))
-        if not elements[0] == fmt:
-            raise TypeError('First element in file name is not of specified '
-                            'format for file {0}; expected {1}'
-                            .format(file, format_str))
-        if not elements[1] == site_name:
-            raise TypeError('Second element in file name different to '
-                            'passed file name for file {}'.format(file))
-        if not elements[2] == interval:
-            raise TypeError('Third element in file name is not a recognised '
-                            'data interval for filename {}'.format(file))
-        dt.datetime(int(elements[3]), int(elements[4]), int(elements[5]))    
-    
-    def _get_files_of_type(self, file_type=None, error_if_zero=True,
-                           error_if_other_type=False) -> list:
-
-        """Check for files of type (default None for all files)"""
-        
-        path = self.get_raw_data_path()
-        files = [x.name for x in path.glob('*.dat')]
-        if not file_type:
-            subset_files = files
-        else:
-            subset_files = [x for x in files if x.split('_')[0] == file_type]
-        if not subset_files:
-            raise FileNotFoundError('Directory contains no files of type {}!'
-                                    .format(file_type))
-        if error_if_other_type and not len(subset_files) == len(files):
-            raise RuntimeError('Non-{} files present in TMP directory! '
-                               'Please remove these files and try again!'
-                               .format(file_type))            
-        return subset_files
-    
-    def _make_dir(self, file):
-
-        """Get the required child directory name(s) for the file"""
-    
-        split_list = file.split('.')[0].split('_')
-        split_dict = {x: split_list[filename_format[x]] for x in filename_format}
-        year_month = '_'.join([split_dict['Year'], split_dict['Month']])
-        sub_dirs_list = [split_dict['Format'], year_month]
-        if not split_dict['Format'] == 'TOB3':
-            sub_dirs_list += [split_dict['Day']]
-        target_path = self._get_path(path=self.get_base_data_path(),
-                                     subdirs=sub_dirs_list, 
-                                     error_if_missing=False)
-        try: 
-            target_path.mkdir(parents=True)
-        except FileExistsError: 
-            pass
-        return target_path
-
-    #-------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
     ### Class methods pre-CardConvert ###
-    #-------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
 
     def get_bale_interval(self):
 
         """Return the formatted interval for file baling"""
 
         bale_interval = 1 / (1440 / self.time_step)
-        if bale_interval == 1: return init_dict['BaleInterval']
+        if bale_interval == 1: return INIT_DICT['BaleInterval']
         if bale_interval > 1:
             raise RuntimeError('Error! Minutes must sum to less than 1 day!')
-        return str(int(init_dict['BaleInterval']) - 1 + round(bale_interval, 10))
+        return str(int(INIT_DICT['BaleInterval']) - 1 + round(bale_interval, 10))
 
-    def get_base_data_path(self):
+    def get_raw_data_filename_format(self):
         
-        """Return the site-specific base data path"""
-        
-        site_data_path = base_data_path.format(self.SiteName)
-        if self.understorey_flag:
-            site_data_path = site_data_path.replace('Flux', 'Flux_aux')
-        return self._get_path(site_data_path)
+        fmt = self.in_format        
+        site_name = self.SiteName
+        if self.understorey_flag: site_name += 'Under'
+        interval = '100ms' if self.time_step == 30 else '50ms'
+        return (
+            '{0}_{1}_{2}_YYYY_MM_DD.dat'.format(fmt, site_name, interval)
+            )
 
     def get_ccf_dict(self) -> dict:
 
@@ -336,7 +92,7 @@ class CardConvert_parser():
         if self.out_format == 'TOB1': format_str = '1'
         write_dict = {'SourceDir': str(self.get_raw_data_path()) + '\\',
                       'TargetDir': str(self.get_raw_data_path()) + '\\'}
-        write_dict.update(init_dict)
+        write_dict.update(INIT_DICT)
         write_dict['BaleInterval'] = self.get_bale_interval()
         write_dict['Format'] = format_str
         return write_dict
@@ -345,7 +101,7 @@ class CardConvert_parser():
 
         """Return the site-specific ccf file path"""
 
-        path = self._get_path(base_ccf_path.format(self.SiteName))
+        path = su.get_path(base_path='ccf_config')
         file_name = '{0}_{1}.ccf'.format(self.out_format, self.SiteName)
         return path / file_name    
 
@@ -353,7 +109,12 @@ class CardConvert_parser():
 
         """Return the site-specific raw data path"""
 
-        return self._get_path(path=self.get_base_data_path(), subdirs=['TMP'])
+        data_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+                                site=self.SiteName, sub_dirs='TMP',
+                                check_exists=True)
+        if self.understorey_flag:
+            return _replace_dir_for_understorey(inpath=data_path)
+        return data_path
 
     def get_n_expected_converted_files(self) -> int:
 
@@ -366,24 +127,50 @@ class CardConvert_parser():
 
         """Check for unparsed TOB3 files in TMP directory"""
 
-        check_for_other = False if self.CardConvert_process_flag else True
-        files = (
-            self._get_files_of_type(file_type='TOB3', 
-                                    error_if_other_type=check_for_other)
-            )
-        for this_file in files:
-            self._check_raw_file_name_formatting(this_file)
-        return files
+        path = self.get_raw_data_path()
+        all_files = [x.name for x in path.glob('*')]
+        raw_files = [x.name for x in path.glob('TOB3*.dat') 
+                     if self.in_format in x.name]
+        if not all_files == raw_files:
+            raise RuntimeError('Non-{} files present in TMP directory! '
+                               'Please remove these files and try again!'
+                                .format(self.in_format))   
+        expected_name = self.get_raw_data_filename_format()
+        for this_name in raw_files:
+            _check_raw_file_name_formatting(file_name=this_name, 
+                                            expected_name=expected_name)
+        return raw_files               
+
+    def _make_dir(self, file_name):
+    
+        """Get the required child directory name(s) for the file"""
+    
+        split_list = file_name.split('.')[0].split('_')
+        split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
+        year_month = '_'.join([split_dict['Year'], split_dict['Month']])
+        sub_dirs_list = [split_dict['Format'], year_month]
+        if not split_dict['Format'] == 'TOB3':
+            sub_dirs_list += [split_dict['Day']]
+        target_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+                                  sub_dirs='/'.join(sub_dirs_list), 
+                                  site=self.SiteName)
+        if self.understorey_flag:
+            target_path = _replace_dir_for_understorey(inpath=target_path)
+        try: 
+            target_path.mkdir(parents=True)
+        except FileExistsError: 
+            pass
+        return target_path
 
     def run_CardConvert(self):
 
-        """Run CardConvert"""
+        """Run CardConvert and move raw files"""
 
         if self.CardConvert_process_flag:
             raise RuntimeError('Process has already run!')
         files_to_convert = self.get_raw_files()
         self.write_ccf_file()
-        cc_path = str(self._get_path(CardConvert_path))
+        cc_path = str(su.get_path(base_path='CardConvert'))
         spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
         rslt = spc.run(spc_args)
         if not rslt.returncode == 0:
@@ -410,9 +197,9 @@ class CardConvert_parser():
             for this_item in write_dict:
                 f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
 
-    #-------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
     ### Class methods post-CardConvert ###
-    #-------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
 
     def get_converted_files(self) -> list:
 
@@ -422,7 +209,10 @@ class CardConvert_parser():
 
         if not self.CardConvert_process_flag:
             raise RuntimeError('CardConvert Process has not run yet!')
-        return self._get_files_of_type(file_type=self.out_format)
+        path = self.get_raw_data_path()
+        raw_files = [x.name for x in path.glob('{}*.dat'.format(self.out_format)) 
+                     if self.in_format in x.name]
+        return raw_files       
 
     def parse_converted_files(self, overwrite_files=False):
 
@@ -447,29 +237,53 @@ class CardConvert_parser():
                 if not overwrite_files: raise
                 old_file.replace(new_file)
         self.rename_process_flag = True
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 ### File handling functions ###
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+def _check_raw_file_name_formatting(file_name, expected_name):
+
+    """Check that file conforms to expected naming - no action if true,
+        raise if false"""        
+
+    # Split to lists for comparison of elements
+    file, ext = file_name.split('.')
+    elements = file.split('_')
+    expected_elements = expected_name.split('.')[0].split('_')
+    
+    # Error checks
+    if not ext == 'dat':
+        raise TypeError('File type unknown for file {}'.format(file))
+    if not len(elements) == 6:
+        raise TypeError('File {} does not conform to expected convention '
+                        '({})'.format(file, expected_name))
+    for i in range(3):
+        if not elements[i] == expected_elements[i]:
+            raise TypeError('Element {0} in file name is not of required '
+                            'format for file {1}; expected {2}'
+                            .format(str(i), file, expected_elements[i]))
+    dt.datetime(int(elements[3]), int(elements[4]), int(elements[5]))   
+
 def _demangle_filename(file_name):
 
     """Get the new filename (CardConvert prepends the new format and appends
        year, month, day, hour and minute; we drop old format and redundant
        date parts)"""
 
-    local_dict = {'Format': filename_format.get('Format')}
+    local_dict = {'Format': FILENAME_FORMAT.get('Format')}
     local_dict.update(
-        {x: filename_format[x] + 1 for x in list(filename_format.keys())[1:]}
+        {x: FILENAME_FORMAT[x] + 1 for x in list(FILENAME_FORMAT.keys())[1:]}
         )
     split_list = file_name.split('_')
     rebuild_list = [split_list[local_dict[x]] for x in local_dict.keys()]
     rebuild_list += [split_list[-1]]
     return '_'.join(rebuild_list)
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 def _enforce_format_naming(from_format, to_format):
 
     """Check the file formats passed"""
@@ -480,24 +294,54 @@ def _enforce_format_naming(from_format, to_format):
         raise TypeError('Input format must be either TOB1 or TOA5')
     if from_format == to_format:
         raise TypeError('Input format must be different to output format')
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 def _get_rounded_mins(mins, interval):
 
     """Roll forward minutes to end of relevant interval"""
 
     return (mins - np.mod(mins, interval) + interval).item()
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+def _make_dir(file_name):
+
+    """Get the required child directory name(s) for the file"""
+
+    split_list = file_name.split('.')[0].split('_')
+    split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
+    year_month = '_'.join([split_dict['Year'], split_dict['Month']])
+    sub_dirs_list = [split_dict['Format'], year_month]
+    if not split_dict['Format'] == 'TOB3':
+        sub_dirs_list += [split_dict['Day']]
+    site = split_dict['Site']
+    if 'Under' in site:
+        site = site.replace
+    target_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+                              sub_dirs='/'.join(sub_dirs_list), 
+                              site=split_dict['Site'])
+    try: 
+        target_path.mkdir(parents=True)
+    except FileExistsError: 
+        pass
+    return target_path
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _replace_dir_for_understorey(inpath):
+    
+    return pathlib.Path(str(inpath).replace('Flux', 'Flux_aux'))
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def _roll_filename_datetime(file_name, data_interval):
 
     """Correct filename timestamp to represent end rather than beginning
        of period"""
 
     split_list = file_name.split('_')
-    split_dict = {x: split_list[filename_format[x]] for x in filename_format}
+    split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
     HrMin = split_list[-1].split('.')[0]
     split_dict.update({'Hour': HrMin[:2], 'Min': HrMin[2:]})
     prefix = '_'.join([split_dict['Format'], split_dict['Site'], split_dict['Freq']])
@@ -509,9 +353,9 @@ def _roll_filename_datetime(file_name, data_interval):
         )
     suffix = dt.datetime.strftime(py_datetime, '%Y_%m_%d_%H%M')
     return '_'.join([prefix, suffix]) + '.dat'
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 def _set_logger(site, name=None):
 
     """Create logger and send output to file"""
@@ -539,16 +383,21 @@ def _set_logger(site, name=None):
         handler.setFormatter(formatter)
         this_logger.addHandler(handler)
     return this_logger
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 ### Main ###
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 if __name__ == "__main__":
 
     site, interval = sys.argv[1], sys.argv[2]
+    if 'Under' in site:
+        under = True
+        site.replace('Under', '')
+    else:
+        under = False
     base_logger_path = (r'E:/Cloudstor/Shared/EcoSystemProcesses/Sites/'
                         '{}/Data/Flux/Logs')
     logger = _set_logger(site=site)
@@ -557,7 +406,8 @@ if __name__ == "__main__":
     try:
         cc_parser = CardConvert_parser(sitename=site, in_fmt='TOB3',
                                        out_fmt='TOA5',
-                                       data_intvl_mins=interval)
+                                       data_intvl_mins=interval,
+                                       understorey=under)
         files_to_parse = cc_parser.get_raw_files()
         logger.info('The following files will be parsed: {}'
                     .format(', '.join(files_to_parse)))

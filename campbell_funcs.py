@@ -243,7 +243,9 @@ def make_site_10Hz_update():
     
     """Make TOA5 constructor containing latest 10Hz files for sites"""
     
-    data_path = su.get_data_path(data='flux_raw_fast') / 'TOB3'
+    data_path = (
+        su.get_path(base_path='data', data_stream='flux_raw_fast') / 'TOB3'
+        )
     site_list = ['Boyagin', 'Calperum', 'GreatWesternWoodlands']
     result_dict = {}
     for site in site_list:
@@ -269,7 +271,6 @@ if __name__ == "__main__":
     
     # If passed 'update_10Hz' as argument:
     if sys.argv[1] == 'update_10Hz':
-        path = (pathlib.Path(su.get_base_path(to='generic_RTMC_files')) /
-                'latest_fast_data.dat')
+        path = su.get_base_path(to='generic_RTMC_files') / 'latest_fast_data.dat'
         a = make_site_10Hz_update()
         a.output_file(path)
