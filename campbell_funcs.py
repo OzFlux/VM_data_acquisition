@@ -271,6 +271,29 @@ if __name__ == "__main__":
     
     # If passed 'update_10Hz' as argument:
     if sys.argv[1] == 'update_10Hz':
-        path = su.get_base_path(to='generic_RTMC_files') / 'latest_fast_data.dat'
+        path = su.get_path(base_path='generic_RTMC_files') / 'latest_fast_data.dat'
         a = make_site_10Hz_update()
         a.output_file(path)
+        
+    if sys.argv[1] == 'update_site_details':
+        try:
+            site = sys.argv[2]
+            path = su.get_path(base_path='data', data_stream='flux_raw_RTMC',
+                               site=site, check_exists=True) / 'site_details.dat'
+            a = make_site_info_TOA5(site=site)
+            a.output_file(path)
+        except IndexError:
+            site_list = su.get_site_list()
+            for site in site_list.index:
+                try:
+                    path = (
+                        su.get_path(base_path='data', 
+                                    data_stream='flux_raw_RTMC',
+                                    site=site, check_exists=True) / 
+                        'site_details.dat'
+                        )
+                    a = make_site_info_TOA5(site=site)
+                    a.output_file(path)
+                except FileNotFoundError:
+                    print ('No directory for site {}'.format(site))
+                    next
