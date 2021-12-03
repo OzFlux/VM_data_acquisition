@@ -46,9 +46,12 @@ class bom_ftp_getter():
             files = [x for x in files if search_str in x]
         return files
 
-    def get_file(self, src_file, target_dir):
+    def get_file(self, src_file, output_dir, output_name=None):
 
-        out_file = pathlib.Path(target_dir) / pathlib.Path(src_file).name
+        if not output_name:
+            out_file = pathlib.Path(output_dir) / pathlib.Path(src_file).name
+        else:
+            out_file = pathlib.Path(output_dir) / output_name
         with open(out_file, 'wb') as f:
             self.ftp.retrbinary('RETR {}'.format(src_file), f.write)
 
@@ -57,7 +60,8 @@ if __name__ == "__main__":
     out_path = sys.argv[1]
     getter = bom_ftp_getter(img_type='satellite')
     file_list = getter.get_file_list(file_type='jpg', search_str='IDE00135.20')
-    getter.get_file(src_file=file_list[-1], target_dir=out_path)
+    getter.get_file(src_file=file_list[-1], output_dir=out_path, 
+                    output_name='sat_img.jpg')
     getter = bom_ftp_getter(img_type='mslp')
-    getter.get_file(src_file='anon/gen/difacs/IDX0894.gif',
-                    target_dir=out_path)
+    getter.get_file(src_file='anon/gen/difacs/IDX0894.gif', output_dir=out_path,
+                    output_name='mslp.gif')
