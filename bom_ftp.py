@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     out_path = sys.argv[1]
     getter = bom_ftp_getter(img_type='satellite')
-    file_list = getter.get_file_list(file_type='jpg', search_str='IDE00135')
+    file_list = getter.get_file_list(file_type='jpg', search_str='IDE00135.20')
     getter.get_file(src_file=file_list[-1], output_dir=out_path,
                     output_name='sat_img.jpg')
     getter = bom_ftp_getter(img_type='mslp')
