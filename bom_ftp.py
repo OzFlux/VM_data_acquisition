@@ -14,7 +14,7 @@ import sys
 ### Constants
 #------------------------------------------------------------------------------
 DIRS_DICT = {'satellite': 'anon/gen/gms',
-             'mslp': 'anon/gen/difacs'}
+             'mslp': 'anon/gen/fwo'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -59,9 +59,10 @@ if __name__ == "__main__":
 
     out_path = sys.argv[1]
     getter = bom_ftp_getter(img_type='satellite')
-    file_list = getter.get_file_list(file_type='jpg', search_str='IDE00135.20')
-    getter.get_file(src_file=file_list[-1], output_dir=out_path, 
+    file_list = getter.get_file_list(file_type='jpg', search_str='IDE00135')
+    getter.get_file(src_file=file_list[-1], output_dir=out_path,
                     output_name='sat_img.jpg')
     getter = bom_ftp_getter(img_type='mslp')
-    getter.get_file(src_file='anon/gen/difacs/IDX0894.gif', output_dir=out_path,
-                    output_name='mslp.gif')
+    file_list = getter.get_file_list(file_type='png', search_str='IDY00030')
+    getter.get_file(src_file=file_list[-1], output_dir=out_path,
+                    output_name='mslp.png')
