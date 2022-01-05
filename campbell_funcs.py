@@ -274,15 +274,16 @@ if __name__ == "__main__":
         path = su.get_path(base_path='generic_RTMC_files') / 'latest_fast_data.dat'
         a = make_site_10Hz_update()
         a.output_file(path)
-        
+    
+    # If passed 'update site details as argument'        
     if sys.argv[1] == 'update_site_details':
         try:
             site = sys.argv[2]
             path = su.get_path(base_path='data', data_stream='flux_raw_RTMC',
                                site=site, check_exists=True) / 'site_details.dat'
-            a = make_site_info_TOA5(site=site)
+            a = make_site_info_TOA5(site=site, num_to_str='Start year')
             a.output_file(path)
-        except IndexError:
+        except IndexError: # If not passed a site name from batch file
             site_list = su.get_site_list()
             for site in site_list.index:
                 try:
