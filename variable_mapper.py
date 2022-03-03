@@ -12,6 +12,45 @@ import pdb
 
 path='/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
 
+#------------------------------------------------------------------------------
+class rtmc_constructor():
+
+    def __init__(self, var_data):
+
+        self.data = var_data
+        self.eval_alias = var_data.evaluated_alias_name
+
+    def get_alias(self):
+
+        return self.data.alias_name
+
+    def get_evaluated_alias(self):
+
+        return self.data.evaluated_alias_name
+
+    def make_alias_map(self):
+
+        return 'Alias({},{});'.format(self.alias, self.rtmc_name)
+
+    def make_rtmc_name(self):
+
+        try:
+            return '"Server:{}"'.format(
+                '.'.join([self.data.logger_name, self.data.table_name,
+                          self.data.site_variable_name])
+                )
+        except TypeError:
+            return '"{}"'.format(
+                self.data.file_data_source + ':' +
+                '.'.join([self.data.table_name, self.data.site_variable_name])
+                )
+
+    def apply_statistic(**kwargs):
+
+        pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class variable_mapper():
 
     def __init__(self, path, site):
@@ -20,39 +59,6 @@ class variable_mapper():
         self.rtmc_df = _make_component_df(path=path)
         self.master_df = _make_master_df(path=path)
         self.site_df = _make_site_df(path=path, site=site)
-        # self._check_long_names()
-
-    # #--------------------------------------------------------------------------
-    # def _check_long_names(self):
-    #     """
-    #     Check that long_names specified in site spreadsheet are contained in
-    #     the standard long names list in the master spreadsheet.
-
-    #     Raises
-    #     ------
-    #     KeyError
-    #         Raised if and long name is invalid.
-
-    #     Returns
-    #     -------
-    #     None.
-    #     """
-
-    #     master_long_names = (
-    #         self.master_df.index.get_level_values(level='long_name').tolist()
-    #         )
-    #     site_long_names = (
-    #         self.site_df.index.get_level_values(level='long_name').tolist()
-    #         )
-    #     invalid_list = (
-    #         [name for name in site_long_names if not name in master_long_names]
-    #         )
-    #     if invalid_list:
-    #         raise KeyError(
-    #             'The following long variable names were invalid: {}'
-    #             .format(', '.join(invalid_list))
-    #             )
-    # #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _make_text_string_from_dict(self, text_dict):
@@ -318,6 +324,15 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def rtmc_var(self, long_name, label):
+
+        try:
+            var_data = self.get_variable(long_name=long_name, label=label)
+        except KeyError:
+            pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def _get_time_diff(self, long_name):
 
         text_dict = (
@@ -460,7 +475,6 @@ def _make_site_df(path, site):
     # Create the site dataframe
     site_df = pd.read_excel(path, sheet_name=site,
                             converters={'Variable units': converter})
-    pdb.set_trace()
     site_df.index = (
         pd.MultiIndex.from_tuples(zip(site_df['Long name'],
                                       site_df['Label']),
