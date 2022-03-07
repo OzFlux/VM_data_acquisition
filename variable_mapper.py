@@ -4,6 +4,10 @@
 Created on Thu Dec 16 07:31:34 2021
 
 @author: imchugh
+
+To do:
+    - deal with variables that have multiple labels
+    - why does it take so long to create the rtmc constructor? Check where...
 """
 
 import numpy as np
@@ -13,41 +17,101 @@ import pdb
 path='/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
 
 #------------------------------------------------------------------------------
-class rtmc_constructor():
+class _rtmc_constructor():
 
-    def __init__(self, var_data):
+    def __init__(self, data_series):
 
-        self.data = var_data
-        self.eval_alias = var_data.evaluated_alias_name
+        if not isinstance(data_series, pd.core.series.Series):
+            raise TypeError('data_series must be a pandas Series!')
 
-    def get_alias(self):
+        self._data = data_series
+        self.eval_alias = data_series.evaluated_alias_name
+        self.alias_name = [data_series.alias_name]
+        self.rtmc_name = [self._get_rtmc_variable_name()]
+        self.primary_data = True
+        self.alias_map = (
+            ['Alias({},{});'.format(data_series.alias_name,
+                                    self.rtmc_name[0])]
+            )
 
-        return self.data.alias_name
+    def get_rtmc_output(self, as_alias=False):
 
-    def get_evaluated_alias(self):
+        if self._data.convert:
+            as_alias = True
+        if not as_alias:
+            return _list_to_str_with_crlf(self.rtmc_name)
+        return (
+            _list_to_str_with_crlf(self.alias_map) +
+            '\r\n\r\n' +
+            self.eval_alias
+            )
 
-        return self.data.evaluated_alias_name
-
-    def make_alias_map(self):
-
-        return 'Alias({},{});'.format(self.alias, self.rtmc_name)
-
-    def make_rtmc_name(self):
+    def _get_rtmc_variable_name(self):
 
         try:
             return '"Server:{}"'.format(
-                '.'.join([self.data.logger_name, self.data.table_name,
-                          self.data.site_variable_name])
+                '.'.join([self._data.logger_name, self._data.table_name,
+                          self._data.site_variable_name])
                 )
         except TypeError:
             return '"{}"'.format(
-                self.data.file_data_source + ':' +
-                '.'.join([self.data.table_name, self.data.site_variable_name])
+                self._data.file_data_source + ':' +
+                '.'.join([self._data.table_name, self._data.site_variable_name])
                 )
+#------------------------------------------------------------------------------
 
-    def apply_statistic(**kwargs):
+#------------------------------------------------------------------------------
+class _rtmc_sec_constructor():
 
-        pass
+    def __init__(self, data_dict):
+
+
+        self._data = data_dict['data_series']
+        self.eval_alias = data_dict['eval_string']
+        self.alias_name = self._data.index.tolist()
+        self.rtmc_name = self._data.tolist()
+        self.primary_data = False
+        self.alias_map = self._get_alias_map()
+
+    def get_rtmc_output(self):
+
+        return '\r\n'.join([self.alias_map]) + '\r\n\r\n' + self.eval_alias
+
+    def _get_alias_map(self):
+
+        return [
+            'Alias({0},{1});'.format(x[0], x[1]) for x in
+             zip(self._data.index, self._data.tolist())
+            ]
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class _calculation_constructor():
+
+    stat_dict = {'max_limited': 'MaxRunOverTimeWithReset',
+                  'max_unlimited': 'MaxRun',
+                  'min_limited': 'MinRunOverTimeWithReset',
+                  'min_unlimited': 'MinRun'}
+
+    reset_dict = {'monthly': 'RESET_MONTHLY', 'daily': 'RESET_DAILY'}
+
+    def __init__(self, rtmc_obj, **kwargs):
+
+        self.rtmc_obj = rtmc_obj
+        self.args = kwargs
+
+    def max_limited(self, interval):
+
+        stat = self.stat_dict['max_limited']
+        reset = self.reset_dict[interval]
+        eval_string = self.rtmc_obj.eval_alias
+        timestamp_var = self.rtmc_obj.rtmc_name[0]
+        stat_string = (
+            '{0}({1},Timestamp({2}),{3})'
+            .format(stat, eval_string, timestamp_var, reset)
+            )
+        alias_map_string = _list_to_str_with_crlf(self.rtmc_obj.alias_map)
+        return alias_map_string + '\r\n\r\n' + stat_string
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -130,7 +194,14 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def calculate_AH(self, build_string=True):
+    def _get_rtmc_constructor(self, long_name):
+
+        data_series = self.get_variable(long_name)
+        return _rtmc_constructor(data_series=data_series)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _calculate_AH(self):
         """
         Generate components for an rtmc-valid calculation of absolute humidity.
 
@@ -149,25 +220,21 @@ class variable_mapper():
             elements for building rtmc string.
         """
 
-        e_dict = self.calculate_e(build_string=False)
-        rho_mol_dict = self.calculate_molar_density(build_string=False)
-        ps_data = self.get_variable(long_name='Surface air pressure')
-        if ps_data.convert:
-            alias_name = ps_data.evaluated_alias_name
-        else:
-            alias_name = ps_data.alias_name
-        alias_map_list = e_dict['alias_map'] + [ps_data.alias_map]
-        evaluation = '{0}/{1}*{2}*18'.format(
-            e_dict['evaluation'], alias_name, rho_mol_dict['evaluation']
+        e_dict = self._calculate_e()
+        rho_dict = self._calculate_molar_density()
+        ps_obj = self._get_rtmc_constructor(long_name='Surface air pressure')
+        data_series = (
+            e_dict['data_series'].append(rho_dict['data_series'])
+            .drop_duplicates()
             )
-        text_dict = {'alias_map': alias_map_list, 'evaluation': evaluation}
-        if build_string:
-            return self._make_text_string_from_dict(text_dict=text_dict)
-        return text_dict
+        eval_string = '{0}/{1}*({2})*18'.format(
+            e_dict['eval_string'], ps_obj.eval_alias, rho_dict['eval_string']
+            )
+        return {'data_series': data_series, 'eval_string': eval_string}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def calculate_e(self, build_string=True):
+    def _calculate_e(self):
         """
         Generate components for an rtmc-valid calculation of vapour pressure.
 
@@ -186,50 +253,54 @@ class variable_mapper():
             elements for building rtmc string.
         """
 
-        es_dict = self.calculate_es(build_string=False)
-        rh_data = self.get_variable('Relative humidity')
-        if rh_data.convert:
-            alias_name = rh_data.alias_name
-        else:
-            alias_name = '{}/100'.format(rh_data.alias_name)
-        alias_map_list = es_dict['alias_map'] + [rh_data.alias_map]
-        evaluation = '{0}*({1})'.format(alias_name, es_dict['evaluation'])
-        text_dict = {'alias_map': alias_map_list, 'evaluation': evaluation}
-        if build_string:
-            return self._make_text_string_from_dict(text_dict=text_dict)
-        return text_dict
+        data_dict = self._calculate_es()
+        rtmc_obj = (
+            self._get_rtmc_constructor(long_name='Relative humidity')
+            )
+        data_series = pd.Series(data=rtmc_obj.rtmc_name,
+                                index=rtmc_obj.alias_name)
+        data_dict['data_series'] = (
+            data_dict['data_series'].append(data_series)
+            )
+        data_dict['eval_string'] = (
+            '{0}/100*({1})'.format(rtmc_obj.eval_alias,
+                                   data_dict['eval_string'])
+            )
+        return data_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def calculate_es(self, build_string=True):
+    def _calculate_es(self):
 
-        return {'alias_map': [self.get_variable('Air temperature').alias_map],
-                'evaluation': '0.6106*exp(17.27*Ta/(Ta+237.3))'}
+        rtmc_obj = self._get_rtmc_constructor(long_name='Air temperature')
+        return {
+            'data_series': pd.Series(data=rtmc_obj.rtmc_name,
+                                     index=rtmc_obj.alias_name),
+            'eval_string': '0.6106*exp(17.27*Ta/(Ta+237.3))'
+            }
     #--------------------------------------------------------------------------
 
     #------------------------------------------------------------------------------
-    def calculate_molar_density(self, build_string=True):
+    def _calculate_molar_density(self):
 
-        ps_data = self.get_variable('Surface air pressure')
-        if not ps_data.convert:
-            ps_alias_name = ps_data.alias_name
-        else:
-            ps_alias_name = ps_data.evaluated_alias_name
-        ps_alias_map = ps_data.alias_map
-        Ta_data = self.get_variable('Air temperature')
-        Ta_alias_name = Ta_data.alias_name
-        Ta_alias_map = Ta_data.alias_map
-        alias_map_list = [ps_alias_map, Ta_alias_map]
-        evaluation = ('({}*1000/(8.3143*({}+273.15)))'
-                       .format(ps_alias_name, Ta_alias_name))
-        text_dict = {'alias_map': alias_map_list, 'evaluation': evaluation}
-        if build_string:
-            return self._make_text_string_from_dict(text_dict=text_dict)
-        return text_dict
+        ps_obj = self._get_rtmc_constructor(long_name='Surface air pressure')
+        data_series = (
+            pd.Series(data=ps_obj.rtmc_name, index=ps_obj.alias_name)
+            )
+        Ta_obj = self._get_rtmc_constructor(long_name='Air temperature')
+        data_series = data_series.append(
+            pd.Series(data=Ta_obj.rtmc_name, index=Ta_obj.alias_name)
+            )
+        return {'data_series': data_series,
+                'eval_string': (
+                    '{}*1000/(8.3143*({}+273.15))'
+                    .format(ps_obj.alias_name, Ta_obj.alias_name)
+                    )
+                }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def calculate_vpd(self, build_string=True):
+    def _calculate_vpd(self):
         """
         Generate components for an rtmc-valid calculation of vapour pressure
         deficit.
@@ -249,14 +320,14 @@ class variable_mapper():
             elements for building rtmc string.
         """
 
-        e_dict = self.calculate_e(build_string=False)
-        es_dict = self.calculate_es(build_string=False)
-        calc_str = es_dict['evaluation'] + '-' + e_dict['evaluation']
-        alias_list = list(set(e_dict['alias_map'] + es_dict['alias_map']))
-        text_dict = {'alias_map': alias_list,'evaluation': calc_str}
-        if build_string:
-            return self._make_text_string_from_dict(text_dict=text_dict)
-        return text_dict
+        e_dict = self._calculate_e()
+        es_dict = self._calculate_es()
+        eval_string = es_dict['eval_string'] + '-' + e_dict['eval_string']
+        data_series = (
+            e_dict['data_series'].append(e_dict['data_series'])
+            .drop_duplicates()
+            )
+        return {'data_series': data_series, 'eval_string': eval_string}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -303,33 +374,16 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_rtmc_variable(self, long_name, label=None, build_string=True):
+    def get_rtmc_variable(self, long_name, label=None):
 
-        constructor_dict = {'Vapour pressure deficit': self.calculate_vpd,
-                            'Absolute humidity sensor': self.calculate_AH}
+        constructor_dict = {'Vapour pressure deficit': self._calculate_vpd,
+                            'Absolute humidity sensor': self._calculate_AH,
+                            'Saturation vapour pressure': self._calculate_es}
         try:
-            var_data = self.get_variable(long_name=long_name, label=label)
-            if var_data.convert:
-                use_name = var_data.evaluated_alias_name
-                alias_map = [var_data.alias_map]
-            else:
-                use_name = var_data.rtmc_name
-                alias_map = None
-            text_dict = {'alias_map': alias_map, 'evaluation': use_name}
-            if build_string:
-                return self._make_text_string_from_dict(text_dict=text_dict)
-            return text_dict
+            return self._get_rtmc_constructor(long_name=long_name)
         except KeyError:
-            return constructor_dict[long_name](build_string=build_string)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def rtmc_var(self, long_name, label):
-
-        try:
-            var_data = self.get_variable(long_name=long_name, label=label)
-        except KeyError:
-            pass
+            data_dict = constructor_dict[long_name]()
+            return _rtmc_sec_constructor(data_dict=data_dict)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -355,7 +409,6 @@ class variable_mapper():
             )
         stat_var, reset_var = stat_dict[statistic], reset_dict[interval]
         calc_var = text_dict['evaluation']
-        pdb.set_trace()
         try:
             timestamp_var = text_dict['alias_map'][0]
         except TypeError:
@@ -375,11 +428,7 @@ class variable_mapper():
         return constructor_dict[statistic](long_name)
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_alias(self, long_name, label=None, as_string=True):
-
-        pass
-    #--------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
@@ -388,45 +437,19 @@ class variable_mapper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _make_rtmc_name(df):
+def _list_to_str_with_crlf(the_list):
 
-    l = []
-    for this_var in df.index:
-        try:
-            l.append(
-                '"Server:{}"'.format('.'.join(
-                    [df.loc[this_var, 'logger_name'],
-                     df.loc[this_var, 'table_name'],
-                     df.loc[this_var, 'site_variable_name']]
-                    )
-                    )
-            )
-        except TypeError:
-            l.append(
-                '"{}"'.format(df.loc[this_var, 'file_data_source'] + ':' +
-                '.'.join([df.loc[this_var, 'table_name'],
-                          df.loc[this_var, 'site_variable_name']])
-                )
-                )
-    return l
+    return '\r\n'.join(the_list)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _make_alias_map(df):
+def _make_alias(series):
 
-    alias_list, alias_map_list = [], []
-    # pdb.set_trace()
-    for this_var in df.index:
-        alias = this_var[1]
-        try:
-            if np.isnan(alias):
-                alias = df.loc[this_var, 'standard_variable_name']
-        except TypeError:
-            pass
-        rtmc_var = df.loc[this_var, 'rtmc_name']
-        alias_list.append(alias)
-        alias_map_list.append('Alias({},{});'.format(alias, rtmc_var))
-    return alias_list, alias_map_list
+    try:
+        if np.isnan(series.name[1]):
+            return series.standard_variable_name
+    except TypeError:
+        return series.name[1]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -488,10 +511,7 @@ def _make_site_df(path, site):
                     'File data source': 'file_data_source'},
                    axis=1, inplace=True)
 
-    # Get and write rtmc-specific variable name strings
-    site_df = site_df.assign(rtmc_name=_make_rtmc_name(df=site_df))
-
-    # Get and write variable standard names and unit strings
+    # Write variable standard names and unit strings
     master_df = _make_master_df(path=path)
     site_df = (
         site_df.assign(standard_variable_name=
@@ -504,24 +524,25 @@ def _make_site_df(path, site):
                         site_df.index.get_level_values(level='long_name')])
         )
 
-    # Get and write conversion string for each variable
+    # Write unit conversion boolean for each variable
     site_df = site_df.assign(
         convert=lambda x: x['standard_variable_units'] !=
                           x['site_variable_units']
         )
 
-    # Get and write alias strings for each variable
-    alias_names, alias_maps = _make_alias_map(df=site_df)
-    site_df = site_df.assign(alias_name=alias_names)
-    site_df = site_df.assign(alias_map=alias_maps)
+    # Write alias string for each variable
+    site_df = site_df.assign(
+        alias_name=
+        lambda x: x.apply(_make_alias, axis=1)
+        )
 
+    # Write alias conversion string for each variable
     site_df = site_df.assign(
         evaluated_alias_name=
         lambda x: x.site_variable_units.map(units_dict).fillna(
             x.alias_name
             )
         )
-    # site_df.drop('convert', axis=1, inplace=True)
 
     return site_df
 #------------------------------------------------------------------------------
