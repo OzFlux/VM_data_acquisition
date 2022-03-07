@@ -16,102 +16,70 @@ import pdb
 
 path='/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
 
+
 #------------------------------------------------------------------------------
 class _rtmc_constructor():
 
-    def __init__(self, data_series):
-
-        if not isinstance(data_series, pd.core.series.Series):
-            raise TypeError('data_series must be a pandas Series!')
-
-        self._data = data_series
-        self.eval_alias = data_series.evaluated_alias_name
-        self.alias_name = [data_series.alias_name]
-        self.rtmc_name = [self._get_rtmc_variable_name()]
-        self.primary_data = True
-        self.alias_map = (
-            ['Alias({},{});'.format(data_series.alias_name,
-                                    self.rtmc_name[0])]
-            )
-
-    def get_rtmc_output(self, as_alias=False):
-
-        if self._data.convert:
-            as_alias = True
-        if not as_alias:
-            return _list_to_str_with_crlf(self.rtmc_name)
-        return (
-            _list_to_str_with_crlf(self.alias_map) +
-            '\r\n\r\n' +
-            self.eval_alias
-            )
-
-    def _get_rtmc_variable_name(self):
-
-        try:
-            return '"Server:{}"'.format(
-                '.'.join([self._data.logger_name, self._data.table_name,
-                          self._data.site_variable_name])
-                )
-        except TypeError:
-            return '"{}"'.format(
-                self._data.file_data_source + ':' +
-                '.'.join([self._data.table_name, self._data.site_variable_name])
-                )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class _rtmc_sec_constructor():
-
     def __init__(self, data_dict):
 
+        self._data = data_dict
+        self.eval_string = data_dict['eval_string']
+        self.variable_units = data_dict['variable_units']
+        self.alias_name = data_dict['alias_name']
+        self.rtmc_name = data_dict['rtmc_name']
 
-        self._data = data_dict['data_series']
-        self.eval_alias = data_dict['eval_string']
-        self.alias_name = self._data.index.tolist()
-        self.rtmc_name = self._data.tolist()
-        self.primary_data = False
-        self.alias_map = self._get_alias_map()
+    def get_alias_map(self):
 
-    def get_rtmc_output(self):
+        return '\r\n'.join(
+            ['Alias({0},{1});'.format(x[0], x[1])
+             for x in zip(self.alias_name, self.rtmc_name)]
+            )
 
-        return '\r\n'.join([self.alias_map]) + '\r\n\r\n' + self.eval_alias
+    def get_intvl_ltd_statistic(self, statistic, interval):
 
-    def _get_alias_map(self):
-
-        return [
-            'Alias({0},{1});'.format(x[0], x[1]) for x in
-             zip(self._data.index, self._data.tolist())
-            ]
+        return _get_intvl_ltd_statistic(
+            rtmc_obj=self, statistic=statistic, interval=interval
+            )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class _calculation_constructor():
+def _get_intvl_ltd_statistic(rtmc_obj, statistic, interval):
 
     stat_dict = {'max_limited': 'MaxRunOverTimeWithReset',
-                  'max_unlimited': 'MaxRun',
-                  'min_limited': 'MinRunOverTimeWithReset',
-                  'min_unlimited': 'MinRun'}
+                 'min_limited': 'MinRunOverTimeWithReset'}
+    reset_dict = {'daily': 'RESET_DAILY', 'weekly': 'RESET_WEEKLY',
+                  'monthly': 'RESET_MONTHLY', }
+    start_dict = {'daily': 'nsecPerDay', 'weekly': 'nsecPerWeek',
+                  'monthly': 'nsecPerDay*30'}
 
-    reset_dict = {'monthly': 'RESET_MONTHLY', 'daily': 'RESET_DAILY'}
+    try:
+        stat_string = stat_dict[statistic]
+    except KeyError:
+        print('Statistic keyword must be one of the following: {})'
+              .format(', '.join(list(stat_dict.keys())))
+              );
+        raise
 
-    def __init__(self, rtmc_obj, **kwargs):
+    try:
+        reset_when = reset_dict[interval]
+        start_when = start_dict[interval]
+    except KeyError:
+        print('Interval keyword must be one of the following: {})'
+              .format(', '.join(list(reset_dict.keys())))
+              );
+        raise
 
-        self.rtmc_obj = rtmc_obj
-        self.args = kwargs
-
-    def max_limited(self, interval):
-
-        stat = self.stat_dict['max_limited']
-        reset = self.reset_dict[interval]
-        eval_string = self.rtmc_obj.eval_alias
-        timestamp_var = self.rtmc_obj.rtmc_name[0]
-        stat_string = (
-            '{0}({1},Timestamp({2}),{3})'
-            .format(stat, eval_string, timestamp_var, reset)
-            )
-        alias_map_string = _list_to_str_with_crlf(self.rtmc_obj.alias_map)
-        return alias_map_string + '\r\n\r\n' + stat_string
+    start_cond = ('StartRelativeToNewest({},OrderCollected);'
+                  .format(start_when)
+                  )
+    alias_map = rtmc_obj.get_alias_map()
+    eval_string = rtmc_obj.eval_string
+    timestamp_var = rtmc_obj.rtmc_name[0]
+    new_eval_string = (
+        '{0}({1},Timestamp({2}),{3})'
+        .format(stat_string, eval_string, timestamp_var, reset_when)
+        )
+    return '\r\n\r\n'.join([start_cond, alias_map, new_eval_string])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -149,7 +117,7 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variable(self, long_name, label=None):
+    def get_raw_variable(self, long_name, label=None):
         """
         Get the details required to generate an rtmc entry from a given
         variable.
@@ -199,13 +167,6 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _get_rtmc_constructor(self, long_name):
-
-        data_series = self.get_variable(long_name)
-        return _rtmc_constructor(data_series=data_series)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def _calculate_AH(self):
         """
         Generate components for an rtmc-valid calculation of absolute humidity.
@@ -227,7 +188,7 @@ class variable_mapper():
 
         e_dict = self._calculate_e()
         rho_dict = self._calculate_molar_density()
-        ps_dict = self.get_variable(long_name='Surface air pressure')
+        ps_dict = self.get_raw_variable(long_name='Surface air pressure')
         eval_string = '{0}/{1}*({2})*18'.format(
             e_dict['eval_string'], ps_dict['eval_string'],
             rho_dict['eval_string']
@@ -264,7 +225,7 @@ class variable_mapper():
         """
 
         es_dict = self._calculate_es()
-        rh_dict = self.get_variable(long_name='Relative humidity')
+        rh_dict = self.get_raw_variable(long_name='Relative humidity')
         for this_key in ['rtmc_name', 'alias_name']:
             es_dict[this_key].append(rh_dict[this_key][0])
         es_dict['eval_string'] = '{0}/100*({1})'.format(rh_dict['eval_string'],
@@ -275,7 +236,7 @@ class variable_mapper():
     #--------------------------------------------------------------------------
     def _calculate_es(self):
 
-        rtmc_dict = self.get_variable(long_name='Air temperature')
+        rtmc_dict = self.get_raw_variable(long_name='Air temperature')
         rtmc_dict['variable_units'] = 'kPa'
         rtmc_dict['eval_string'] = '0.6106*exp(17.27*Ta/(Ta+237.3))'
         return rtmc_dict
@@ -284,8 +245,8 @@ class variable_mapper():
     #------------------------------------------------------------------------------
     def _calculate_molar_density(self):
 
-        ps_dict = self.get_variable(long_name='Surface air pressure')
-        Ta_dict = self.get_variable(long_name='Air temperature')
+        ps_dict = self.get_raw_variable(long_name='Surface air pressure')
+        Ta_dict = self.get_raw_variable(long_name='Air temperature')
         for this_key in ['rtmc_name', 'alias_name']:
             ps_dict[this_key].append(Ta_dict[this_key][0])
         ps_dict['eval_string'] = (
@@ -328,7 +289,7 @@ class variable_mapper():
     #--------------------------------------------------------------------------
     def make_record_counter(self):
 
-        dummy = self.get_variable(long_name='Battery voltage')
+        dummy = self.get_raw_variable(long_name='Battery voltage')
         pdb.set_trace()
         pass
     #--------------------------------------------------------------------------
@@ -357,7 +318,7 @@ class variable_mapper():
         d = {}
         for i, name in enumerate(name_list):
             try:
-                var_obj = self.get_variable(name)
+                var_obj = self.get_raw_variable(name)
             except KeyError:
                 pdb.set_trace()
             if isinstance(var_obj, pd.core.frame.DataFrame):
@@ -375,10 +336,10 @@ class variable_mapper():
                             'Absolute humidity sensor': self._calculate_AH,
                             'Saturation vapour pressure': self._calculate_es}
         try:
-            return self._get_rtmc_constructor(long_name=long_name)
+            data_dict = self.get_raw_variable(long_name=long_name)
         except KeyError:
             data_dict = constructor_dict[long_name]()
-            return _rtmc_sec_constructor(data_dict=data_dict)
+        return _rtmc_constructor(data_dict=data_dict)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -390,29 +351,6 @@ class variable_mapper():
         text_dict['evaluation'] = (
             '{0}-Last({0})'.format(text_dict['evaluation'])
             )
-        return self._make_text_string_from_dict(text_dict=text_dict)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_rtmc_statistic_over_interval(self, long_name, statistic, interval):
-
-        stat_dict = {'max': 'MaxRunOverTimeWithReset',
-                     'min': 'MinRunOverTimeWithReset'}
-        reset_dict = {'monthly': 'RESET_MONTHLY', 'daily': 'RESET_DAILY'}
-        text_dict = (
-            self.get_rtmc_variable(long_name=long_name, build_string=False)
-            )
-        stat_var, reset_var = stat_dict[statistic], reset_dict[interval]
-        calc_var = text_dict['evaluation']
-        try:
-            timestamp_var = text_dict['alias_map'][0]
-        except TypeError:
-            timestamp_var = calc_var
-        stat_string = (
-            '{0}({1},Timestamp({2}),{3})'
-            .format(stat_var, calc_var, timestamp_var, reset_var)
-            )
-        text_dict['evaluation'] = stat_string
         return self._make_text_string_from_dict(text_dict=text_dict)
     #--------------------------------------------------------------------------
 
@@ -429,12 +367,6 @@ class variable_mapper():
 
 #------------------------------------------------------------------------------
 ### PRIVATE FUNCTIONS ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _list_to_str_with_crlf(the_list):
-
-    return '\r\n'.join(the_list)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -496,6 +428,22 @@ def _make_master_df(path):
 
 #------------------------------------------------------------------------------
 def _make_site_df(path, site):
+    """
+
+
+    Parameters
+    ----------
+    path : TYPE
+        DESCRIPTION.
+    site : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
 
     def converter(val, default_val='None'):
         if len(val) > 0:
@@ -533,12 +481,6 @@ def _make_site_df(path, site):
                        [master_df.loc[x, 'variable_units'] for x in
                         site_df.index.get_level_values(level='long_name')])
         )
-
-    # # Write unit conversion boolean for each variable
-    # site_df = site_df.assign(
-    #     convert=lambda x: x['standard_variable_units'] !=
-    #                       x['site_variable_units']
-    #     )
 
     # Write variable name for each variable
     site_df = site_df.assign(
@@ -578,5 +520,3 @@ def make_statistic(stat, reset)->str:
     second_str = '{})'.format(reset_dict[reset])
     return first_str + second_str
 #------------------------------------------------------------------------------
-
-
