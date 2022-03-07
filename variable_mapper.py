@@ -149,7 +149,7 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variable(self, long_name, label=None, field=None):
+    def get_variable(self, long_name, label=None):
         """
         Get the details required to generate an rtmc entry from a given
         variable.
@@ -188,9 +188,14 @@ class variable_mapper():
             pd_obj = self.site_df.loc[(long_name, label)]
         except KeyError:
             pd_obj = self.site_df.loc[long_name]
-        if field:
-            return pd_obj[field]
-        return pd_obj
+        if isinstance(pd_obj, pd.core.frame.DataFrame):
+            raise NotImplementedError('doesnt work for dataframes yet!')
+        parse_list = ['variable_units', 'rtmc_name', 'alias_name',
+                      'eval_string']
+        parse_dict = pd_obj[parse_list].to_dict()
+        output_dict = {x: [parse_dict[x]] for x in ['rtmc_name', 'alias_name']}
+        parse_dict.update(output_dict)
+        return parse_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -222,15 +227,20 @@ class variable_mapper():
 
         e_dict = self._calculate_e()
         rho_dict = self._calculate_molar_density()
-        ps_obj = self._get_rtmc_constructor(long_name='Surface air pressure')
-        data_series = (
-            e_dict['data_series'].append(rho_dict['data_series'])
-            .drop_duplicates()
-            )
+        ps_dict = self.get_variable(long_name='Surface air pressure')
         eval_string = '{0}/{1}*({2})*18'.format(
-            e_dict['eval_string'], ps_obj.eval_alias, rho_dict['eval_string']
+            e_dict['eval_string'], ps_dict['eval_string'],
+            rho_dict['eval_string']
             )
-        return {'data_series': data_series, 'eval_string': eval_string}
+        temp_df = (pd.concat(
+            [pd.DataFrame(e_dict), pd.DataFrame(rho_dict),
+             pd.DataFrame(ps_dict)])
+            [['alias_name', 'rtmc_name']]
+            )
+        temp_df.drop_duplicates(inplace=True)
+        new_dict = {'eval_string': eval_string, 'variable_units': 'g/m^3'}
+        new_dict.update({x: temp_df[x].tolist() for x in temp_df.columns})
+        return new_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -253,50 +263,37 @@ class variable_mapper():
             elements for building rtmc string.
         """
 
-        data_dict = self._calculate_es()
-        rtmc_obj = (
-            self._get_rtmc_constructor(long_name='Relative humidity')
-            )
-        data_series = pd.Series(data=rtmc_obj.rtmc_name,
-                                index=rtmc_obj.alias_name)
-        data_dict['data_series'] = (
-            data_dict['data_series'].append(data_series)
-            )
-        data_dict['eval_string'] = (
-            '{0}/100*({1})'.format(rtmc_obj.eval_alias,
-                                   data_dict['eval_string'])
-            )
-        return data_dict
+        es_dict = self._calculate_es()
+        rh_dict = self.get_variable(long_name='Relative humidity')
+        for this_key in ['rtmc_name', 'alias_name']:
+            es_dict[this_key].append(rh_dict[this_key][0])
+        es_dict['eval_string'] = '{0}/100*({1})'.format(rh_dict['eval_string'],
+                                                        es_dict['eval_string'])
+        return es_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _calculate_es(self):
 
-        rtmc_obj = self._get_rtmc_constructor(long_name='Air temperature')
-        return {
-            'data_series': pd.Series(data=rtmc_obj.rtmc_name,
-                                     index=rtmc_obj.alias_name),
-            'eval_string': '0.6106*exp(17.27*Ta/(Ta+237.3))'
-            }
+        rtmc_dict = self.get_variable(long_name='Air temperature')
+        rtmc_dict['variable_units'] = 'kPa'
+        rtmc_dict['eval_string'] = '0.6106*exp(17.27*Ta/(Ta+237.3))'
+        return rtmc_dict
     #--------------------------------------------------------------------------
 
     #------------------------------------------------------------------------------
     def _calculate_molar_density(self):
 
-        ps_obj = self._get_rtmc_constructor(long_name='Surface air pressure')
-        data_series = (
-            pd.Series(data=ps_obj.rtmc_name, index=ps_obj.alias_name)
+        ps_dict = self.get_variable(long_name='Surface air pressure')
+        Ta_dict = self.get_variable(long_name='Air temperature')
+        for this_key in ['rtmc_name', 'alias_name']:
+            ps_dict[this_key].append(Ta_dict[this_key][0])
+        ps_dict['eval_string'] = (
+            '{}*1000/(8.3143*({}+273.15))'
+            .format(ps_dict['eval_string'], Ta_dict['eval_string'])
             )
-        Ta_obj = self._get_rtmc_constructor(long_name='Air temperature')
-        data_series = data_series.append(
-            pd.Series(data=Ta_obj.rtmc_name, index=Ta_obj.alias_name)
-            )
-        return {'data_series': data_series,
-                'eval_string': (
-                    '{}*1000/(8.3143*({}+273.15))'
-                    .format(ps_obj.alias_name, Ta_obj.alias_name)
-                    )
-                }
+        ps_dict['variable_units'] = 'mol/m^3'
+        return ps_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -322,12 +319,10 @@ class variable_mapper():
 
         e_dict = self._calculate_e()
         es_dict = self._calculate_es()
-        eval_string = es_dict['eval_string'] + '-' + e_dict['eval_string']
-        data_series = (
-            e_dict['data_series'].append(e_dict['data_series'])
-            .drop_duplicates()
+        e_dict['eval_string'] = (
+            es_dict['eval_string'] + '-' + e_dict['eval_string']
             )
-        return {'data_series': data_series, 'eval_string': eval_string}
+        return e_dict
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -447,9 +442,24 @@ def _make_alias(series):
 
     try:
         if np.isnan(series.name[1]):
-            return series.standard_variable_name
+            return series.variable_name
     except TypeError:
         return series.name[1]
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _get_rtmc_variable_name(series):
+
+    try:
+        return '"Server:{}"'.format(
+            '.'.join([series.logger_name, series.table_name,
+                      series.site_variable_name])
+            )
+    except TypeError:
+        return '"{}"'.format(
+            series.file_data_source + ':' +
+            '.'.join([series.table_name, series.site_variable_name])
+            )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -514,20 +524,25 @@ def _make_site_df(path, site):
     # Write variable standard names and unit strings
     master_df = _make_master_df(path=path)
     site_df = (
-        site_df.assign(standard_variable_name=
+        site_df.assign(variable_name=
                        [master_df.loc[x, 'variable_name'] for x in
                         site_df.index.get_level_values(level='long_name')])
         )
     site_df = (
-        site_df.assign(standard_variable_units=
+        site_df.assign(variable_units=
                        [master_df.loc[x, 'variable_units'] for x in
                         site_df.index.get_level_values(level='long_name')])
         )
 
-    # Write unit conversion boolean for each variable
+    # # Write unit conversion boolean for each variable
+    # site_df = site_df.assign(
+    #     convert=lambda x: x['standard_variable_units'] !=
+    #                       x['site_variable_units']
+    #     )
+
+    # Write variable name for each variable
     site_df = site_df.assign(
-        convert=lambda x: x['standard_variable_units'] !=
-                          x['site_variable_units']
+        rtmc_name=lambda x: x.apply(_get_rtmc_variable_name, axis=1)
         )
 
     # Write alias string for each variable
@@ -538,7 +553,7 @@ def _make_site_df(path, site):
 
     # Write alias conversion string for each variable
     site_df = site_df.assign(
-        evaluated_alias_name=
+        eval_string=
         lambda x: x.site_variable_units.map(units_dict).fillna(
             x.alias_name
             )
@@ -564,20 +579,4 @@ def make_statistic(stat, reset)->str:
     return first_str + second_str
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def make_difference(text_dict):
 
-    pass
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def convert_units(units):
-
-    d = {'mg/m^2/s': 'CO2flux*1000/44',
-         'frac': 'RH*100'}
-    try:
-        return d[units]
-    except KeyError:
-        pass
-#------------------------------------------------------------------------------
