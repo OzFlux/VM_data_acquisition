@@ -24,8 +24,11 @@ class combo_class():
 
         info = self.variable_mapper.get_rtmc_component_variables(
             screen=screen, component=component)
-        info['element'] = self.rtmc_parser.get_component_elements(
-            screen=screen, component=component)
+        try:
+            info['element'] = self.rtmc_parser.get_component_elements(
+                screen=screen, component=component)
+        except TypeError:
+            pdb.set_trace()
         return info
 
     def set_component(self, screen, component):
@@ -52,7 +55,19 @@ class combo_class():
 
         self.rtmc_parser.write_to_file()
 
-
+a = vm.variable_mapper(
+    path='/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx',
+    site='Calperum'
+    )
+b = rp.rtmc_parser(
+    path='/home/unimelb.edu.au/imchugh/Desktop/Boyagin_dark.rtmc2'
+    )
+component_list = a.rtmc_df.loc['System'].index.tolist()
+sub_list = [x for x in component_list if 'Digital' in x]
+d = {}
+for var in sub_list:
+    print(var)
+    d[var] = a.get_rtmc_component_variables(screen='System', component=var)
 
         # elems = self.rtmc_parser.get_elements_of_type(screen=screen,
         #                                               the_type=the_type)
