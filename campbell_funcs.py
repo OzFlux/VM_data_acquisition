@@ -23,7 +23,7 @@ import time_functions as tf
 ### Constants ###
 #------------------------------------------------------------------------------
 
-SITES = ['Boyagin', 'Calperum', 'Gingin', 'GreatWesternWoodlands']
+SITES = ['Boyagin', 'Calperum', 'Gingin', 'GreatWesternWoodlands', 'RobsonCreek']
 CAMERAS = {'Boyagin': 'ccfc-1859'}
 
 #------------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def make_site_info_TOA5(site, num_to_str=None):
     details['sunrise'] = sun['rising'].strftime('%H:%M')
     details['sunset'] = sun['setting'].strftime('%H:%M')
     details['UTC offset'] = utc_offset.seconds / 3600
-    details['10Hz file'] = get_latest_10Hz_file(site=site).name
+    details['10Hz file'] = get_latest_10Hz_file(site=site)
     df = pd.DataFrame(details).T
     
     # Check passed num_to_str arg is correct
@@ -285,9 +285,10 @@ def get_latest_10Hz_file(site):
                     site=site, check_exists=True) / 'TOB3'
         )
     try:
-        return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime)
-    except ValueError as e:
-        raise RuntimeError('Damn, no files').with_traceback(e.__traceback__)
+        return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
+    except ValueError:
+        # raise FileNotFoundError('Damn, no files').with_traceback(e.__traceback__)
+        return 'No files'
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -295,11 +296,8 @@ def get_latest_10Hz_files():
     
     result_dict = {}
     for site in SITES:
-        try:
-            latest_file = get_latest_10Hz_file(site)
-            result_dict[site] = '"{}"'.format(latest_file.name)
-        except FileNotFoundError:
-            continue
+        latest_file = get_latest_10Hz_file(site)
+        result_dict[site] = '"{}"'.format(latest_file.name)
     index = [dt.datetime.now().date()]
     df = pd.DataFrame(data=result_dict, index=index)
     header = ['TOA5', 'NoStation', 'CR1000', '9999',
