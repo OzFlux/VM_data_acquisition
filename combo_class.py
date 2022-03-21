@@ -62,12 +62,27 @@ a = vm.variable_mapper(
 b = rp.rtmc_parser(
     path='/home/unimelb.edu.au/imchugh/Desktop/Boyagin_dark.rtmc2'
     )
-component_list = a.rtmc_df.loc['System'].index.tolist()
+component_list = a.rtmc_df.loc['Meteorology'].index.tolist()
 sub_list = [x for x in component_list if 'Digital' in x]
-d = {}
-for var in sub_list:
-    print(var)
-    d[var] = a.get_rtmc_component_variables(screen='System', component=var)
+# d = {}
+# for var in sub_list:
+#     d[var] = {
+#         'var_map': a.get_rtmc_component_variables(screen='System',
+#                                                   component=var),
+#         'elem': b.get_component_elements(screen='System', component=var)
+#         }
+#     elem = d[var]['elem'].find('./calculation')
+#     print('For variable {}:'.format(var))
+#     print('    - Old text: {}'.format(elem.text))
+#     try:
+#         text = d[var]['var_map'][0].get_rtmc_output(alias=False)
+#     except TypeError:
+#         text = d[var]['var_map'][0].get_rtmc_output()
+#     print('    - New text: {}'.format(text))
+#     b.set_element_text(elem, text)
+# b.write_to_file(write_to_self=True)
+
+
 
         # elems = self.rtmc_parser.get_elements_of_type(screen=screen,
         #                                               the_type=the_type)

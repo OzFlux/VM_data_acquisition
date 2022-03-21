@@ -29,7 +29,9 @@ START_DICT = {'daily': 'nsecPerDay', 'weekly': 'nsecPerWeek',
               'monthly': 'nsecPerDay*30'}
 STAT_DICT = {'max_limited': 'MaxRunOverTimeWithReset',
              'min_limited': 'MinRunOverTimeWithReset',
-             'total_limited': 'TotalOverTimeWithReset'}
+             'total_limited': 'TotalOverTimeWithReset',
+             'max': 'MaxRunOverTime', 'min': 'MinRunOverTime',
+             'total': 'TotalOverTime'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -40,30 +42,48 @@ STAT_DICT = {'max_limited': 'MaxRunOverTimeWithReset',
 class _rtmc_constructor():
 
     def __init__(self, data_dict):
+        """
+        Creates object that generates rtmc output from attributes and methods.
 
-        self._data = data_dict
+        Parameters
+        ----------
+        data_dict : dict
+            Dictionary containing requisite key:value pairs (see attributes).
+
+        Returns
+        -------
+        None.
+
+        """
+
         self.eval_string = data_dict['eval_string']
         self.long_name = data_dict['long_name']
         self.variable_units = data_dict['variable_units']
         self.alias_name = data_dict['alias_name']
         self.rtmc_name = data_dict['rtmc_name']
+        self.parse_as_raw = data_dict['parse_as_raw']
 
     def get_alias_map(self):
+        """
+        Returns
+        -------
+        str
+            DESCRIPTION.
 
-        return '\r\n'.join(
+        """
+
+        return _str_joiner(
             ['Alias({0},{1});'.format(x[0], x[1])
-             for x in zip(self.alias_name, self.rtmc_name)]
+             for x in zip(self.alias_name, self.rtmc_name)],
+            joiner='\r\n'
         )
 
-    def get_rtmc_output(self):
+    def get_rtmc_output(self, as_alias=False):
 
+        if not as_alias:
+            if self.parse_as_raw:
+                return _str_joiner(self.rtmc_name)
         return _str_joiner([self.get_alias_map(), self.eval_string])
-
-    # def get_intvl_ltd_statistic(self, statistic, interval):
-
-    #     return _get_intvl_ltd_statistic(
-    #         rtmc_obj=self, statistic=statistic, interval=interval
-    #     )
 
     def get_interval_statistic(self, statistic, interval):
 
@@ -75,47 +95,16 @@ class _rtmc_constructor():
                     self.rtmc_name[0], RESET_DICT[interval])
             )
         return _str_joiner([start, alias, eval_string])
+
+    def get_absolute_statistic(self, statistic):
+
+        eval_string = self.get_rtmc_output()
+        if self.parse_as_raw:
+            return '{0}({1})'.format(STAT_DICT[statistic], eval_string)
+        alias = self.get_alias_map()
+        eval_string = '{0}({1})'.format(STAT_DICT[statistic], eval_string)
+        return _str_joiner([alias, eval_string])
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def _get_intvl_ltd_statistic(rtmc_obj, statistic, interval):
-
-#     stat_dict = {'max_limited': 'MaxRunOverTimeWithReset',
-#                  'min_limited': 'MinRunOverTimeWithReset'}
-#     reset_dict = {'daily': 'RESET_DAILY', 'weekly': 'RESET_WEEKLY',
-#                   'monthly': 'RESET_MONTHLY', }
-#     start_dict = {'daily': 'nsecPerDay', 'weekly': 'nsecPerWeek',
-#                   'monthly': 'nsecPerDay*30'}
-
-#     try:
-#         stat_string = stat_dict[statistic]
-#     except KeyError:
-#         print('Statistic keyword must be one of the following: {})'
-#               .format(', '.join(list(stat_dict.keys())))
-#               )
-#         raise
-
-#     try:
-#         reset_when = reset_dict[interval]
-#         start_when = start_dict[interval]
-#     except KeyError:
-#         print('Interval keyword must be one of the following: {})'
-#               .format(', '.join(list(reset_dict.keys())))
-#               )
-#         raise
-
-#     start_cond = ('StartRelativeToNewest({},OrderCollected);'
-#                   .format(start_when)
-#                   )
-#     alias_map = rtmc_obj.get_alias_map()
-#     eval_string = rtmc_obj.eval_string
-#     timestamp_var = rtmc_obj.rtmc_name[0]
-#     new_eval_string = (
-#         '{0}({1},Timestamp({2}),{3})'
-#         .format(stat_string, eval_string, timestamp_var, reset_when)
-#     )
-#     return _str_joiner([start_cond, alias_map, new_eval_string])
-# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class _rtmc_comp_constructor(_rtmc_constructor):
@@ -181,7 +170,7 @@ class variable_mapper():
         if isinstance(pd_obj, pd.core.frame.DataFrame):
             raise NotImplementedError('doesnt work for dataframes yet!')
         parse_list = ['variable_units', 'rtmc_name', 'alias_name',
-                      'eval_string']
+                      'eval_string', 'parse_as_raw']
         parse_dict = pd_obj[parse_list].to_dict()
         output_dict = {x: [parse_dict[x]] for x in ['rtmc_name', 'alias_name']}
         parse_dict.update(output_dict)
@@ -195,9 +184,11 @@ class variable_mapper():
         constructor_dict = {'Vapour pressure deficit': self._calculate_vpd,
                             'Absolute humidity sensor': self._calculate_AH,
                             'Saturation vapour pressure': self._calculate_es,
+                            'Vapour pressure': self._calculate_e,
                             'Records': self._calculate_records}
         data_dict = constructor_dict[long_name]()
         data_dict['long_name'] = long_name
+        data_dict['parse_as_raw'] = False
         return data_dict
     #--------------------------------------------------------------------------
 
@@ -377,8 +368,6 @@ class variable_mapper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-
-
 def _make_alias(series):
 
     try:
@@ -389,8 +378,6 @@ def _make_alias(series):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-
-
 def _get_rtmc_variable_name(series):
 
     try:
@@ -406,8 +393,6 @@ def _get_rtmc_variable_name(series):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-
-
 def _make_component_df(path):
 
     df = pd.read_excel(path, sheet_name='RTMC_components')
@@ -496,6 +481,13 @@ def _make_site_df(path, site):
             variable_units=[master_df.loc[x, 'variable_units'] for x in
                             site_df.index.get_level_values(level='long_name')]
             )
+    )
+
+    # Write flag to determine whether raw string can be used in rtmc output
+    # strings (for example, raw variable string should not be used if
+    # conversion of units is required)
+    site_df = site_df.assign(
+        parse_as_raw=lambda x: x.site_variable_units==x.variable_units
     )
 
     # Write variable name for each variable
