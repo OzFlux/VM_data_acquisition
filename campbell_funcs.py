@@ -24,7 +24,7 @@ import time_functions as tf
 #------------------------------------------------------------------------------
 
 SITES = ['Boyagin', 'Calperum', 'Gingin', 'GreatWesternWoodlands', 'RobsonCreek']
-CAMERAS = {'Boyagin': 'ccfc-1859'}
+# CAMERAS = {'Boyagin': 'ccfc-1859'}
 
 #------------------------------------------------------------------------------
 
@@ -256,26 +256,26 @@ def make_site_info_TOA5(site, num_to_str=None):
     return toa5_class
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def copy_latest_phenocam_file(site, img_type='true'):
+# #------------------------------------------------------------------------------
+# def copy_latest_phenocam_file(site, img_type='true'):
     
-    latest_file = get_latest_phenocam_file(site=site, img_type=img_type)
-    destination = (
-        su.get_path(base_path='generic_rtmc_images', check_exists=True) / 
-        '{0}_phenocam_{1}.jpg'.format(site, img_type)
-        )
-    shutil.copy(latest_file, destination)
-#------------------------------------------------------------------------------
+#     latest_file = get_latest_phenocam_file(site=site, img_type=img_type)
+#     destination = (
+#         su.get_path(base_path='generic_rtmc_images', check_exists=True) / 
+#         '{0}_phenocam_{1}.jpg'.format(site, img_type)
+#         )
+#     shutil.copy(latest_file, destination)
+# #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def copy_latest_phenocam_files(img_type='true'):
+# #------------------------------------------------------------------------------
+# def copy_latest_phenocam_files(img_type='true'):
     
-    for site in SITES:
-        try:
-            copy_latest_phenocam_file(site=site, img_type=img_type)
-        except (FileNotFoundError, RuntimeError):
-            continue
-#------------------------------------------------------------------------------
+#     for site in SITES:
+#         try:
+#             copy_latest_phenocam_file(site=site, img_type=img_type)
+#         except (FileNotFoundError, RuntimeError):
+#             continue
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_latest_10Hz_file(site):
@@ -306,47 +306,47 @@ def get_latest_10Hz_files():
     return TOA5_file_constructor(data=df, header=header)
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def get_latest_phenocam_file(site, img_type='true'):
+# #------------------------------------------------------------------------------
+# def get_latest_phenocam_file(site, img_type='true'):
     
-    """Get the name of the newest phenocam image"""
+#     """Get the name of the newest phenocam image"""
     
-    data_path = (
-        su.get_path(base_path='data', data_stream='phenocam', site=site,
-                    check_exists=True)
-        )
-    gen = data_path.rglob('*overstorey_oblique*')
-    file_list = []
-    for file_path in gen:
-        if img_type == 'true':
-            if not 'NDVI' in str(file_path):
-                file_list.append(file_path)
-        elif img_type == 'NDVI':
-            if 'NDVI' in str(file_path):
-                file_list.append(file_path)
-    try:
-        return max(file_list, key=os.path.getctime)
-    except ValueError as e:
-        raise RuntimeError('Damn, no files').with_traceback(e.__traceback__)
-#------------------------------------------------------------------------------
+#     data_path = (
+#         su.get_path(base_path='data', data_stream='phenocam', site=site,
+#                     check_exists=True)
+#         )
+#     gen = data_path.rglob('*overstorey_oblique*')
+#     file_list = []
+#     for file_path in gen:
+#         if img_type == 'true':
+#             if not 'NDVI' in str(file_path):
+#                 file_list.append(file_path)
+#         elif img_type == 'NDVI':
+#             if 'NDVI' in str(file_path):
+#                 file_list.append(file_path)
+#     try:
+#         return max(file_list, key=os.path.getctime)
+#     except ValueError as e:
+#         raise RuntimeError('Damn, no files').with_traceback(e.__traceback__)
+# #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def get_latest_phenocam_files(img_type='true'):
+# #------------------------------------------------------------------------------
+# def get_latest_phenocam_files(img_type='true'):
     
-    result_dict = {}
-    for site in SITES:
-        try:
-            result_dict[site] = (
-                '"{}"'.format(
-                get_latest_phenocam_file(site=site, img_type=img_type).name
-                ))
-        except (FileNotFoundError, RuntimeError):
-            continue
-    index = [dt.datetime.now().date()]
-    df = pd.DataFrame(data=result_dict, index=index)
-    toa5_class = TOA5_file_constructor(data=df)
-    return toa5_class
-#------------------------------------------------------------------------------
+#     result_dict = {}
+#     for site in SITES:
+#         try:
+#             result_dict[site] = (
+#                 '"{}"'.format(
+#                 get_latest_phenocam_file(site=site, img_type=img_type).name
+#                 ))
+#         except (FileNotFoundError, RuntimeError):
+#             continue
+#     index = [dt.datetime.now().date()]
+#     df = pd.DataFrame(data=result_dict, index=index)
+#     toa5_class = TOA5_file_constructor(data=df)
+#     return toa5_class
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### Main ###
@@ -362,19 +362,19 @@ if __name__ == "__main__":
         a = get_latest_10Hz_files()
         a.output_file(path)
 
-    # If passed 'update_PhenoImages' as argument:
-    if sys.argv[1] == 'update_PhenoImages':
-        path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam.dat'
-        a = get_latest_phenocam_files()
-        a.output_file(path)
-        copy_latest_phenocam_files()
+    # # If passed 'update_PhenoImages' as argument:
+    # if sys.argv[1] == 'update_PhenoImages':
+    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam.dat'
+    #     a = get_latest_phenocam_files()
+    #     a.output_file(path)
+    #     copy_latest_phenocam_files()
 
-    # If passed 'update_PhenoImages_NDVI' as argument:
-    if sys.argv[1] == 'update_PhenoImages_NDVI':
-        path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam_NDVI.dat'
-        a = get_latest_phenocam_files(img_type='NDVI')
-        a.output_file(path)
-        copy_latest_phenocam_files(img_type='NDVI')
+    # # If passed 'update_PhenoImages_NDVI' as argument:
+    # if sys.argv[1] == 'update_PhenoImages_NDVI':
+    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam_NDVI.dat'
+    #     a = get_latest_phenocam_files(img_type='NDVI')
+    #     a.output_file(path)
+    #     copy_latest_phenocam_files(img_type='NDVI')
     
     # If passed 'update site details' as argument
     if sys.argv[1] == 'update_site_details':
