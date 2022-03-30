@@ -65,7 +65,7 @@ def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
     """Use initialisation file to extract data path for site and data type"""    
 
     config = ConfigParser()
-    config.read(pathlib.Path(__file__).parent / 'paths.ini')
+    config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
     if not base_path in config['BASE_PATH']:
         raise KeyError('base_path arg must be one of: {}'
                        .format(', '.join(config['BASE_PATH'])))
@@ -79,6 +79,7 @@ def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
         return out_path
     if data_stream:
         if not data_stream in config['DATA_STREAM']:
+            pdb.set_trace()
             raise KeyError('data_stream arg must be one of: {}'
                            .format(', '.join(config['DATA_STREAM'])))
         out_path = out_path / config['DATA_STREAM'][data_stream]

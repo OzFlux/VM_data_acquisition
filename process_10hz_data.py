@@ -24,7 +24,7 @@ import site_utils as su
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
-base_logger_path = (r'E:/Cloudstor/Shared/EcoSystemProcesses/Sites/{}/Data/Flux/Logs')
+base_logger_path = r'E:/Sites/{}/Logs'
 INIT_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0',
              'Timestamps': '1', 'CreateNew': '0', 'DateTimeNames': '1',
              'Midnight24': '0', 'ColWidth': '263', 'ListHeight': '288',
@@ -59,10 +59,25 @@ class CardConvert_parser():
         self.rename_process_flag = False
         self.time_step = int(data_intvl_mins)
         self.timestamp_is_end = timestamp_is_end
+        self._cross_check_for_proc_files()
 
     #--------------------------------------------------------------------------
     ### Class methods pre-CardConvert ###
     #--------------------------------------------------------------------------
+
+    def _cross_check_for_proc_files(self):
+        
+        archive_path = su.get_path(base_path='data', data_stream='flux_fast',
+                                   site=self.SiteName, sub_dirs='TOB3',
+                                   check_exists=True)        
+        archived_files = [x.name for x in archive_path.rglob('TOB3*.dat')]
+        raw_files = self.get_raw_files()
+        dupes_list = [x for x in raw_files if x in archived_files]
+        if dupes_list:
+            raise FileExistsError(
+                'The following files have already been parsed: {}'
+                .format(', '.join(dupes_list))
+                )
 
     def get_bale_interval(self):
 
@@ -109,7 +124,7 @@ class CardConvert_parser():
 
         """Return the site-specific raw data path"""
 
-        data_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+        data_path = su.get_path(base_path='data', data_stream='flux_fast',
                                 site=self.SiteName, sub_dirs='TMP',
                                 check_exists=True)
         if self.understorey_flag:
@@ -131,6 +146,8 @@ class CardConvert_parser():
         all_files = [x.name for x in path.glob('*')]
         raw_files = [x.name for x in path.glob('TOB3*.dat') 
                      if self.in_format in x.name]
+        if not raw_files:
+            raise FileNotFoundError('No raw files to parse!')
         if not all_files == raw_files:
             raise RuntimeError('Non-{} files present in TMP directory! '
                                'Please remove these files and try again!'
@@ -151,7 +168,7 @@ class CardConvert_parser():
         sub_dirs_list = [split_dict['Format'], year_month]
         if not split_dict['Format'] == 'TOB3':
             sub_dirs_list += [split_dict['Day']]
-        target_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+        target_path = su.get_path(base_path='data', data_stream='flux_fast',
                                   sub_dirs='/'.join(sub_dirs_list), 
                                   site=self.SiteName)
         if self.understorey_flag:
@@ -318,7 +335,7 @@ def _make_dir(file_name):
     site = split_dict['Site']
     if 'Under' in site:
         site = site.replace
-    target_path = su.get_path(base_path='data', data_stream='flux_raw_fast',
+    target_path = su.get_path(base_path='data', data_stream='flux_fast',
                               sub_dirs='/'.join(sub_dirs_list), 
                               site=split_dict['Site'])
     try: 
@@ -398,8 +415,6 @@ if __name__ == "__main__":
         site.replace('Under', '')
     else:
         under = False
-    base_logger_path = (r'E:/Cloudstor/Shared/EcoSystemProcesses/Sites/'
-                        '{}/Data/Flux/Logs')
     logger = _set_logger(site=site)
     logger.info('Raw file received - begin processing for site {}'.format(site))
     logger.info('Running TOA5 format conversion with CardConvert_parser')
@@ -420,7 +435,8 @@ if __name__ == "__main__":
         else: logger.warning(msg)
     except Exception as e:
         logger.error('CardConvert processing failed! Message: {}'
-                     .format(e)); sys.exit()
+                     .format(e))
+        sys.exit()
     logger.info('Renaming and moving parsed files...')
     try:
         cc_parser.parse_converted_files()

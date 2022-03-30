@@ -256,33 +256,12 @@ def make_site_info_TOA5(site, num_to_str=None):
     return toa5_class
 #------------------------------------------------------------------------------
 
-# #------------------------------------------------------------------------------
-# def copy_latest_phenocam_file(site, img_type='true'):
-    
-#     latest_file = get_latest_phenocam_file(site=site, img_type=img_type)
-#     destination = (
-#         su.get_path(base_path='generic_rtmc_images', check_exists=True) / 
-#         '{0}_phenocam_{1}.jpg'.format(site, img_type)
-#         )
-#     shutil.copy(latest_file, destination)
-# #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def copy_latest_phenocam_files(img_type='true'):
-    
-#     for site in SITES:
-#         try:
-#             copy_latest_phenocam_file(site=site, img_type=img_type)
-#         except (FileNotFoundError, RuntimeError):
-#             continue
-# #------------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
 def get_latest_10Hz_file(site):
     
     data_path = (
-        su.get_path(base_path='data', data_stream='flux_raw_fast',
-                    site=site, check_exists=True) / 'TOB3'
+        su.get_path(base_path='data', data_stream='flux_fast',
+                    site=site, check_exists=True)
         )
     try:
         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
@@ -357,10 +336,10 @@ def get_latest_10Hz_files():
 if __name__ == "__main__":
     
     # If passed 'update_10Hz' as argument:
-    if sys.argv[1] == 'update_10Hz':
-        path = su.get_path(base_path='generic_RTMC_files') / 'latest_fast_data.dat'
-        a = get_latest_10Hz_files()
-        a.output_file(path)
+    # if sys.argv[1] == 'update_10Hz':
+    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_fast_data.dat'
+    #     a = get_latest_10Hz_files()
+    #     a.output_file(path)
 
     # # If passed 'update_PhenoImages' as argument:
     # if sys.argv[1] == 'update_PhenoImages':
@@ -380,19 +359,20 @@ if __name__ == "__main__":
     if sys.argv[1] == 'update_site_details':
         try:
             site = sys.argv[2]
-            path = su.get_path(base_path='data', data_stream='flux_raw_RTMC',
-                               site=site, check_exists=True) / 'site_details.dat'
+            path = (
+                su.get_path(base_path='generic_RTMC_files', check_exists=True) / 
+                '{}_details.dat'.format(site)
+                )
             a = make_site_info_TOA5(site=site, num_to_str=['Start year'])
             a.output_file(path)
         except IndexError: # If not passed a site name from batch file
             site_list = su.get_site_list()
-            for site in site_list.index:
+            for site in SITES:
                 try:
                     path = (
-                        su.get_path(base_path='data', 
-                                    data_stream='flux_raw_RTMC',
-                                    site=site, check_exists=True) / 
-                        'site_details.dat'
+                        su.get_path(base_path='generic_RTMC_files', 
+                                    check_exists=True) / 
+                        '{}_details.dat'.format(site)
                         )
                     a = make_site_info_TOA5(site=site, num_to_str=['Start year'])
                     a.output_file(path)
