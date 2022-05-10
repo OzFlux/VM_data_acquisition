@@ -220,7 +220,7 @@ def make_site_info_TOA5(site, num_to_str=None):
     details = su.get_site_details(site)
     sun = tf.get_sunrise_sunset_local(lat=str(details.Latitude), 
                                       lon=str(details.Longitude), 
-                                      elev=details.Altitude, 
+                                      elev=details.Elevation, 
                                       tz=details['Time zone'], 
                                       date=dt.datetime.now())
     utc_offset = tf.get_timezone_utc_offset(details['Time zone'], 
