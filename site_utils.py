@@ -28,6 +28,7 @@ def get_site_list():
                        converters=convert_dict)
     df.Latitude = df.Latitude.round(6)
     df.Longitude = df.Longitude.round(6)
+    df.rename({'Altitude': 'Elevation'}, axis=1, inplace=True)
     df.index = df.Site
     return df.drop('Site', axis=1)
 #------------------------------------------------------------------------------
