@@ -64,6 +64,19 @@ b = rp.rtmc_parser(
     )
 component_list = a.rtmc_df.loc['Meteorology'].index.tolist()
 sub_list = [x for x in component_list if 'Digital' in x]
+
+
+screen='System'
+component='AH_TimeSeriesChart'
+the_element = b.get_component_elements(screen=screen, component=component)
+long_names = (
+    a.rtmc_df.sort_index().loc[(screen, component), 'long_name']
+    .item()
+    .split(',')
+    )
+l = [a.get_rtmc_variable(long_name=long_name) for long_name in long_names]
+editor = rp.time_series_editor(elem=the_element)
+
 # d = {}
 # for var in sub_list:
 #     d[var] = {

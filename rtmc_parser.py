@@ -13,6 +13,65 @@ import pdb
 
 path='/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
 
+#------------------------------------------------------------------------------
+### CONSTANTS
+#------------------------------------------------------------------------------
+COMPONENT_DICT = {'Image': '10702',
+                  'Digital': '10101',
+                  'TimeSeriesChart': '10602',
+                  'Time': '10108',
+                  'BasicStatusBar': '10002',
+                  'MultiStateAlarm': '10207',
+                  'CommStatusAlarm': '10205',
+                  'MultiStateImage': '10712',
+                  'NoDataAlarm': '10204'}
+#------------------------------------------------------------------------------
+
+class time_series_editor():
+
+    def __init__(self, elem):
+
+        self.elem = elem
+
+    def get_traces(self):
+
+        return self.elem.findall('Traces/traces')
+
+    def get_trace_labels(self):
+
+        return [x.attrib['label'] for x in self.get_traces()]
+
+    def get_trace_variables(self):
+
+        return [x.find('calculation').text for x in self.get_traces()]
+
+    def get_trace_by_label(self, label):
+
+        elems = self.get_traces()
+        for x in elems:
+            try:
+                if x.attrib['label'] == label:
+                    return x
+            except KeyError:
+                next
+        return
+
+    def get_trace_var_by_label(self, label):
+
+        elem = self.get_trace_by_label(label=label)
+        return elem.find('calculation')
+
+    def set_trace_variable(self, label, variable):
+
+        elems = self.get_traces()
+        for x in elems:
+            try:
+                if x.attrib['label'] == label:
+                    return x
+            except KeyError:
+                next
+        return
+
 class rtmc_parser():
 
     def __init__(self, path):

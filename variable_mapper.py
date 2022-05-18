@@ -7,8 +7,8 @@ Created on Thu Dec 16 07:31:34 2021
 
 To do:
     - deal with variables that have multiple labels
-    - why does it take so long to create the rtmc constructor? Check where...
-    - do I need a child class for the rtmc constructor? Maybe use a setter instead?
+    - deal with compound variables breaking when subject to statistics
+      (e.g. try getting the max of VPD)
 """
 
 import numpy as np
@@ -32,10 +32,51 @@ STAT_DICT = {'max_limited': 'MaxRunOverTimeWithReset',
              'total_limited': 'TotalOverTimeWithReset',
              'max': 'MaxRunOverTime', 'min': 'MinRunOverTime',
              'total': 'TotalOverTime'}
+COMPONENT_DICT = {'Image': '10702',
+                  'Digital': '10101',
+                  'TimeSeriesChart': '10602',
+                  'Time': '10108',
+                  'BasicStatusBar': '10002',
+                  'MultiStateAlarm': '10207',
+                  'CommStatusAlarm': '10205',
+                  'MultiStateImage': '10712',
+                  'NoDataAlarm': '10204'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class rtmc_component_mapper():
+
+    def __init__(self, path, screen):
+
+        self.rtmc_df = _make_component_df(path=path).loc[screen]
+        self.screen = screen
+
+    def get_component_attr(self, component, attr=None):
+
+        s = self.rtmc_df.loc[component]
+        if not attr:
+            return s
+        return s.loc[attr]
+
+    def get_TimeSeriesChart_aliases(self, chart_name):
+
+        component_type = chart_name.split('_')[-1]
+        if not component_type == 'TimeSeriesChart':
+            raise KeyError('chart_name argument does not contain a recognised'
+                           ' component type!')
+        s = self.rtmc_df.loc[chart_name]
+        return dict(zip(
+            s.label.split(','),
+            s.long_name.split(',')
+            )
+            )
+    #--------------------------------------------------------------------------
+
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -62,8 +103,10 @@ class _rtmc_constructor():
         self.alias_name = data_dict['alias_name']
         self.rtmc_name = data_dict['rtmc_name']
         self.parse_as_raw = data_dict['parse_as_raw']
+        self.alias_map = self._get_alias_map()
+        self.rtmc_output = self._get_rtmc_output()
 
-    def get_alias_map(self):
+    def _get_alias_map(self):
         """
         Returns
         -------
@@ -78,7 +121,7 @@ class _rtmc_constructor():
             joiner='\r\n'
         )
 
-    def get_rtmc_output(self, as_alias=False):
+    def _get_rtmc_output(self, as_alias=False):
 
         if not as_alias:
             if self.parse_as_raw:
@@ -107,14 +150,34 @@ class _rtmc_constructor():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class _rtmc_comp_constructor(_rtmc_constructor):
+class stat_generator():
 
-    def __init__(self, data_dict, component_dict):
+    def __init__(self, eval_str, alias_map=None)->str:
 
-        super().__init__(data_dict)
-        self.interval = component_dict['interval']
-        self.operation = component_dict['operation']
-        self.axis = component_dict['axis']
+        self.eval_str = eval_str
+        self.alias_map = alias_map
+
+    def _str_joiner(self, str_list, joiner='\r\n\r\n'):
+
+        return joiner.join(str_list)
+
+    def get_absolute_statistic(self, statistic):
+
+        if not self.alias_map:
+            return '{0}({1})'.format(STAT_DICT[statistic], self.eval_str)
+        new_eval_str = '{0}({1})'.format(STAT_DICT[statistic], self.eval_str)
+        return self._str_joiner([self.alias_map, new_eval_str])
+
+    def get_interval_statistic(self, statistic, interval):
+
+        start = COND_DICT['start'].format(START_DICT[interval])
+        # alias = self.alias_map
+        eval_string = (
+            '{0}({1},Timestamp({2}),{3})'
+            .format(STAT_DICT[statistic], self.eval_string,
+                    self.rtmc_name[0], RESET_DICT[interval])
+            )
+        return self._str_joiner([start, self.alias_map, eval_string])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -170,7 +233,8 @@ class variable_mapper():
         if isinstance(pd_obj, pd.core.frame.DataFrame):
             raise NotImplementedError('doesnt work for dataframes yet!')
         parse_list = ['variable_units', 'rtmc_name', 'alias_name',
-                      'eval_string', 'parse_as_raw']
+                      'eval_string', 'parse_as_raw', 'disable',
+                      'default_value']
         parse_dict = pd_obj[parse_list].to_dict()
         output_dict = {x: [parse_dict[x]] for x in ['rtmc_name', 'alias_name']}
         parse_dict.update(output_dict)
@@ -190,6 +254,55 @@ class variable_mapper():
         data_dict['long_name'] = long_name
         data_dict['parse_as_raw'] = False
         return data_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_two_variable_operation(self, long_name_first, long_name_second):
+
+        ops_dict = {}
+        first_var = self.get_rtmc_variable(long_name=long_name_first)
+        second_var = self.get_rtmc_variable(long_name=long_name_second)
+        data_dict = {}
+        data_dict['alias_name'] = first_var.alias_name + second_var.alias_name
+        data_dict['rtmc_name'] = first_var.rtmc_name + second_var.rtmc_name
+        data_dict['eval_string'] = (
+            '{0}-{1}'.format(first_var.eval_string, second_var.eval_string)
+            )
+        data_dict['variable_units'] = first_var.variable_units
+        data_dict['long_name'] = (
+            'Difference between {0} and {1}'.format(first_var.long_name,
+                                                    second_var.long_name)
+            )
+        data_dict['parse_as_raw'] = False
+        return data_dict    # #--------------------------------------------------------------------------
+    # def get_rtmc_component_variables(self, screen, component):
+
+    #     rtmc_dict = self.rtmc_df.loc[(screen, component)].to_dict()
+    #     rtmc_dict['Screen'] = screen
+    #     rtmc_dict['Component'] = component
+    #     name_list = rtmc_dict['long_name'].split(',')
+    #     try:
+    #         axis_list = rtmc_dict['axis'].split(',')
+    #     except AttributeError:
+    #         axis_list = ['Left'] * len(name_list)
+    #     if not len(name_list) == len(axis_list):
+    #         raise RuntimeError('Number of comma-separated items in sheet '
+    #                            '"RTMC_components" must be the same for '
+    #                            'columns "Long name" and "Axis"!')
+    #     obj_list = []
+    #     for i, this_name in enumerate(name_list):
+    #         try:
+    #             data_dict = self.get_raw_variable(long_name=this_name)
+    #         except KeyError:
+    #             data_dict = self.get_calculated_variable(long_name=this_name)
+    #         this_axis = axis_list[i]
+    #         rtmc_dict['axis'] = this_axis
+    #         obj_list.append(
+    #             _rtmc_comp_constructor(data_dict=data_dict,
+    #                                    component_dict=rtmc_dict)
+    #             )
+    #     return obj_list
+    # #--------------------------------------------------------------------------
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -292,6 +405,16 @@ class variable_mapper():
         return rtmc_dict
     #--------------------------------------------------------------------------
 
+    # #--------------------------------------------------------------------------
+    # def _calculate_rh(self):
+
+    #     rho_dict = self._calculate_molar_density()
+    #     pdb.set_trace()
+    #     rtmc_dict['eval_string'] = 'iif(Vbat>-1,1,1)'
+    #     rtmc_dict['long_name'] = 'Records'
+    #     return rtmc_dict
+    # #--------------------------------------------------------------------------
+
     #--------------------------------------------------------------------------
     def _calculate_vpd(self):
         """
@@ -322,36 +445,6 @@ class variable_mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_rtmc_component_variables(self, screen, component):
-
-        rtmc_dict = self.rtmc_df.loc[(screen, component)].to_dict()
-        rtmc_dict['Screen'] = screen
-        rtmc_dict['Component'] = component
-        name_list = rtmc_dict['long_name'].split(',')
-        try:
-            axis_list = rtmc_dict['axis'].split(',')
-        except AttributeError:
-            axis_list = ['Left'] * len(name_list)
-        if not len(name_list) == len(axis_list):
-            raise RuntimeError('Number of comma-separated items in sheet '
-                               '"RTMC_components" must be the same for '
-                               'columns "Long name" and "Axis"!')
-        obj_list = []
-        for i, this_name in enumerate(name_list):
-            try:
-                data_dict = self.get_raw_variable(long_name=this_name)
-            except KeyError:
-                data_dict = self.get_calculated_variable(long_name=this_name)
-            this_axis = axis_list[i]
-            rtmc_dict['axis'] = this_axis
-            obj_list.append(
-                _rtmc_comp_constructor(data_dict=data_dict,
-                                       component_dict=rtmc_dict)
-                )
-        return obj_list
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def get_rtmc_variable(self, long_name, label=None):
 
         try:
@@ -361,7 +454,39 @@ class variable_mapper():
         return _rtmc_constructor(data_dict=data_dict)
     #--------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
+    def VarName_2_LongName(self, var_name):
+
+        bool_idx = self.master_df['variable_name'] == var_name
+        if not any(bool_idx):
+            raise IndexError('Unknown variable')
+        return self.master_df[bool_idx].index.item()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def LongName_2_VarName(self, long_name):
+
+        return self.master_df.loc[long_name, 'variable_name']
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_TimeSeriesChart_aliases(self, screen_name, chart_name):
+
+        s = self.rtmc_df.loc[screen_name, chart_name]
+        return dict(zip(
+            s.label.item().split(','),
+            s.long_name.item().split(',')
+            )
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_Digital_LongName(self, screen_name, digital_name):
+
+        return (
+            self.rtmc_df.loc[(screen_name, digital_name), 'long_name'].item()
+            )
+    #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### PRIVATE FUNCTIONS ###
@@ -403,8 +528,8 @@ def _make_component_df(path):
     )
     df.drop(labels=['Screen name', 'RTMC component name'],
             axis=1, inplace=True)
-    df.columns = ['long_name', 'operation', 'interval', 'axis']
-    return df
+    df.columns = ['long_name', 'label', 'operation', 'interval', 'axis']
+    return df.sort_index()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -465,7 +590,9 @@ def _make_site_df(path, site):
                     'Variable units': 'site_variable_units',
                     'Table name': 'table_name',
                     'Logger name': 'logger_name',
-                    'File data source': 'file_data_source'},
+                    'File data source': 'file_data_source',
+                    'Disable': 'disable',
+                    'Default value': 'default_value'},
                    axis=1, inplace=True)
 
     # Write variable standard names and unit strings
@@ -514,4 +641,8 @@ def _make_site_df(path, site):
 def _str_joiner(str_list, joiner='\r\n\r\n'):
 
     return joiner.join(str_list)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+### PUBLIC FUNCTIONS
 #------------------------------------------------------------------------------
