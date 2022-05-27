@@ -29,9 +29,9 @@ COMPONENT_DICT = {'Image': '10702',
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class digital_editor():
+class Digital_editor():
 
-    """Get and set main calculation elements"""
+    """Edit RTMC component elements"""
 
     def __init__(self, elem):
 
@@ -42,52 +42,65 @@ class digital_editor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_element_calculation_text(self):
+    def get_set_element_calculation_text(self, text=None):
 
-        return self.elem.find('calculation').text
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def set_element_calculation_text(self, text):
+        """Get and set calculation element"""
 
         calculation_element = self.elem.find('calculation')
+        if not text:
+            return calculation_element.text
         calculation_element.text = text
+
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class BasicStatusBar_editor(digital_editor):
-
-    """Get and set main and pointer calculation elements"""
+class BasicStatusBar_editor(Digital_editor):
 
     #--------------------------------------------------------------------------
     ### METHODS
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_pointer_calculation_text(self, pointer):
+    def get_set_pointer_calculation_text(self, pointer, text=None):
 
+        """Get and set pointer calculation element"""
         d = {'max': 'max_pointer', 'min': 'min_pointer'}
-
-        return self.elem.find('./{}/calculation'.format(d[pointer])).text
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def set_pointer_calculation_text(self, pointer, text):
-
-        d = {'max': 'max_pointer', 'min': 'min_pointer'}
-
-        calculation_element = (
-            self.elem.find('./{}/calculation'.format(d[pointer]))
-            )
-        calculation_element.text = text
+        element = self.elem.find('./{}/calculation'.format(d[pointer]))
+        if not text:
+            return element.text
+        element.text = text
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class time_editor(digital_editor):
+class MultiStateAlarm_editor(Digital_editor):
+
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class MultiStateImage_editor(Digital_editor):
+
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class NoDataAlarm_editor(Digital_editor):
+
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class CommStatusAlarm_editor(Digital_editor):
+
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class Time_editor():
 
     """Get and set main calculation elements"""
 
@@ -118,7 +131,7 @@ class time_editor(digital_editor):
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class time_series_editor():
+class TimeSeriesChart_editor():
 
     def __init__(self, elem):
 
@@ -153,24 +166,21 @@ class time_series_editor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_trace_calculation_by_label(self, label):
+    def get_set_trace_calculation_by_label(self, label, text=None):
 
         elem = self.get_trace_element_by_label(label=label)
-        return elem.find('calculation').text
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def set_trace_calculation_by_label(self, label, variable):
-
-        root_elem = self.get_trace_element_by_label(label=label)
-        calculation_elem = root_elem.find('calculation')
-        calculation_elem.text = variable
+        calculation_elem = elem.find('calculation')
+        if not text:
+            return calculation_elem.text
+        calculation_elem.text = text
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class rtmc_parser():
+
+    """Traverse xml tree, find and edit components and write changes"""
 
     def __init__(self, path):
 
@@ -186,6 +196,21 @@ class rtmc_parser():
 
     #--------------------------------------------------------------------------
     def get_screen_element(self, screen=None):
+        """
+        Get the root element for a given screen
+
+        Parameters
+        ----------
+        screen : str, optional
+            Name of the screen for which to return the element.
+            The default is None.
+
+        Returns
+        -------
+        xml_element
+            Returns list of xml screen elements if screen is None.
+
+        """
 
         if not screen:
             return self.root.findall('./Screens/screen')
@@ -210,28 +235,34 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_component_element_by_name(self, screen, component_name=None):
+    def get_component_element_by_name(self, screen, component_name=None,
+                                      raise_if_missing=True):
 
         screen_element = self.get_screen_element(screen=screen)
         if not component_name:
             return screen_element.findall('./Components/component')
-        return (
-            screen_element.find('./Components/component[@name="{}"]'
-                                 .format(component_name))
+        component_element = (
+            screen_element.find(
+                './Components/component[@name="{}"]'.format(component_name)
+                )
             )
+        if not component_element:
+            if raise_if_missing:
+                raise KeyError(
+                    'Could not find component {}'.format(component_name)
+                    )
+        return component_element
     #--------------------------------------------------------------------------
 
-    # #--------------------------------------------------------------------------
-    # def Digital_editor(self, digital_element):
+    #--------------------------------------------------------------------------
+    def get_edited_screen_component_elements(self, screen):
 
-    #     return digital_editor(elem=digital_element)
-    # #--------------------------------------------------------------------------
-
-    # #--------------------------------------------------------------------------
-    # def TimeSeriesChart_editor(self, ts_element):
-
-    #     return time_series_editor(elem=ts_element)
-    # #--------------------------------------------------------------------------
+        components = self.get_component_element_by_name(screen=screen)
+        return [
+            x.attrib['name'] for x in components if
+            x.find('comp_name_manually_editted').text == 'true'
+            ]
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def write_to_file(self, write_to_self=False):
@@ -246,4 +277,26 @@ class rtmc_parser():
             input_file_path.parent / (input_file_name + '_new' + file_ext)
             )
         self.tree.write(output_file_path)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_editor(self, editor_type, element):
+
+        EDITOR_DICT = {'Image': None,
+                       'Digital': Digital_editor,
+                       'TimeSeriesChart': TimeSeriesChart_editor,
+                       'Time': Time_editor,
+                       'BasicStatusBar': BasicStatusBar_editor,
+                       'MultiStateAlarm': MultiStateAlarm_editor,
+                       'CommStatusAlarm': CommStatusAlarm_editor,
+                       'MultiStateImage': MultiStateImage_editor,
+                       'NoDataAlarm': NoDataAlarm_editor}
+
+        return EDITOR_DICT[editor_type](element)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def rename_component_element(self, element, new_name):
+
+        element.attrib['name'] = new_name
     #--------------------------------------------------------------------------
