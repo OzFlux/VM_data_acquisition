@@ -22,7 +22,8 @@ path = '/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-COND_DICT = {'start': 'StartRelativeToNewest({},OrderCollected);'}
+COND_DICT = {'start': 'StartRelativeToNewest({},OrderCollected);',
+             'start_absolute': 'StartAtRecord(0,0,OrderCollected);'}
 RESET_DICT = {'daily': 'RESET_DAILY', 'weekly': 'RESET_WEEKLY',
               'monthly': 'RESET_MONTHLY', }
 START_DICT = {'minute': 'nsecPerMinute', 'half-hourly': 'nsecPerMinute*30',
@@ -33,15 +34,6 @@ STAT_DICT = {'max_limited': 'MaxRunOverTimeWithReset',
              'total_limited': 'TotalOverTimeWithReset',
              'max': 'MaxRunOverTime', 'min': 'MinRunOverTime',
              'total': 'TotalOverTime'}
-# COMPONENT_DICT = {'Image': '10702',
-#                   'Digital': '10101',
-#                   'TimeSeriesChart': '10602',
-#                   'Time': '10108',
-#                   'BasicStatusBar': '10002',
-#                   'MultiStateAlarm': '10207',
-#                   'CommStatusAlarm': '10205',
-#                   'MultiStateImage': '10712',
-#                   'NoDataAlarm': '10204'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -96,9 +88,9 @@ class rtmc_component_mapper():
     def get_label_mapping(self, chart_name):
 
         s = self.rtmc_df.loc[chart_name]
-        long_name_list = s.long_name.split(',')
+        long_name_list = [x.strip() for x in s.long_name.split(',')]
         try:
-            label_list = s.label.split(',')
+            label_list = [x.strip() for x in s.label.split(',')]
         except AttributeError as e:
             raise Exception(
                 'No labels associated with {}'.format(chart_name)
@@ -139,6 +131,7 @@ class _rtmc_constructor():
         self.rtmc_output = self._get_rtmc_output()
         self.default_value = data_dict['default_value']
 
+    #--------------------------------------------------------------------------
     def _get_alias_map(self):
         """
         Returns
@@ -153,14 +146,18 @@ class _rtmc_constructor():
              for x in zip(self.alias_name, self.rtmc_name)],
             joiner='\r\n'
         )
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def _get_rtmc_output(self, as_alias=False):
 
         if not as_alias:
             if self.parse_as_raw:
                 return _str_joiner(self.rtmc_name)
         return _str_joiner([self.alias_map, self.eval_string])
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_statistic(self, statistic, interval=None):
 
         if 'limited' in statistic:
@@ -174,7 +171,9 @@ class _rtmc_constructor():
         raise NotImplementedError(
             'No statistical operation named {}'.format(statistic)
             )
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_interval_statistic(self, statistic, interval):
 
         start = COND_DICT['start'].format(START_DICT[interval])
@@ -185,7 +184,9 @@ class _rtmc_constructor():
                     self.rtmc_name[0], RESET_DICT[interval])
             )
         return _str_joiner([start, alias, eval_string])
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_absolute_statistic(self, statistic):
 
         eval_string = self.rtmc_output
@@ -194,45 +195,30 @@ class _rtmc_constructor():
         alias = self.alias_map
         eval_string = '{0}({1})'.format(STAT_DICT[statistic], eval_string)
         return _str_joiner([alias, eval_string])
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
+    def get_pct_min_max(self):
+
+        start = COND_DICT['start_absolute']
+        alias = self.alias_map
+        base_string = '({0}-MinRun({0}))/(MaxRun({0})-MinRun({0}))*100'
+        if self.parse_as_raw:
+            eval_string = base_string.format(self.alias_name[0])
+        else:
+            eval_string = base_string.format(self.eval_string)
+        return _str_joiner([start, alias, eval_string])
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def subtract_last(self):
 
         eval_string = '{0}-Last({0})'.format(self.rtmc_output)
         start = COND_DICT['start'].format(START_DICT['hourly'])
         return _str_joiner([start, eval_string])
-
+    #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# class stat_generator():
-
-#     def __init__(self, eval_str, alias_map=None)->str:
-
-#         self.eval_str = eval_str
-#         self.alias_map = alias_map
-
-#     def _str_joiner(self, str_list, joiner='\r\n\r\n'):
-
-#         return joiner.join(str_list)
-
-#     def get_absolute_statistic(self, statistic):
-
-#         if not self.alias_map:
-#             return '{0}({1})'.format(STAT_DICT[statistic], self.eval_str)
-#         new_eval_str = '{0}({1})'.format(STAT_DICT[statistic], self.eval_str)
-#         return self._str_joiner([self.alias_map, new_eval_str])
-
-#     def get_interval_statistic(self, statistic, interval):
-
-#         start = COND_DICT['start'].format(START_DICT[interval])
-#         eval_string = (
-#             '{0}({1},Timestamp({2}),{3})'
-#             .format(STAT_DICT[statistic], self.eval_string,
-#                     self.rtmc_name[0], RESET_DICT[interval])
-#             )
-#         return self._str_joiner([start, self.alias_map, eval_string])
-# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class variable_mapper():
@@ -304,7 +290,9 @@ class variable_mapper():
                             'Absolute humidity sensor': self._calculate_AH,
                             'Saturation vapour pressure': self._calculate_es,
                             'Vapour pressure': self._calculate_e,
-                            'Records': self._calculate_records}
+                            'Records': self._calculate_records,
+                            'Molar density': self._calculate_molar_density,
+                            'Dew point temperature': self._calculate_Td}
         data_dict = constructor_dict[long_name]()
         data_dict['long_name'] = long_name
         data_dict['parse_as_raw'] = False
@@ -315,7 +303,6 @@ class variable_mapper():
     #--------------------------------------------------------------------------
     def get_two_variable_operation(self, long_name_first, long_name_second):
 
-        ops_dict = {}
         first_var = self.get_variable(long_name=long_name_first)
         second_var = self.get_variable(long_name=long_name_second)
         data_dict = {}
@@ -370,6 +357,25 @@ class variable_mapper():
         new_dict = {'eval_string': eval_string, 'variable_units': 'g/m^3'}
         new_dict.update({x: temp_df[x].tolist() for x in temp_df.columns})
         return new_dict
+    # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    def _calculate_Td(self):
+
+        # B1*(ln(RH/100) + (A1*t)/(B1 +t)))/(A1-ln(RH/100)-A1*t/(B1+t))
+        A1 = 17.625
+        B1 = 243.04
+        rh_dict = self._get_raw_variable(long_name='Relative humidity')
+        Ta_dict = self._get_raw_variable(long_name='Air temperature')
+        Ta_dict['rtmc_name'] += rh_dict['rtmc_name']
+        Ta_dict['alias_name'] += rh_dict['alias_name']
+        eval_string = (
+            '{1}*(ln({2}/100)+({0}*{3})/({1}+{3})))/'
+            '({0}-ln({2}/100)-{0}*{3}/({1}+{3}))'
+            .format(A1, B1, rh_dict['eval_string'], Ta_dict['eval_string'])
+            )
+        Ta_dict['eval_string'] = eval_string
+        return Ta_dict
     # -------------------------------------------------------------------------
 
     # -------------------------------------------------------------------------
@@ -476,31 +482,31 @@ class variable_mapper():
                 )
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def VarName_2_LongName(self, var_name):
+    # #--------------------------------------------------------------------------
+    # def VarName_2_LongName(self, var_name):
 
-        bool_idx = self.master_df['variable_name'] == var_name
-        if not any(bool_idx):
-            raise IndexError('Unknown variable')
-        return self.master_df[bool_idx].index.item()
-    #--------------------------------------------------------------------------
+    #     bool_idx = self.master_df['variable_name'] == var_name
+    #     if not any(bool_idx):
+    #         raise IndexError('Unknown variable')
+    #     return self.master_df[bool_idx].index.item()
+    # #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def LongName_2_VarName(self, long_name):
+    # #--------------------------------------------------------------------------
+    # def LongName_2_VarName(self, long_name):
 
-        return self.master_df.loc[long_name, 'variable_name']
-    #--------------------------------------------------------------------------
+    #     return self.master_df.loc[long_name, 'variable_name']
+    # #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_TimeSeriesChart_aliases(self, screen_name, chart_name):
+    # #--------------------------------------------------------------------------
+    # def get_TimeSeriesChart_aliases(self, screen_name, chart_name):
 
-        s = self.rtmc_df.loc[screen_name, chart_name]
-        return dict(zip(
-            s.label.item().split(','),
-            s.long_name.item().split(',')
-            )
-            )
-    #--------------------------------------------------------------------------
+    #     s = self.rtmc_df.loc[screen_name, chart_name]
+    #     return dict(zip(
+    #         s.label.item().split(','),
+    #         s.long_name.item().split(',')
+    #         )
+    #         )
+    # #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_Digital_LongName(self, screen_name, digital_name):
@@ -562,7 +568,7 @@ def _make_component_df(path):
             axis=1, inplace=True)
     df.columns = [
         'default_component_name', 'long_name', 'label', 'operation',
-        'interval', 'axis', 'compound_operation'
+        'interval', 'compound_operation', 'axis', 'disable'
         ]
     df = df.replace({np.nan: None})
     return df.sort_index()
@@ -623,6 +629,7 @@ def _make_site_df(path, site):
                                   names=['long_name', 'label'])
     )
     site_df.drop(labels=['Long name', 'Label'], axis=1, inplace=True)
+    site_df = site_df.loc[np.isnan(site_df.Disable)]
     site_df.rename({'Variable name': 'site_variable_name',
                     'Variable units': 'site_variable_units',
                     'Table name': 'table_name',
@@ -630,47 +637,50 @@ def _make_site_df(path, site):
                     'File data source': 'file_data_source',
                     'Disable': 'disable',
                     'Default value': 'default_value'},
-                   axis=1, inplace=True)
+                    axis=1, inplace=True)
 
     # Write variable standard names and unit strings
     master_df = _make_master_df(path=path)
+
+
     site_df = (
         site_df.assign(
             variable_name=[master_df.loc[x, 'variable_name'] for x in
                            site_df.index.get_level_values(level='long_name')]
             )
-    )
+        )
+
     site_df = (
         site_df.assign(
             variable_units=[master_df.loc[x, 'variable_units'] for x in
                             site_df.index.get_level_values(level='long_name')]
             )
-    )
+        )
 
     # Write flag to determine whether raw string can be used in rtmc output
     # strings (for example, raw variable string should not be used if
     # conversion of units is required)
     site_df = site_df.assign(
         parse_as_raw=lambda x: x.site_variable_units==x.variable_units
-    )
+        )
 
     # Write rtmc variable name for each variable (special table variable for
     # connection status - no variable name)
     site_df = site_df.assign(
         rtmc_name=lambda x: x.apply(_get_rtmc_variable_name, axis=1)
-    )
+        )
 
     # Write alias string for each variable
     site_df = site_df.assign(
         alias_name=lambda x: x.apply(_make_alias, axis=1)
-    )
+        )
 
     # Write alias conversion string for each variable
     site_df = site_df.assign(
         eval_string=lambda x: x.site_variable_units.map(units_dict).fillna(
             x.alias_name
+            )
         )
-    )
 
     return site_df
 #------------------------------------------------------------------------------

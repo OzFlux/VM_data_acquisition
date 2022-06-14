@@ -21,7 +21,12 @@ COMPONENT_DICT = {'Image': '10702',
                   'MultiStateAlarm': '10207',
                   'CommStatusAlarm': '10205',
                   'MultiStateImage': '10712',
-                  'NoDataAlarm': '10204'}
+                  'NoDataAlarm': '10204',
+                  'WindRose': '10606',
+                  'RotaryGauge': '10503'}
+RTMC_IMAGE_PATH = (
+    'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
+    )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -50,7 +55,6 @@ class Digital_editor():
         if not text:
             return calculation_element.text
         calculation_element.text = text
-
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -76,27 +80,21 @@ class BasicStatusBar_editor(Digital_editor):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class MultiStateAlarm_editor(Digital_editor):
+class Image_editor():
 
-    pass
-#------------------------------------------------------------------------------
+    def __init__(self, elem):
 
-#------------------------------------------------------------------------------
-class MultiStateImage_editor(Digital_editor):
+        self.elem = elem
 
-    pass
-#------------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
+    def get_set_element_ImgName(self, text=None):
 
-#------------------------------------------------------------------------------
-class NoDataAlarm_editor(Digital_editor):
+        location_element = self.elem.find('image_name')
+        if not text:
+            return location_element.text
+        location_element.text = text
+    #--------------------------------------------------------------------------
 
-    pass
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class CommStatusAlarm_editor(Digital_editor):
-
-    pass
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -178,6 +176,33 @@ class TimeSeriesChart_editor():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class WindRose_editor(Digital_editor):
+
+    def __init__(self, elem):
+
+        self.elem = elem
+
+    #--------------------------------------------------------------------------
+    def get_set_wind_dir_column(self, text=None):
+
+        wind_dir_elem = self.elem.find('wind_speed_column_name')
+        if not text:
+            return wind_dir_elem
+        wind_dir_elem.text = text
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_set_wind_spd_column(self, text=None):
+
+        wind_spd_elem = self.elem.find('wind_direction_column_name')
+        if not text:
+            return wind_spd_elem
+        wind_spd_elem.text = text
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class rtmc_parser():
 
     """Traverse xml tree, find and edit components and write changes"""
@@ -221,17 +246,29 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_component_element_by_type(self, screen, component_type=None):
+    def get_component_element_by_type(self, screen, component_type=None,
+                                      look_in_groups=True):
 
         if component_type:
             component_idx = COMPONENT_DICT[component_type]
         screen_element = self.get_screen_element(screen=screen)
+        component_list = screen_element.findall('./Components/component')
         if not component_type:
-            return screen_element.findall('./Components/component')
-        return (
-            screen_element.findall('./Components/component[@type="{}"]'
-                                   .format(component_idx))
-            )
+            return component_list
+        if not look_in_groups:
+            return [
+                x for x in component_list if x.attrib['type'] == component_idx
+                ]
+        group_list = [x for x in component_list if x.attrib['type']=='10806']
+        component_list = [
+            x for x in component_list if x.attrib['type']==component_idx
+            ]
+        for group in group_list:
+            component_list += [
+                x for x in group.findall('Components/component') if
+                x.attrib['type'] in COMPONENT_DICT.values()
+                ]
+        return component_list
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -239,8 +276,11 @@ class rtmc_parser():
                                       raise_if_missing=True):
 
         screen_element = self.get_screen_element(screen=screen)
-        if not component_name:
-            return screen_element.findall('./Components/component')
+        try:
+            if not component_name:
+                return screen_element.findall('./Components/component')
+        except ValueError:
+            pdb.set_trace()
         component_element = (
             screen_element.find(
                 './Components/component[@name="{}"]'.format(component_name)
@@ -276,21 +316,24 @@ class rtmc_parser():
         output_file_path = (
             input_file_path.parent / (input_file_name + '_new' + file_ext)
             )
-        self.tree.write(output_file_path)
+        output_file_path = str(output_file_path)
+        self.tree.write(str(output_file_path))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_editor(self, editor_type, element):
 
-        EDITOR_DICT = {'Image': None,
+        EDITOR_DICT = {'Image': Image_editor,
                        'Digital': Digital_editor,
                        'TimeSeriesChart': TimeSeriesChart_editor,
                        'Time': Time_editor,
                        'BasicStatusBar': BasicStatusBar_editor,
-                       'MultiStateAlarm': MultiStateAlarm_editor,
-                       'CommStatusAlarm': CommStatusAlarm_editor,
-                       'MultiStateImage': MultiStateImage_editor,
-                       'NoDataAlarm': NoDataAlarm_editor}
+                       'MultiStateAlarm': Digital_editor,
+                       'CommStatusAlarm': Digital_editor,
+                       'MultiStateImage': Digital_editor,
+                       'NoDataAlarm': Digital_editor,
+                       'WindRose': WindRose_editor,
+                       'RotaryGauge': Digital_editor}
 
         return EDITOR_DICT[editor_type](element)
     #--------------------------------------------------------------------------
