@@ -36,7 +36,7 @@ def get_site_list():
 # #------------------------------------------------------------------------------
 # def get_data_path(site=None, data=None, sub_dirs=None, check_exists=False):
 
-#     """Use initialisation file to extract data path for site and data type"""    
+#     """Use initialisation file to extract data path for site and data type"""
 
 #     config = ConfigParser()
 #     config.read(pathlib.Path(__file__).parent / 'paths.ini')
@@ -63,7 +63,7 @@ def get_site_list():
 def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
              check_exists=False):
 
-    """Use initialisation file to extract data path for site and data type"""    
+    """Use initialisation file to extract data path for site and data type"""
 
     config = ConfigParser()
     config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
@@ -74,30 +74,24 @@ def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
     if base_path == 'data':
         if site:
             out_path = pathlib.Path(str(out_path).replace('<site>', site))
-    else:
-        if not out_path.exists():
-            raise FileNotFoundError('path does not exist')
-        return out_path
     if data_stream:
         if not data_stream in config['DATA_STREAM']:
-            pdb.set_trace()
             raise KeyError('data_stream arg must be one of: {}'
                            .format(', '.join(config['DATA_STREAM'])))
         out_path = out_path / config['DATA_STREAM'][data_stream]
         if sub_dirs:
             out_path = out_path / sub_dirs
-    if not check_exists: return out_path
-    if not out_path.exists():
-        raise FileNotFoundError('path does not exist')
-    else:
-        return out_path
+    if check_exists:
+        if not out_path.exists():
+            raise FileNotFoundError('path does not exist')
+    return out_path
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_base_path(to):
-    
+
     """Use initialisation file to extract base paths"""
-    
+
     config = ConfigParser()
     config.read(pathlib.Path(__file__).parent / 'paths.ini')
     if not to in config['BASE_PATH']:

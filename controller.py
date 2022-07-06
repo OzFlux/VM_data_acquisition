@@ -32,15 +32,18 @@ import site_utils as su
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
 PATH_TO_XL = '/home/unimelb.edu.au/imchugh/Desktop/site_variable_map.xlsx'
-PATH_TO_XML = '/home/unimelb.edu.au/imchugh/Documents/Calperum.rtmc2'
+PATH_TO_XML = '/home/unimelb.edu.au/imchugh/Documents/Calperum_new.rtmc2'
 PATH_TO_IMAGES = (
     'E:/Cloudstor/Network_documents/RTMC_files/Static_images/Site_images'
+    )
+PATH_TO_SITE_DETAILS = (
+    'E:/Cloudstor/Network_documents/RTMC_files/Static_data'
     )
 IMAGES_DICT = {'Contour_Image': '{}_contour.png',
                'SitePhoto_Image': '{}_tower.jpg',
                'MSLP_Image': 'mslp.png', 'Sat_Image': 'sat_img.jpg'}
-TIME_OFFSET_UNITS = {'min': '1', 'hr': '2'}
-SERVER_UTC_OFFSET = 10
+# TIME_OFFSET_UNITS = {'min': '1', 'hr': '2'}
+# SERVER_UTC_OFFSET = 10
 SCREENS_TO_PARSE = ['System', 'Meteorology', 'Turbulent_flux', 'Radiant_flux']
 #------------------------------------------------------------------------------
 
@@ -51,38 +54,27 @@ SCREENS_TO_PARSE = ['System', 'Meteorology', 'Turbulent_flux', 'Radiant_flux']
 #------------------------------------------------------------------------------
 def function_getter(element):
 
-    function_dict = {'BasicStatusBar': BasicStatusBar_function,
-                     'Digital': Digital_function,
-                     'MultiStateAlarm': MultiStateAlarm_function,
-                     'MultiStateImage': MultiStateImage_function,
-                     'CommStatusAlarm': CommStatusAlarm_function,
-                     'NoDataAlarm': NoDataAlarm_function,
-                     'Time': Time_function,
-                     'TimeSeriesChart': TimeSeriesChart_function,
-                     'WindRose': WindRose_function,
-                     'RotaryGauge': RotaryGauge_function,
-                     'Image': Image_function}
-
-    component_name = element.attrib['name']
-    component_type = component_name.split('_')[-1]
-    print ('    - Parsing component {}'.format(component_name))
-    try:
-        function_dict[component_type](element)
-    except KeyError:
-        print (
-            '        *** No algorithm for component type {} *** '
-            .format(component_type)
-               )
-        return
+    function_dict = {'10002': BasicStatusBar_function,
+                     '10101': Digital_function,
+                     '10207': MultiStateAlarm_function,
+                     '10712': MultiStateImage_function,
+                     '10205': CommStatusAlarm_function,
+                     '10204': NoDataAlarm_function,
+                     '10108': Time_function,
+                     '10602': TimeSeriesChart_function,
+                     '10606': WindRose_function,
+                     '10503': RotaryGauge_function,
+                     '10702': Image_function}
+    type_id = element.attrib['type']
+    function_dict[type_id](element=element)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def base_function(element):
 
     component_name = element.attrib['name']
-    component_type = component_name.split('_')[-1]
     details = rtmc_mapper.get_component_attr(component_name=component_name)
-    editor = parser.get_editor(editor_type=component_type, element=element)
+    editor = parser.get_editor(element=element)
     return details, editor
 #------------------------------------------------------------------------------
 
@@ -137,11 +129,13 @@ def Digital_function(element):
 def Image_function(element):
 
     image_name = element.attrib['name']
+    if not rtmc_mapper.use_custom_names:
+        image_name = rtmc_mapper.translate_component_name(image_name)
     file_str = IMAGES_DICT[image_name].format(site)
     full_path = pathlib.Path(PATH_TO_IMAGES) / file_str
-    text = str(full_path)
-    editor = parser.get_editor(editor_type='Image', element=element)
-    editor.get_set_element_ImgName(text=text)
+    windows_path_str = str(full_path).replace('/', '\\')
+    editor = parser.get_editor(element=element)
+    editor.get_set_element_ImgName(text=windows_path_str)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -186,18 +180,34 @@ def RotaryGauge_function(element):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def SetFileSource(site):
+
+    new_file_path = str(
+        pathlib.Path(PATH_TO_SITE_DETAILS) /
+        '{}_details.dat'.format(site)
+        )
+    editor = parser.get_file_source_editor()
+    editor.get_set_source_file(path=new_file_path)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def Time_function(element):
 
     details, editor = base_function(element=element)
     component_name = element.attrib['name']
-    if not component_name == 'UTC_Time':
-        return
-    constructor = var_mapper.get_variable(long_name='UTC offset')
-    time_offset = constructor.default_value
-    utc_offset = str(int(-(SERVER_UTC_OFFSET * 60 - time_offset * 60)))
-    time_units = TIME_OFFSET_UNITS['min']
-    editor.get_set_element_offset_text(text=str(utc_offset))
-    editor.get_set_element_offset_units_text(time_units)
+    ec_table = (
+        var_mapper.get_variable(long_name='Logger collect').rtmc_output
+        )
+    custom_name = (
+        rtmc_mapper.translate_component_name(component_name=component_name)
+        )
+    editor.get_set_element_calculation_text(text=ec_table)
+    if custom_name == 'UTC_Time':
+        utc_offset = (
+            var_mapper.get_variable(long_name='UTC offset').default_value
+            )
+        editor.get_set_element_offset_text(text=str(round(utc_offset * 60)))
+        editor.get_set_element_offset_units_text('1')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -212,7 +222,6 @@ def TimeSeriesChart_function(element):
             long_name = label_map[trace_label]
         except KeyError as e:
             if trace_label == 'Const': continue
-            pdb.set_trace()
             raise Exception('No long name entry for trace label {}'
                             .format(trace_label)) from e
         constructor = (
@@ -250,25 +259,39 @@ def WindRose_function(element):
 #------------------------------------------------------------------------------
 
 # Create the RTMC XML parser and site variable mapper
-site = 'Calperum' #sys.argv[1]
+site = 'Boyagin' #sys.argv[1]
+custom_names = False
 parser = rxp.rtmc_parser(path=PATH_TO_XML)
 var_mapper = vm.variable_mapper(path=PATH_TO_XL, site=site)
+
+# Edit project settings - site_details file source
+SetFileSource(site=site)
 
 # Iterate over the screen components
 for screen in SCREENS_TO_PARSE[:3]:
     print ('Editing components for Screen "{}":'.format(screen))
+
     # Create the rtmc component mapper
-    rtmc_mapper = vm.rtmc_component_mapper(path=PATH_TO_XL, screen=screen)
+    rtmc_mapper = vm.rtmc_component_mapper(
+        path=PATH_TO_XL, screen=screen, use_custom_names=custom_names
+        )
+
     # Iterate over components for each screen
-    for custom_name in rtmc_mapper.get_component_names():
-        try:
-            element = parser.get_component_element_by_name(
-                screen=screen, component_name=custom_name
-                )
-        except KeyError:
-            default_name = rtmc_mapper.get_default_name(custom_name)
-            element = parser.get_component_element_by_name(
-                screen=screen, component_name=default_name
+    for name in rtmc_mapper.get_component_names():
+        print ('    - Parsing component {}'.format(name))
+
+        # Get the individual component
+        element = parser.get_component_element_by_name(
+            screen=screen, component_name=name
             )
-            parser.rename_component_element(element=element, new_name=custom_name)
+
         function_getter(element=element)
+        # # Run the function
+        # try:
+        #     function_getter(element=element)
+        # except KeyError:
+        #     pdb.set_trace()
+        #     print (
+        #         '        *** No algorithm for component type {} *** '
+        #         .format(element.attrib['type'])
+        #             )

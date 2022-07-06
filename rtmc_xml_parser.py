@@ -24,6 +24,7 @@ COMPONENT_DICT = {'Image': '10702',
                   'NoDataAlarm': '10204',
                   'WindRose': '10606',
                   'RotaryGauge': '10503'}
+
 RTMC_IMAGE_PATH = (
     'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
     )
@@ -98,13 +99,33 @@ class Image_editor():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class Time_editor():
-
-    """Get and set main calculation elements"""
+class FileSource_editor():
 
     def __init__(self, elem):
 
         self.elem = elem
+
+    #--------------------------------------------------------------------------
+    def get_set_source_file(self, path=None):
+
+        settings_elem = self.elem.find('settings')
+        if not path:
+            return settings_elem.attrib['file-name']
+        settings_elem.attrib['file-name'] = path
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_set_source_name(self, name=None):
+
+        if not name:
+            return self.elem.attrib['name']
+        self.elem.attrib['name'] = name
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class Time_editor(Digital_editor):
 
     #--------------------------------------------------------------------------
     ### METHODS
@@ -185,7 +206,7 @@ class WindRose_editor(Digital_editor):
     #--------------------------------------------------------------------------
     def get_set_wind_dir_column(self, text=None):
 
-        wind_dir_elem = self.elem.find('wind_speed_column_name')
+        wind_dir_elem = self.elem.find('wind_direction_column_name')
         if not text:
             return wind_dir_elem
         wind_dir_elem.text = text
@@ -194,7 +215,7 @@ class WindRose_editor(Digital_editor):
     #--------------------------------------------------------------------------
     def get_set_wind_spd_column(self, text=None):
 
-        wind_spd_elem = self.elem.find('wind_direction_column_name')
+        wind_spd_elem = self.elem.find('wind_speed_column_name')
         if not text:
             return wind_spd_elem
         wind_spd_elem.text = text
@@ -214,9 +235,72 @@ class rtmc_parser():
         self.root = self.tree.getroot()
         self.parent_map = {c: p for p in self.tree.iter() for c in p}
         self.state_change = False
+        self._COMP_DICT = {
+            '10702': {'type_name': 'Image', 'function': Image_editor},
+            '10101': {'type_name': 'Digital', 'function': Digital_editor},
+            '10602': {'type_name': 'Time Series Chart',
+                      'function': TimeSeriesChart_editor},
+            '10106': {'type_name': 'Time', 'function': Time_editor},
+            '10108': {'type_name': 'Segmented Time', 'function': Time_editor},
+            '10002': {'type_name': 'Basic Status Bar',
+                      'function': BasicStatusBar_editor},
+            '10207': {'type_name': 'Multi-State Alarm',
+                      'function': Digital_editor},
+            '10205': {'type_name': 'Comm Status Alarm',
+                      'function': Digital_editor},
+            '10712': {'type_name': 'Multi-State Image',
+                      'function': Digital_editor},
+            '10204': {'type_name': 'No Data Alarm',
+                      'function': Digital_editor},
+            '10606': {'type_name': 'Wind Rose', 'function': WindRose_editor},
+            '10503': {'type_name': 'Rotary Gauge', 'function': Digital_editor}
+            }
 
     #--------------------------------------------------------------------------
     ### METHODS
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def add_element(self, parent_elem, child_elem):
+
+        parent_elem.append(child_elem)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def drop_element(self, parent_elem, child_elem):
+
+        parent_elem.remove(child_elem)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_editor(self, element):
+
+        funcs_dict = {
+            x: self._COMP_DICT[x]['function'] for x in self._COMP_DICT
+            }
+        try:
+            type_id = element.attrib['type']
+        except KeyError as e:
+            raise Exception(
+                'This does not appear to be a component element - '
+                'did not contain attribute "type"'
+                ) from e
+        try:
+            return funcs_dict[type_id](element)
+        except KeyError as e:
+            raise Exception(
+                'Component element of type {} is not defined!'
+                .format(type_id)
+                ) from e
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_editor_by_component_name(self, screen, component_name):
+
+        element = self.get_component_element_by_name(
+            screen=screen, component_name=component_name
+            )
+        return self.get_editor(element)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -276,11 +360,8 @@ class rtmc_parser():
                                       raise_if_missing=True):
 
         screen_element = self.get_screen_element(screen=screen)
-        try:
-            if not component_name:
-                return screen_element.findall('./Components/component')
-        except ValueError:
-            pdb.set_trace()
+        if not component_name:
+            return screen_element.findall('./Components/component')
         component_element = (
             screen_element.find(
                 './Components/component[@name="{}"]'.format(component_name)
@@ -305,41 +386,28 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_to_file(self, write_to_self=False):
+    def get_file_source_editor(self):
 
-        input_file_path = pathlib.Path(self.path)
-        if write_to_self:
-            self.tree.write(input_file_path)
-            return
-        file_ext = input_file_path.suffix
-        input_file_name = input_file_path.name.replace(file_ext, '')
-        output_file_path = (
-            input_file_path.parent / (input_file_name + '_new' + file_ext)
+        return FileSource_editor(
+            elem=self.root.find('Sources/source/[@name="Site_details"]')
             )
-        output_file_path = str(output_file_path)
-        self.tree.write(str(output_file_path))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_editor(self, editor_type, element):
+    def write_to_file(self, file_name):
 
-        EDITOR_DICT = {'Image': Image_editor,
-                       'Digital': Digital_editor,
-                       'TimeSeriesChart': TimeSeriesChart_editor,
-                       'Time': Time_editor,
-                       'BasicStatusBar': BasicStatusBar_editor,
-                       'MultiStateAlarm': Digital_editor,
-                       'CommStatusAlarm': Digital_editor,
-                       'MultiStateImage': Digital_editor,
-                       'NoDataAlarm': Digital_editor,
-                       'WindRose': WindRose_editor,
-                       'RotaryGauge': Digital_editor}
-
-        return EDITOR_DICT[editor_type](element)
+        file_name_fmt = pathlib.Path(file_name)
+        if not file_name_fmt.parent.exists:
+            raise FileNotFoundError(
+                'No such directory as {}!' .format(str(file_name_fmt.parent))
+                )
+        if not file_name_fmt.suffix == '.rtmc2':
+            raise TypeError('File extension must be ".rtmc2"')
+        self.tree.write(str(file_name_fmt))
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def rename_component_element(self, element, new_name):
+    # #--------------------------------------------------------------------------
+    # def rename_component_element(self, element, new_name):
 
-        element.attrib['name'] = new_name
-    #--------------------------------------------------------------------------
+    #     element.attrib['name'] = new_name
+    # #--------------------------------------------------------------------------
