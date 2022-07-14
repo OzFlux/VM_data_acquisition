@@ -11,12 +11,31 @@ import pandas as pd
 import pathlib
 import pdb
 
+#------------------------------------------------------------------------------
+### CONSTANTS ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 PATH_TO_XL = (
     'E:\\Cloudstor\\Network_documents\\Site_documentation\\'
-    'site_variable_map.xlsx'
+    'site_variable_map_alt.xlsx'
     )
 PATH_TO_DATA = 'E:\\Sites\\{}\\Flux\\Slow'
+IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
+               'Logger name', 'Disable', 'Default value', 'Long name']
+RENAME_DICT = {'Label': 'site_label',
+               'Variable name': 'site_name',
+               'Variable units': 'site_units',
+               'Table name': 'table_name',
+               'Logger name': 'logger_name'}
+USE_LOGGER_NAME = True
+#------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+### CLASSES ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class translator():
 
     def __init__(self, site):
@@ -88,10 +107,9 @@ class translator():
 
         if not table in self.get_table_list():
             raise KeyError('Table "{}" not found!'.format(table))
-        return (
-            pathlib.Path(PATH_TO_DATA.format(self.site)) / '{}.dat'
-            .format(table)
-            )
+        table_to_file = self.map_table_to_source()
+        file = table_to_file[table]
+        return pathlib.Path(PATH_TO_DATA.format(self.site)) / file
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -99,14 +117,24 @@ class translator():
         
         path = self.get_table_data_path(table=table)
         df = pd.read_csv(path, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-                         index_col=['TIMESTAMP'], na_values='NaN', sep=',', 
+                         index_col=['TIMESTAMP'], na_values='NAN', sep=',', 
                          engine='c', on_bad_lines='warn')
         df.drop_duplicates(inplace=True)
         freq = self._get_table_freq(df)
         new_index = (
             pd.date_range(start=df.index[0], end=df.index[-1], freq=freq)
             )
+        df.drop('RECORD', axis=1, inplace=True)
         return df.reindex(new_index)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def map_table_to_source(self):
+        
+        return dict(zip(
+            pd.unique(self.site_df['table_name']).tolist(), 
+            pd.unique(self.site_df['source']).tolist()
+            ))
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -194,7 +222,9 @@ class translator():
 
 #------------------------------------------------------------------------------
 
-
+#------------------------------------------------------------------------------
+### FUNCTIONS ###
+#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def make_master_df(path):
@@ -215,7 +245,7 @@ def make_master_df(path):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def make_site_df(path, site):
+def make_site_df(path, site, logger_name_in_source=USE_LOGGER_NAME):
     """
 
 
@@ -233,71 +263,32 @@ def make_site_df(path, site):
 
     """
 
+    # Concatenate the logger_name and the table_name to make the file source 
+    # name    
     def converter(val, default_val='None'):
         if len(val) > 0:
             return val
         return default_val
 
-    IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-                   'Logger name', 'Disable', 'Default value', 'Long name']
+    # Concatenate the logger_name and the table_name to make the file source 
+    # name (only applied if 'logger_name_in_source' arg is True)
+    def func(s):
+       return '{}.dat'.format('_'.join(s.tolist()))
 
     # Create the site dataframe
     site_df = pd.read_excel(path, sheet_name=site, usecols=IMPORT_LIST,
                             converters={'Variable units': converter},
                             index_col='Long name')
     site_df = site_df.loc[np.isnan(site_df.Disable)]
-    site_df.rename({'Label': 'site_label',
-                    'Variable name': 'site_name',
-                    'Variable units': 'site_units',
-                    'Table name': 'table_name',
-                    'Logger name': 'logger_name'},
-                    axis=1, inplace=True)
-
+    site_df.rename(RENAME_DICT, axis=1, inplace=True)
+    if logger_name_in_source:
+        site_df = site_df.assign(
+            source=site_df[['logger_name', 'table_name']]
+            .apply(func, axis=1)
+            )
+    else:
+        site_df = site_df.assign(
+            source=site_df['table_name'].apply('{}.dat'.format, axis=1)
+            )
     return site_df
-
-
-    # # Write variable standard names and unit strings
-    # master_df = _make_master_df(path=path)
-
-
-    # site_df = (
-    #     site_df.assign(
-    #         variable_name=[master_df.loc[x, 'variable_name'] for x in
-    #                        site_df.index.get_level_values(level='long_name')]
-    #         )
-    #     )
-
-    # site_df = (
-    #     site_df.assign(
-    #         variable_units=[master_df.loc[x, 'variable_units'] for x in
-    #                         site_df.index.get_level_values(level='long_name')]
-    #         )
-    #     )
-
-    # # Write flag to determine whether raw string can be used in rtmc output
-    # # strings (for example, raw variable string should not be used if
-    # # conversion of units is required)
-    # site_df = site_df.assign(
-    #     parse_as_raw=lambda x: x.site_variable_units==x.variable_units
-    #     )
-
-    # # Write rtmc variable name for each variable (special table variable for
-    # # connection status - no variable name)
-    # site_df = site_df.assign(
-    #     rtmc_name=lambda x: x.apply(_get_rtmc_variable_name, axis=1)
-    #     )
-
-    # # Write alias string for each variable
-    # site_df = site_df.assign(
-    #     alias_name=lambda x: x.apply(_make_alias, axis=1)
-    #     )
-
-    # # Write alias conversion string for each variable
-    # site_df = site_df.assign(
-    #     eval_string=lambda x: x.site_variable_units.map(units_dict).fillna(
-    #         x.alias_name
-    #         )
-    #     )
-
-    # return site_df
 #------------------------------------------------------------------------------
