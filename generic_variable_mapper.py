@@ -7,6 +7,9 @@ Issues:
     - currently the units in the raw file are overriden by what is contained 
       in the site spreadsheet; maybe need to reconcile these / allow choice 
       about which are used
+    - need to do a comprehensive check of the files to be concatenated before
+      doing the concat - pandas is good at reconciling different files but this
+      could have unintended consequences
 
 @author: imchugh
 """
@@ -37,6 +40,7 @@ RENAME_DICT = {'Label': 'site_label',
                'Logger name': 'logger_name'}
 PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 'serial_num', 
                   'OS_version', 'program_name', 'program_sig', 'table_name']
+SITE_PROC_LIST = ['Calperum', 'Gingin']
 USE_LOGGER_NAME = True
 #------------------------------------------------------------------------------
 
@@ -47,7 +51,8 @@ USE_LOGGER_NAME = True
 #------------------------------------------------------------------------------
 class var_mapper():
     
-    def __init__(self, path):
+    def __init__(self):
+        
         
         pass
 #------------------------------------------------------------------------------
@@ -70,11 +75,12 @@ class file_grouper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class translator():
+class file_parser():
 
     def __init__(self, site):
 
-        self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2}}
+        self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
+                                 'RH': {'frac': _convert_RH}}
         self.site_df = make_site_df(path=PATH_TO_XL, site=site)
         self.site = site
 
@@ -84,18 +90,26 @@ class translator():
 
     #--------------------------------------------------------------------------
     def get_table_data(self, table, standardise_vars=False, 
-                       convert_units=False, apply_limits=False):
+                       convert_units=False, apply_limits=False, 
+                       pass_all_vars=False):
         
-        variables = (
-            ['TIMESTAMP', 'RECORD'] +
-            self.get_variable_list(by_table=table, returns='site_name')
-            )
-        path = self.get_table_data_path(table=table)
-        df = pd.read_csv(path, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-                         index_col=['TIMESTAMP'], usecols=variables, 
+        files_to_concat = self.get_file_list(table)
+        df = (pd.concat(
+            [pd.read_csv(file, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
+                         index_col=['TIMESTAMP'], #usecols=variables, 
                          na_values='NAN', sep=',', engine='c',
                          on_bad_lines='warn')
-        df.drop_duplicates(inplace=True)
+            for file in files_to_concat]
+            )
+            .drop_duplicates()
+            .sort_index()
+            )
+        if not pass_all_vars:
+            variables = (
+                ['RECORD'] +
+                self.get_variable_list(by_table=table, returns='site_name')
+                )
+            df = df[variables]
         freq = self._get_table_freq(df)
         new_index = (
             pd.date_range(start=df.index[0], end=df.index[-1], freq=freq)
@@ -115,7 +129,10 @@ class translator():
                 self._do_unit_conversion(df=df)
             if apply_limits:
                 self._apply_limits(df=df)
-        return df.reindex(new_index)
+        try:
+            return df.reindex(new_index)
+        except ValueError:
+            pdb.set_trace()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -157,6 +174,13 @@ class translator():
         if table:
             return files_dict[table]
         return files_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_list(self, search_str):
+        
+        file_path = pathlib.Path(PATH_TO_DATA.format(self.site))
+        return list(file_path.glob('*{}.dat'.format(search_str)))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -221,7 +245,7 @@ class translator():
    
     #--------------------------------------------------------------------------
     def merge_tables(self, standardise_vars=False, convert_units=False, 
-                     apply_limits=False):
+                     apply_limits=False, pass_all_vars=False):
         
         tables = self.get_table_list()
         try:
@@ -233,7 +257,8 @@ class translator():
             print ('Getting table {}...'.format(table))
             this_df = self.get_table_data(
                 table=table, standardise_vars=standardise_vars,
-                convert_units=convert_units, apply_limits=apply_limits
+                convert_units=convert_units, apply_limits=apply_limits,
+                pass_all_vars=pass_all_vars
                 )
             df_list.append(this_df)
             date_list += [this_df.index[0], this_df.index[-1]]
@@ -250,7 +275,10 @@ class translator():
             )
         for this_df in df_list:
             this_df = this_df.reindex(new_index)
-        return pd.concat(df_list, axis=1)
+        df = pd.concat(df_list, axis=1)
+        if standardise_vars:
+            df = df[self.site_df.translation_name]
+        return df
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -296,11 +324,13 @@ class translator():
     #--------------------------------------------------------------------------
     def merge_header_frames(self, standardise_vars=False, convert_units=False):
         
-        header_frame = pd.concat(
-            [self.get_header_frame(table=table) 
-             for table in self.get_table_list()]
+        header_frame = (
+            pd.concat([self.get_header_frame(table=table) 
+                       for table in self.get_table_list()]
+                      )
             )
-        timestamp = header_frame.loc['TIMESTAMP'].drop_duplicates()
+        header_frame = header_frame[~header_frame.index.duplicated()]
+        timestamp = pd.DataFrame(header_frame.loc['TIMESTAMP']).T
         header_frame = header_frame.loc[self.site_df.site_name.tolist()]
         site_name_list = header_frame.index.tolist()
         if standardise_vars:
@@ -340,17 +370,15 @@ class translator():
             standardise_vars=True, convert_units=True, apply_limits=True
             )
         data = data.reset_index()
-        timestamps = [
-            '{}'.format(x) for x in 
-            data['index'].apply(dt.datetime.strftime, 
-                                format='%Y-%m-%d %H:%M:%S')
-            ]
+        timestamps = data['index'].apply(dt.datetime.strftime, 
+                                         format='%Y-%m-%d %H:%M:%S')
         data['TIMESTAMP'] = timestamps
         data.drop('index', axis=1, inplace=True)
         column_order = ['TIMESTAMP'] + data.columns.drop('TIMESTAMP').tolist()
+        # pdb.set_trace()
+        # if 
         data = data[column_order]
         data.fillna('NAN', inplace=True)
-        # pdb.set_trace()
         with open(dest, 'w', newline='\n') as f:
             for line in header_lines:
                 f.write(line)
@@ -389,7 +417,10 @@ class translator():
             if not var in df.columns:
                 continue
             conversion_dict = self._conversion_dict[var]
-            existing_units = conversion_df.site_units.item()
+            existing_units = (
+                conversion_df.loc[conversion_df.translation_name==var, 
+                                  'site_units'].item()
+                )
             conversion_func = conversion_dict[existing_units]
             df[var] = df[var].apply(conversion_func)
     #--------------------------------------------------------------------------
@@ -405,7 +436,7 @@ class translator():
         interval_list = new_df.minutes.unique().tolist()
         if not len(interval_list) == 1:
             raise RuntimeError('Inconsistent interval between records!')
-        return '{}T'.format(str(interval_list[0]))
+        return '{}T'.format(str(round(interval_list[0])))
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -494,3 +525,32 @@ def _convert_co2(data):
     
     return data * 1000 / 44
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _convert_RH(data):
+    
+    return data * 100
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _calculate_es(Ta_data):
+    
+    return 0.6106 * np.exp(17.27 * Ta_data / (Ta_data + 237.3))
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _calculate_e(Ta_data, RH_data):
+    
+    return Ta_data * RH_data / 100
+#------------------------------------------------------------------------------
+
+if __name__=='__main__':
+    
+    for site in SITE_PROC_LIST:
+        print ('Parsing site {}:'.format(site))
+        output_path = (
+            pathlib.Path(PATH_TO_DATA.format(site)) / 
+            '{}_merged_std.dat'.format(site)
+            )
+        parser = file_parser(site=site)
+        parser.make_output_file(dest=output_path)
