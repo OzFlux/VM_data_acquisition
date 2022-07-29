@@ -10,6 +10,9 @@ Issues:
     - need to do a comprehensive check of the files to be concatenated before
       doing the concat - pandas is good at reconciling different files but this
       could have unintended consequences
+    - remove direct manipulation of site dataframe from the file parser (this 
+      necessitates the use of self.map.etc... particularly in the output file
+      method)
 
 @author: imchugh
 """
@@ -49,12 +52,212 @@ USE_LOGGER_NAME = True
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class var_mapper():
+class mapper():
     
-    def __init__(self):
+    def __init__(self, site):
+
+        self.site = site        
+        self.path_to_xl = pathlib.Path(PATH_TO_XL)
+        self.path_to_data = pathlib.Path(PATH_TO_DATA.format(site))
+        if not self.path_to_data.exists():
+            raise FileNotFoundError('Path does not exist!')
+        self.master_df = self._make_master_df()
+        self.site_df = self._make_site_df()
+    
+    #--------------------------------------------------------------------------
+    ### PUBLIC METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_conversion_data(self):
         
+        return self.site_df.loc[self.site_df.conversion]
         
         pass
+    #--------------------------------------------------------------------------    
+
+    #--------------------------------------------------------------------------
+    def get_table_files(self, table, allow_backups=False):
+        """
+        Get the path on disk for either a single table or all tables.
+
+        Parameters
+        ----------
+        table : str, optional
+            The table for which to return the path. The default is None.
+        file_only : Bool, optional
+            Return only the filename (as opposed to the path). 
+            The default is False.
+
+        Raises
+        ------
+        KeyError
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+
+        if not table in self.get_table_list():
+            raise KeyError('Table not found!')
+        if allow_backups:
+            return list(self.path_to_data.glob('*{}.*'.format(table)))
+        return list(self.path_to_data.glob('*{}.dat'.format(table)))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------    
+    def get_standard_name_mapping(self, table):
+        
+        return dict(zip(
+            self.get_variable_list(
+                table=table, returns='site_name'
+                ),
+            self.get_variable_list(
+                table=table, returns='translation_name'
+                )
+            ))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------    
+    def get_variable_limits(self, variable, by_field='translation_name'):
+        
+        return self.site_df.loc[
+            self.site_df[by_field] == variable, ['Max', 'Min']
+            ]
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def get_table_list(self):
+        """
+        List all the unique tables for the relevant site in the variable map
+        spreadsheet
+
+        Returns
+        -------
+        list
+            The list of tables.
+        """
+
+        return list(self.site_df.table_name.dropna().unique())
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def get_variable_list(self, table, returns='long_name'):
+        """
+        Get a list of the variables mapped in the variable map spreasheet.
+
+        Parameters
+        ----------
+        table : str, optional
+            The table for which to return variables. The default is None 
+            (returns all variables).
+        returns : str, optional
+            The variable column to return (can be 'site name', 'standard_name', 
+            or 'long name'). The default is 'long_name'.
+
+        Raises
+        ------
+        KeyError
+            Raised if either table name or returns arg is invalid.
+
+        Returns
+        -------
+        list
+            List of the variables that meet the criteria.
+
+        """
+
+        if not table in self.get_table_list():
+            raise KeyError('Table not found!')
+        return_list = [
+            'long_name', 'site_name', 'standard_name', 'translation_name'
+            ]
+        if not returns in return_list:
+            raise KeyError(
+                '"Returns" arg must be one of the following: {}'
+                .format(', '.join(return_list))
+                )
+        temp_df = self.site_df.reset_index()
+        if table:
+            return (
+                temp_df.loc[temp_df.table_name==table, returns].tolist()
+                )
+        return temp_df[returns].tolist()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    ### PRIVATE METHODS ###
+    #--------------------------------------------------------------------------   
+
+    def _make_master_df(self):
+    
+        # Create the master dataframe
+        df = pd.read_excel(
+            self.path_to_xl, sheet_name='master_variables', 
+            index_col='Long name',
+            converters={'Variable units': lambda x: x if len(x) > 0 else None}
+        )
+        df.rename(
+            {'Variable name': 'standard_name', 
+             'Variable units': 'standard_units'}, 
+            axis=1, inplace=True
+            )
+        return df
+
+    #--------------------------------------------------------------------------
+    def _make_site_df(self, logger_name_in_file=True):
+        """
+    
+    
+        Parameters
+        ----------
+        path : TYPE
+            DESCRIPTION.
+        site : TYPE
+            DESCRIPTION.
+    
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+    
+        """
+       
+        # Concatenate the logger_name and the table_name to make the file source 
+        # name (only applied if 'logger_name_in_source' arg is True)
+        def func(s):
+           return '{}.dat'.format('_'.join(s.tolist()))
+    
+        # Create the site dataframe
+        site_df = pd.read_excel(
+            self.path_to_xl, sheet_name=self.site, usecols=IMPORT_LIST,
+            converters={'Variable units': lambda x: x if len(x) > 0 else None},
+            index_col='Long name'
+            )
+        site_df = site_df.loc[np.isnan(site_df.Disable)]
+        site_df.rename(RENAME_DICT, axis=1, inplace=True)
+        if logger_name_in_file:
+            file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
+        else:
+            file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
+        site_df = site_df.assign(file_name=file_name)
+           
+        # Join and generate variables that require input from both sources
+        site_df = site_df.join(self.master_df)
+        site_df = site_df.assign(
+            conversion=site_df.site_units!=site_df.standard_units,
+            translation_name=np.where(site_df.index.duplicated(keep=False),
+                                      site_df.site_label, site_df.standard_name)
+            )
+        
+        # Format and return
+        site_df.index.name = 'long_name'
+        return site_df
+    #--------------------------------------------------------------------------
+        
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -79,9 +282,9 @@ class file_parser():
 
     def __init__(self, site):
 
+        self.map = mapper(site=site)
         self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
                                  'RH': {'frac': _convert_RH}}
-        self.site_df = make_site_df(path=PATH_TO_XL, site=site)
         self.site = site
 
     #--------------------------------------------------------------------------
@@ -93,7 +296,7 @@ class file_parser():
                        convert_units=False, apply_limits=False, 
                        pass_all_vars=False):
         
-        files_to_concat = self.get_file_list(table)
+        files_to_concat = self.map.get_table_files(table=table)
         df = (pd.concat(
             [pd.read_csv(file, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
                          index_col=['TIMESTAMP'], #usecols=variables, 
@@ -107,7 +310,7 @@ class file_parser():
         if not pass_all_vars:
             variables = (
                 ['RECORD'] +
-                self.get_variable_list(by_table=table, returns='site_name')
+                self.map.get_variable_list(table=table, returns='site_name')
                 )
             df = df[variables]
         freq = self._get_table_freq(df)
@@ -116,138 +319,20 @@ class file_parser():
             )
         df.drop('RECORD', axis=1, inplace=True)
         if standardise_vars:
-            rename_dict = dict(zip(
-                self.get_variable_list(
-                    by_table=table, returns='site_name'
-                    ),
-                self.get_variable_list(
-                    by_table=table, returns='translation_name'
-                    )
-                ))
+            rename_dict = self.map.get_standard_name_mapping(table=table)
             df.rename(rename_dict, axis=1, inplace=True)
             if convert_units:
                 self._do_unit_conversion(df=df)
             if apply_limits:
                 self._apply_limits(df=df)
-        try:
-            return df.reindex(new_index)
-        except ValueError:
-            pdb.set_trace()
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_table_data_path(self, table=None, file_only=False):
-        """
-        Get the path on disk for either a single table or all tables.
-
-        Parameters
-        ----------
-        table : str, optional
-            The table for which to return the path. The default is None.
-        file_only : Bool, optional
-            Return only the filename (as opposed to the path). 
-            The default is False.
-
-        Raises
-        ------
-        KeyError
-            DESCRIPTION.
-
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
-
-        """
-
-        if table:        
-            if not table in self.get_table_list():
-                raise KeyError('Table "{}" not found!'.format(table))
-        table_list = self.site_df.table_name.unique().tolist()
-        file_list = self.site_df.file_name.unique().tolist()
-        if not file_only:
-            file_list = [
-                pathlib.Path(PATH_TO_DATA.format(self.site)) / file 
-                for file in file_list
-                ]
-        files_dict = dict(zip(table_list, file_list))
-        if table:
-            return files_dict[table]
-        return files_dict
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_file_list(self, search_str):
-        
-        file_path = pathlib.Path(PATH_TO_DATA.format(self.site))
-        return list(file_path.glob('*{}.dat'.format(search_str)))
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_table_list(self):
-        """
-        List all the unique tables for the relevant site in the variable map
-        spreadsheet
-
-        Returns
-        -------
-        list
-            The list of tables.
-        """
-
-        return list(self.site_df.table_name.dropna().unique())
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_variable_list(self, by_table=None, returns='long_name'):
-        """
-        Get a list of the variables mapped in the variable map spreasheet.
-
-        Parameters
-        ----------
-        by_table : str, optional
-            The table for which to return variables. The default is None 
-            (returns all variables).
-        returns : str, optional
-            The variable column to return (can be 'site name', 'standard_name', 
-            or 'long name'). The default is 'long_name'.
-
-        Raises
-        ------
-        KeyError
-            Raised if either table name or returns arg is invalid.
-
-        Returns
-        -------
-        list
-            List of the variables that meet the criteria.
-
-        """
-
-        table_list = self.get_table_list()
-        if not by_table in table_list:
-            raise KeyError('Table not found!')
-        return_list = [
-            'long_name', 'site_name', 'standard_name', 'translation_name'
-            ]
-        if not returns in return_list:
-            raise KeyError(
-                '"Returns" arg must be one of the following: {}'
-                .format(', '.join(return_list))
-                )
-        temp_df = self.site_df.reset_index()
-        if by_table:
-            return (
-                temp_df.loc[temp_df.table_name==by_table, returns].tolist()
-                )
-        return temp_df[returns].tolist()
+        return df.reindex(new_index)
     #--------------------------------------------------------------------------
    
     #--------------------------------------------------------------------------
     def merge_tables(self, standardise_vars=False, convert_units=False, 
                      apply_limits=False, pass_all_vars=False):
         
-        tables = self.get_table_list()
+        tables = self.map.get_table_list()
         try:
             tables.remove('site_details')
         except ValueError:
@@ -277,14 +362,14 @@ class file_parser():
             this_df = this_df.reindex(new_index)
         df = pd.concat(df_list, axis=1)
         if standardise_vars:
-            df = df[self.site_df.translation_name]
+            df = df[self.map.site_df.translation_name]
         return df
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
     def read_raw_header(self, table):
         
-        table_path = self.get_table_data_path(table=table)
+        table_path = self.map.get_table_files(table=table)[0]
         header_list = []
         with open(table_path) as f:
             for i in range(4):
@@ -326,22 +411,22 @@ class file_parser():
         
         header_frame = (
             pd.concat([self.get_header_frame(table=table) 
-                       for table in self.get_table_list()]
+                       for table in self.map.get_table_list()]
                       )
             )
         header_frame = header_frame[~header_frame.index.duplicated()]
         timestamp = pd.DataFrame(header_frame.loc['TIMESTAMP']).T
-        header_frame = header_frame.loc[self.site_df.site_name.tolist()]
+        header_frame = header_frame.loc[self.map.site_df.site_name.tolist()]
         site_name_list = header_frame.index.tolist()
         if standardise_vars:
-            header_frame.index = self.site_df.loc[
-                self.site_df.site_name==site_name_list,
+            header_frame.index = self.map.site_df.loc[
+                self.map.site_df.site_name==site_name_list,
                 'translation_name'
                 ]
         if convert_units:
-            header_frame.loc[:, 'units'] = self.site_df.standard_units.tolist()
+            header_frame.loc[:, 'units'] = self.map.site_df.standard_units.tolist()
         else:
-            header_frame.loc[:, 'units'] = self.site_df.site_units.tolist()
+            header_frame.loc[:, 'units'] = self.map.site_df.site_units.tolist()
         return pd.concat([timestamp, header_frame])
     #--------------------------------------------------------------------------
 
@@ -375,8 +460,6 @@ class file_parser():
         data['TIMESTAMP'] = timestamps
         data.drop('index', axis=1, inplace=True)
         column_order = ['TIMESTAMP'] + data.columns.drop('TIMESTAMP').tolist()
-        # pdb.set_trace()
-        # if 
         data = data[column_order]
         data.fillna('NAN', inplace=True)
         with open(dest, 'w', newline='\n') as f:
@@ -396,11 +479,7 @@ class file_parser():
         print ('    Parsing variable:')
         for var in df.columns:
             print ('        - {}'.format(var))
-            limits = (
-                self.site_df.loc[self.site_df.translation_name==var, 
-                                 ['Max', 'Min']]
-                .dropna()
-                )
+            limits = self.map.get_variable_limits(variable=var)
             if not len(limits):
                 continue
             filter_bool = (
@@ -412,7 +491,7 @@ class file_parser():
     #--------------------------------------------------------------------------
     def _do_unit_conversion(self, df):
         
-        conversion_df = self.site_df.loc[self.site_df.conversion]
+        conversion_df = self.map.get_conversion_data()
         for var in conversion_df.translation_name:
             if not var in df.columns:
                 continue
@@ -454,71 +533,71 @@ class file_parser():
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def make_site_df(path, site, logger_name_in_file=USE_LOGGER_NAME):
-    """
+# #------------------------------------------------------------------------------
+# def make_site_df(path, site, logger_name_in_file=USE_LOGGER_NAME):
+#     """
 
 
-    Parameters
-    ----------
-    path : TYPE
-        DESCRIPTION.
-    site : TYPE
-        DESCRIPTION.
+#     Parameters
+#     ----------
+#     path : TYPE
+#         DESCRIPTION.
+#     site : TYPE
+#         DESCRIPTION.
 
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
+#     Returns
+#     -------
+#     TYPE
+#         DESCRIPTION.
 
-    """
+#     """
 
-    # Concatenate the logger_name and the table_name to make the file source 
-    # name    
-    def converter(val, default_val='None'):
-        if len(val) > 0:
-            return val
-        return default_val
+#     # Concatenate the logger_name and the table_name to make the file source 
+#     # name    
+#     def converter(val, default_val='None'):
+#         if len(val) > 0:
+#             return val
+#         return default_val
 
-    # Concatenate the logger_name and the table_name to make the file source 
-    # name (only applied if 'logger_name_in_source' arg is True)
-    def func(s):
-       return '{}.dat'.format('_'.join(s.tolist()))
+#     # Concatenate the logger_name and the table_name to make the file source 
+#     # name (only applied if 'logger_name_in_source' arg is True)
+#     def func(s):
+#        return '{}.dat'.format('_'.join(s.tolist()))
 
-    # Create the site dataframe
-    site_df = pd.read_excel(path, sheet_name=site, usecols=IMPORT_LIST,
-                            converters={'Variable units': converter},
-                            index_col='Long name')
-    site_df = site_df.loc[np.isnan(site_df.Disable)]
-    site_df.rename(RENAME_DICT, axis=1, inplace=True)
-    if logger_name_in_file:
-        file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
-    else:
-        file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
-    site_df = site_df.assign(file_name=file_name)
+#     # Create the site dataframe
+#     site_df = pd.read_excel(path, sheet_name=site, usecols=IMPORT_LIST,
+#                             converters={'Variable units': converter},
+#                             index_col='Long name')
+#     site_df = site_df.loc[np.isnan(site_df.Disable)]
+#     site_df.rename(RENAME_DICT, axis=1, inplace=True)
+#     if logger_name_in_file:
+#         file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
+#     else:
+#         file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
+#     site_df = site_df.assign(file_name=file_name)
     
-    # Create the master dataframe
-    master_df = pd.read_excel(
-        path, sheet_name='master_variables', index_col='Long name',
-        converters={'Variable units': converter}
-    )
-    master_df.rename(
-        {'Variable name': 'standard_name', 'Variable units': 'standard_units'}, 
-        axis=1, inplace=True
-        )
+#     # Create the master dataframe
+#     master_df = pd.read_excel(
+#         path, sheet_name='master_variables', index_col='Long name',
+#         converters={'Variable units': converter}
+#     )
+#     master_df.rename(
+#         {'Variable name': 'standard_name', 'Variable units': 'standard_units'}, 
+#         axis=1, inplace=True
+#         )
 
-    # Join and generate variables that require input from both sources
-    site_df = site_df.join(master_df)
-    site_df = site_df.assign(
-        conversion=site_df.site_units!=site_df.standard_units,
-        translation_name=np.where(site_df.index.duplicated(keep=False),
-                                  site_df.site_label, site_df.standard_name)
-        )
+#     # Join and generate variables that require input from both sources
+#     site_df = site_df.join(master_df)
+#     site_df = site_df.assign(
+#         conversion=site_df.site_units!=site_df.standard_units,
+#         translation_name=np.where(site_df.index.duplicated(keep=False),
+#                                   site_df.site_label, site_df.standard_name)
+#         )
     
-    # Format and return
-    site_df.index.name = 'long_name'
-    return site_df
-#------------------------------------------------------------------------------
+#     # Format and return
+#     site_df.index.name = 'long_name'
+#     return site_df
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def _convert_co2(data):
