@@ -17,12 +17,22 @@ Issues:
 @author: imchugh
 """
 
+#------------------------------------------------------------------------------
+### STANDARD IMPORTS ###
+#------------------------------------------------------------------------------
+
 import csv
 import datetime as dt
 import numpy as np
 import pandas as pd
 import pathlib
 import pdb
+
+#------------------------------------------------------------------------------
+### CUSTOM IMPORTS ###
+#------------------------------------------------------------------------------
+
+import paths_manager as pm
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -33,7 +43,6 @@ PATH_TO_XL = (
     'E:\\Cloudstor\\Network_documents\\Site_documentation\\'
     'site_variable_map_alt.xlsx'
     )
-PATH_TO_XML = 'E:\\Campbellsci\RTMC\{}.rtmc2'
 PATH_TO_DATA = 'E:\\Sites\\{}\\Flux\\Slow'
 PATH_TO_DETAILS = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_data'
 PATH_TO_IMAGES = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
@@ -61,7 +70,8 @@ class _paths():
             pathlib.Path(PATH_TO_DETAILS) / ('{}_details.dat')
             )
         self.xl_map_file = pathlib.Path(PATH_TO_XL)        
-        self.data_directory = pathlib.Path(PATH_TO_DATA.format(site))
+        self.read_data_directory = pathlib.Path(PATH_TO_DATA.format(site))
+        self.write_data_directory = self.read_data_directory
         self.images_directory = pathlib.Path(PATH_TO_IMAGES)
         self.contour_image_file = (
             self.images_directory / '{}_contour.png'.format(site)
@@ -76,14 +86,10 @@ class mapper():
     
     def __init__(self, site):
 
-        self.paths = _paths(site=site)
         self.site = site        
-        self.path_to_xl = pathlib.Path(PATH_TO_XL)
-        # self.path_to_xml = pathlib.Path(PATH_TO_XML)
-        self.path_to_data = pathlib.Path(PATH_TO_DATA.format(site))
-        self.path_to_images = pathlib.Path(PATH_TO_IMAGES)
-        if not self.path_to_data.exists():
-            raise FileNotFoundError('Path does not exist!')
+        # self.path_to_data = pathlib.Path(PATH_TO_DATA.format(site))
+        # if not self.path_to_data.exists():
+        #     raise FileNotFoundError('Path does not exist!')
         self.master_df = self._make_master_df()
         self.site_df = self._make_site_df()
     
@@ -124,37 +130,37 @@ class mapper():
         return data.index.unique().tolist()
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_table_files(self, table, allow_backups=False):
-        """
-        Get the path on disk for either a single table or all tables.
+    # #--------------------------------------------------------------------------
+    # def get_table_files(self, table, allow_backups=False):
+    #     """
+    #     Get the path on disk for either a single table or all tables.
 
-        Parameters
-        ----------
-        table : str, optional
-            The table for which to return the path. The default is None.
-        file_only : Bool, optional
-            Return only the filename (as opposed to the path). 
-            The default is False.
+    #     Parameters
+    #     ----------
+    #     table : str, optional
+    #         The table for which to return the path. The default is None.
+    #     file_only : Bool, optional
+    #         Return only the filename (as opposed to the path). 
+    #         The default is False.
 
-        Raises
-        ------
-        KeyError
-            DESCRIPTION.
+    #     Raises
+    #     ------
+    #     KeyError
+    #         DESCRIPTION.
 
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
+    #     Returns
+    #     -------
+    #     TYPE
+    #         DESCRIPTION.
 
-        """
+    #     """
 
-        if not table in self.get_table_list():
-            raise KeyError('Table not found!')
-        if allow_backups:
-            return list(self.path_to_data.glob('*{}.*'.format(table)))
-        return list(self.path_to_data.glob('*{}.dat'.format(table)))
-    #--------------------------------------------------------------------------
+    #     if not table in self.get_table_list():
+    #         raise KeyError('Table not found!')
+    #     if allow_backups:
+    #         return list(self.path_to_data.glob('*{}.*'.format(table)))
+    #     return list(self.path_to_data.glob('*{}.dat'.format(table)))
+    # #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------    
     def get_standard_name_mapping(self, table):
@@ -244,7 +250,7 @@ class mapper():
     
         # Create the master dataframe
         df = pd.read_excel(
-            self.path_to_xl, sheet_name='master_variables', 
+            PATH_TO_XL, sheet_name='master_variables', 
             index_col='Long name',
             converters={'Variable units': lambda x: x if len(x) > 0 else None}
         )
@@ -281,7 +287,7 @@ class mapper():
     
         # Create the site dataframe
         site_df = pd.read_excel(
-            self.path_to_xl, sheet_name=self.site, usecols=IMPORT_LIST,
+            PATH_TO_XL, sheet_name=self.site, usecols=IMPORT_LIST,
             converters={'Variable units': lambda x: x if len(x) > 0 else None},
             index_col='Long name'
             )
@@ -328,13 +334,14 @@ class file_grouper():
 #------------------------------------------------------------------------------
 class file_parser():
 
-    def __init__(self, site):
+    def __init__(self, site, concatenate_backups=False):
 
-        self.paths = _paths(site)
+        self.paths = pm.paths(site)
         self.map = mapper(site=site)
         self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
                                  'RH': {'frac': _convert_RH}}
         self.site = site
+        self.concatenate_backups = concatenate_backups
 
     #--------------------------------------------------------------------------
     ### METHODS (PUBLIC) ###
@@ -345,10 +352,10 @@ class file_parser():
                        convert_units=False, apply_limits=False, 
                        pass_all_vars=False):
         
-        files_to_concat = self.map.get_table_files(table=table)
+        files_to_concat = self.get_table_files(table=table)
         df = (pd.concat(
             [pd.read_csv(file, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-                         index_col=['TIMESTAMP'], #usecols=variables, 
+                         index_col=['TIMESTAMP'],
                          na_values='NAN', sep=',', engine='c',
                          on_bad_lines='warn')
             for file in files_to_concat]
@@ -376,7 +383,21 @@ class file_parser():
                 self._apply_limits(df=df)
         return df.reindex(new_index)
     #--------------------------------------------------------------------------
-   
+
+    #--------------------------------------------------------------------------
+    def get_table_files(self, table):
+
+        if not table in self.map.get_table_list():
+            raise KeyError('Table not found!')
+        if self.concatenate_backups:
+            return list(
+                self.paths.slow_fluxes.glob('*{}.*'.format(table))
+                )
+        return list(
+            self.paths.slow_fluxes.glob('*{}.dat'.format(table))
+            )
+    #--------------------------------------------------------------------------
+
     #--------------------------------------------------------------------------
     def merge_tables(self, standardise_vars=False, convert_units=False, 
                      apply_limits=False, pass_all_vars=False):
@@ -418,7 +439,7 @@ class file_parser():
     #--------------------------------------------------------------------------
     def read_raw_header(self, table):
         
-        table_path = self.map.get_table_files(table=table)[0]
+        table_path = self.get_table_files(table=table)[0]
         header_list = []
         with open(table_path) as f:
             for i in range(4):
