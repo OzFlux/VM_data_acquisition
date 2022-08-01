@@ -33,13 +33,14 @@ PATH_TO_XL = (
     'E:\\Cloudstor\\Network_documents\\Site_documentation\\'
     'site_variable_map_alt.xlsx'
     )
+PATH_TO_XML = 'E:\\Campbellsci\RTMC\{}.rtmc2'
 PATH_TO_DATA = 'E:\\Sites\\{}\\Flux\\Slow'
+PATH_TO_DETAILS = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_data'
+PATH_TO_IMAGES = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
 IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
                'Logger name', 'Disable', 'Default value', 'Long name']
-RENAME_DICT = {'Label': 'site_label',
-               'Variable name': 'site_name',
-               'Variable units': 'site_units',
-               'Table name': 'table_name',
+RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
+               'Variable units': 'site_units', 'Table name': 'table_name',
                'Logger name': 'logger_name'}
 PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 'serial_num', 
                   'OS_version', 'program_name', 'program_sig', 'table_name']
@@ -52,13 +53,35 @@ USE_LOGGER_NAME = True
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class _paths():
+    
+    def __init__(self, site):
+
+        self.site_details_file = (
+            pathlib.Path(PATH_TO_DETAILS) / ('{}_details.dat')
+            )
+        self.xl_map_file = pathlib.Path(PATH_TO_XL)        
+        self.data_directory = pathlib.Path(PATH_TO_DATA.format(site))
+        self.images_directory = pathlib.Path(PATH_TO_IMAGES)
+        self.contour_image_file = (
+            self.images_directory / '{}_contour.png'.format(site)
+            )
+        self.tower_image_file = (
+            self.images_directory / '{}_tower.png'.format(site)
+            )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class mapper():
     
     def __init__(self, site):
 
+        self.paths = _paths(site=site)
         self.site = site        
         self.path_to_xl = pathlib.Path(PATH_TO_XL)
+        # self.path_to_xml = pathlib.Path(PATH_TO_XML)
         self.path_to_data = pathlib.Path(PATH_TO_DATA.format(site))
+        self.path_to_images = pathlib.Path(PATH_TO_IMAGES)
         if not self.path_to_data.exists():
             raise FileNotFoundError('Path does not exist!')
         self.master_df = self._make_master_df()
@@ -72,9 +95,34 @@ class mapper():
     def get_conversion_data(self):
         
         return self.site_df.loc[self.site_df.conversion]
-        
-        pass
     #--------------------------------------------------------------------------    
+
+    # #--------------------------------------------------------------------------
+    # def get_image_path(self, img_type):
+        
+    #     img_list = ['contour', 'tower']
+    #     if not img_type in img_list:
+    #         raise KeyError(
+    #             '"img_type" arg must be either of: {}'
+    #             .format(', '.join(img_list))
+    #             )
+    #     file_ext = 'jpg' if img_type == 'tower' else 'png'
+    #     return (
+    #         self.path_to_images / 
+    #         '{0}_{1}.{2}'.format(self.site, img_type, file_ext)
+    #         )
+    # #--------------------------------------------------------------------------    
+
+    #--------------------------------------------------------------------------    
+    def get_repeat_variables(self, names_only=False):
+        
+        data = self.site_df[self.site_df.index.duplicated(keep=False)]
+        if len(data) == 0:
+            print('No repeat variables found!')
+        if not names_only:
+            return data            
+        return data.index.unique().tolist()
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_table_files(self, table, allow_backups=False):
@@ -282,6 +330,7 @@ class file_parser():
 
     def __init__(self, site):
 
+        self.paths = _paths(site)
         self.map = mapper(site=site)
         self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
                                  'RH': {'frac': _convert_RH}}
@@ -526,78 +575,11 @@ class file_parser():
         return ','.join(['"{}"'.format(x) for x in dummy_list]) + '\n'
     #--------------------------------------------------------------------------
     
-    
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def make_site_df(path, site, logger_name_in_file=USE_LOGGER_NAME):
-#     """
-
-
-#     Parameters
-#     ----------
-#     path : TYPE
-#         DESCRIPTION.
-#     site : TYPE
-#         DESCRIPTION.
-
-#     Returns
-#     -------
-#     TYPE
-#         DESCRIPTION.
-
-#     """
-
-#     # Concatenate the logger_name and the table_name to make the file source 
-#     # name    
-#     def converter(val, default_val='None'):
-#         if len(val) > 0:
-#             return val
-#         return default_val
-
-#     # Concatenate the logger_name and the table_name to make the file source 
-#     # name (only applied if 'logger_name_in_source' arg is True)
-#     def func(s):
-#        return '{}.dat'.format('_'.join(s.tolist()))
-
-#     # Create the site dataframe
-#     site_df = pd.read_excel(path, sheet_name=site, usecols=IMPORT_LIST,
-#                             converters={'Variable units': converter},
-#                             index_col='Long name')
-#     site_df = site_df.loc[np.isnan(site_df.Disable)]
-#     site_df.rename(RENAME_DICT, axis=1, inplace=True)
-#     if logger_name_in_file:
-#         file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
-#     else:
-#         file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
-#     site_df = site_df.assign(file_name=file_name)
-    
-#     # Create the master dataframe
-#     master_df = pd.read_excel(
-#         path, sheet_name='master_variables', index_col='Long name',
-#         converters={'Variable units': converter}
-#     )
-#     master_df.rename(
-#         {'Variable name': 'standard_name', 'Variable units': 'standard_units'}, 
-#         axis=1, inplace=True
-#         )
-
-#     # Join and generate variables that require input from both sources
-#     site_df = site_df.join(master_df)
-#     site_df = site_df.assign(
-#         conversion=site_df.site_units!=site_df.standard_units,
-#         translation_name=np.where(site_df.index.duplicated(keep=False),
-#                                   site_df.site_label, site_df.standard_name)
-#         )
-    
-#     # Format and return
-#     site_df.index.name = 'long_name'
-#     return site_df
-# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def _convert_co2(data):
