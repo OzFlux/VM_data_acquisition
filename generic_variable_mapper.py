@@ -62,35 +62,11 @@ USE_LOGGER_NAME = True
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class _paths():
-    
-    def __init__(self, site):
-
-        self.site_details_file = (
-            pathlib.Path(PATH_TO_DETAILS) / ('{}_details.dat')
-            )
-        self.xl_map_file = pathlib.Path(PATH_TO_XL)        
-        self.read_data_directory = pathlib.Path(PATH_TO_DATA.format(site))
-        self.write_data_directory = self.read_data_directory
-        self.images_directory = pathlib.Path(PATH_TO_IMAGES)
-        self.contour_image_file = (
-            self.images_directory / '{}_contour.png'.format(site)
-            )
-        self.tower_image_file = (
-            self.images_directory / '{}_tower.png'.format(site)
-            )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 class mapper():
     
     def __init__(self, site):
 
         self.site = site        
-        # self.path_to_data = pathlib.Path(PATH_TO_DATA.format(site))
-        # if not self.path_to_data.exists():
-        #     raise FileNotFoundError('Path does not exist!')
-        self.master_df = self._make_master_df()
         self.site_df = self._make_site_df()
     
     #--------------------------------------------------------------------------
@@ -101,23 +77,22 @@ class mapper():
     def get_conversion_data(self):
         
         return self.site_df.loc[self.site_df.conversion]
-    #--------------------------------------------------------------------------    
+    #--------------------------------------------------------------------------   
 
-    # #--------------------------------------------------------------------------
-    # def get_image_path(self, img_type):
+    #--------------------------------------------------------------------------
+    def get_required_variables(self, which='all'):
         
-    #     img_list = ['contour', 'tower']
-    #     if not img_type in img_list:
-    #         raise KeyError(
-    #             '"img_type" arg must be either of: {}'
-    #             .format(', '.join(img_list))
-    #             )
-    #     file_ext = 'jpg' if img_type == 'tower' else 'png'
-    #     return (
-    #         self.path_to_images / 
-    #         '{0}_{1}.{2}'.format(self.site, img_type, file_ext)
-    #         )
-    # #--------------------------------------------------------------------------    
+        response_list = ['missing', 'all']
+        if not which in response_list:
+            raise KeyError(
+                'Arg "which" must be one of: {}'
+                .format(', '.join(response_list))
+                )
+        all_df = self.site_df.loc[self.site_df.Required==True]
+        if which == 'all':
+            return all_df    
+        return all_df.loc[pd.isnull(all_df.site_name) & (all_df.Required)]
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------    
     def get_repeat_variables(self, names_only=False):
@@ -125,42 +100,11 @@ class mapper():
         data = self.site_df[self.site_df.index.duplicated(keep=False)]
         if len(data) == 0:
             print('No repeat variables found!')
+            return
         if not names_only:
             return data            
         return data.index.unique().tolist()
     #--------------------------------------------------------------------------
-
-    # #--------------------------------------------------------------------------
-    # def get_table_files(self, table, allow_backups=False):
-    #     """
-    #     Get the path on disk for either a single table or all tables.
-
-    #     Parameters
-    #     ----------
-    #     table : str, optional
-    #         The table for which to return the path. The default is None.
-    #     file_only : Bool, optional
-    #         Return only the filename (as opposed to the path). 
-    #         The default is False.
-
-    #     Raises
-    #     ------
-    #     KeyError
-    #         DESCRIPTION.
-
-    #     Returns
-    #     -------
-    #     TYPE
-    #         DESCRIPTION.
-
-    #     """
-
-    #     if not table in self.get_table_list():
-    #         raise KeyError('Table not found!')
-    #     if allow_backups:
-    #         return list(self.path_to_data.glob('*{}.*'.format(table)))
-    #     return list(self.path_to_data.glob('*{}.dat'.format(table)))
-    # #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------    
     def get_standard_name_mapping(self, table):
@@ -246,21 +190,6 @@ class mapper():
     ### PRIVATE METHODS ###
     #--------------------------------------------------------------------------   
 
-    def _make_master_df(self):
-    
-        # Create the master dataframe
-        df = pd.read_excel(
-            PATH_TO_XL, sheet_name='master_variables', 
-            index_col='Long name',
-            converters={'Variable units': lambda x: x if len(x) > 0 else None}
-        )
-        df.rename(
-            {'Variable name': 'standard_name', 
-             'Variable units': 'standard_units'}, 
-            axis=1, inplace=True
-            )
-        return df
-
     #--------------------------------------------------------------------------
     def _make_site_df(self, logger_name_in_file=True):
         """
@@ -298,37 +227,39 @@ class mapper():
         else:
             file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
         site_df = site_df.assign(file_name=file_name)
+
+        # Make the master dataframe
+        master_df = pd.read_excel(
+            PATH_TO_XL, sheet_name='master_variables', 
+            index_col='Long name',
+            converters={'Variable units': lambda x: x if len(x) > 0 else None}
+        )
+        master_df.rename(
+            {'Variable name': 'standard_name', 
+             'Variable units': 'standard_units'}, 
+            axis=1, inplace=True
+            )        
            
         # Join and generate variables that require input from both sources
-        site_df = site_df.join(self.master_df)
+        site_df = site_df.join(master_df)
         site_df = site_df.assign(
             conversion=site_df.site_units!=site_df.standard_units,
             translation_name=np.where(site_df.index.duplicated(keep=False),
                                       site_df.site_label, site_df.standard_name)
             )
         
+        # Add critical variables that are missing from the primary datasets
+        required_list = (
+            master_df.loc[master_df.Required==True].index.tolist()
+            )
+        missing_list = [x for x in required_list if not x in site_df.index]
+        site_df = pd.concat([site_df, master_df.loc[missing_list]])
+        
         # Format and return
         site_df.index.name = 'long_name'
         return site_df
     #--------------------------------------------------------------------------
         
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class file_grouper():
-    
-    def __init__(self, site, search_str):
-        
-        self.file_path = pathlib.Path(PATH_TO_DATA.format(site))
-        if not self.file_path.exists(): 
-            raise FileNotFoundError('Path does not exist!')
-        self.search_str = search_str
-        
-    def get_file_list(self, no_dir=False):
-        
-        if not no_dir:
-            return list(self.file_path.glob('*{}*'.format(self.search_str)))
-        return [x.name for x in self.file_path.glob('*{}*'.format(self.search_str))]        
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -486,7 +417,10 @@ class file_parser():
             )
         header_frame = header_frame[~header_frame.index.duplicated()]
         timestamp = pd.DataFrame(header_frame.loc['TIMESTAMP']).T
-        header_frame = header_frame.loc[self.map.site_df.site_name.tolist()]
+        try:
+            header_frame = header_frame.loc[self.map.site_df.site_name.tolist()]
+        except KeyError:
+            pdb.set_trace()
         site_name_list = header_frame.index.tolist()
         if standardise_vars:
             header_frame.index = self.map.site_df.loc[
@@ -623,8 +557,34 @@ def _calculate_es(Ta_data):
 #------------------------------------------------------------------------------
 def _calculate_e(Ta_data, RH_data):
     
-    return Ta_data * RH_data / 100
+    return _calculate_es(Ta_data=Ta_data) * RH_data / 100
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _calculate_AH(Ta_data, RH_data, ps_data):
+    
+    return (
+        _calculate_e(Ta_data, RH_data) / ps_data * 
+        _calc_molar_density(Ta_data, ps_data) * 18
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _calc_molar_density(Ta_data, ps_data):
+    
+    return ps_data * 1000 / ((Ta_data + 273.15) * 8.3143)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _calc_CO2_mole_fraction(CO2Dens_data, Ta_data, ps_data):
+    
+    return (
+        (CO2Dens_data / 44) / 
+        _calc_molar_density(Ta_data, ps_data) * 10**3
+        )
+    pass
+#------------------------------------------------------------------------------
+
 
 if __name__=='__main__':
     

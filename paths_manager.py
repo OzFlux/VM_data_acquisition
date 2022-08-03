@@ -52,8 +52,8 @@ def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
                 raise KeyError('data_stream arg must be one of: {}'
                                .format(', '.join(config['DATA_STREAM'])))
             out_path = out_path / config['DATA_STREAM'][data_stream]
-            # if sub_dirs:
-            #     out_path = out_path / sub_dirs
+    if sub_dirs:
+        out_path = out_path / sub_dirs
     if site:
         if replacer in str(out_path):
             out_path = (
