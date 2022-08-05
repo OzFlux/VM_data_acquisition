@@ -25,7 +25,6 @@ import csv
 import datetime as dt
 import numpy as np
 import pandas as pd
-import pathlib
 import pdb
 
 #------------------------------------------------------------------------------
@@ -39,22 +38,7 @@ import paths_manager as pm
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-PATH_TO_XL = (
-    'E:\\Cloudstor\\Network_documents\\Site_documentation\\'
-    'site_variable_map_alt.xlsx'
-    )
-PATH_TO_DATA = 'E:\\Sites\\{}\\Flux\\Slow'
-PATH_TO_DETAILS = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_data'
-PATH_TO_IMAGES = 'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
-IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-               'Logger name', 'Disable', 'Default value', 'Long name']
-RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
-               'Variable units': 'site_units', 'Table name': 'table_name',
-               'Logger name': 'logger_name'}
-PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 'serial_num', 
-                  'OS_version', 'program_name', 'program_sig', 'table_name']
-SITE_PROC_LIST = ['Calperum', 'Gingin']
-USE_LOGGER_NAME = True
+PATHS = pm.paths()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -91,6 +75,12 @@ class mapper():
         return data.index.unique().tolist()
     #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
+    def get_missing_variables(self):
+        
+        return self.site_df.loc[self.site_df.Missing & self.site_df.Required]
+    #--------------------------------------------------------------------------
+    
     #--------------------------------------------------------------------------    
     def get_variable_limits(self, variable, by_field='translation_name'):
         
@@ -148,6 +138,12 @@ class mapper():
     
         """
        
+        IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
+                       'Logger name', 'Disable', 'Default value', 'Long name']
+        RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
+                       'Variable units': 'site_units', 'Table name': 'table_name',
+                       'Logger name': 'logger_name'}
+       
         # Concatenate the logger_name and the table_name to make the file source 
         # name (only applied if 'logger_name_in_source' arg is True)
         def func(s):
@@ -155,7 +151,7 @@ class mapper():
     
         # Create the site dataframe
         site_df = pd.read_excel(
-            PATH_TO_XL, sheet_name=self.site, usecols=IMPORT_LIST,
+            PATHS.variable_map(), sheet_name=self.site, usecols=IMPORT_LIST,
             converters={'Variable units': lambda x: x if len(x) > 0 else None},
             index_col='Long name'
             )
@@ -169,7 +165,7 @@ class mapper():
 
         # Make the master dataframe
         master_df = pd.read_excel(
-            PATH_TO_XL, sheet_name='master_variables', 
+            PATHS.variable_map(), sheet_name='master_variables', 
             index_col='Long name',
             converters={'Variable units': lambda x: x if len(x) > 0 else None}
         )
@@ -200,8 +196,9 @@ class mapper():
                 missing_list.remove('IRGA signal')
         site_df = pd.concat([site_df, master_df.loc[missing_list]])
         site_df['Missing'] = pd.isnull(site_df.site_name)
-        
-        # Format and return
+        site_df.loc[site_df.Missing, 'translation_name'] = (
+            site_df.loc[site_df.Missing, 'standard_name']
+            )
         site_df.index.name = 'long_name'
         return site_df
     #--------------------------------------------------------------------------
@@ -213,11 +210,8 @@ class file_parser():
 
     def __init__(self, site):
 
-        self.paths = pm.paths(site)
-        self.map = mapper(site=site)
-        self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
-                                 'RH': {'frac': _convert_RH}}
         self.site = site
+        self.map = mapper(site=site)
 
     #--------------------------------------------------------------------------
     ### METHODS (PUBLIC) ###
@@ -260,7 +254,7 @@ class file_parser():
 
         if not table in self.map.get_table_list():
             raise KeyError('Table not found!')
-        gen = self.paths.slow_fluxes.glob('*{}.dat'.format(table))
+        gen = PATHS.slow_fluxes(site=self.site).glob('*{}.dat'.format(table))
         l = [x for x in gen]
         if not len(l) == 1:
             raise RuntimeError('More than one file with that string found!')
@@ -311,6 +305,9 @@ class file_parser():
     #--------------------------------------------------------------------------
     def get_program_info(self, table):
         
+        PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 
+                          'serial_num', 'OS_version', 'program_name', 
+                          'program_sig', 'table_name']
         header_list = self.read_raw_header(table=table)
         string_list = [x.replace('"', '') for x in 
                        header_list[0].replace('\n', '').split(',')]
@@ -330,8 +327,18 @@ class file_parser():
                  for table in self.map.get_table_list()]
                 )
             df = df[~df.index.duplicated()]
-        if add_missing:
-            pass
+            if add_missing:
+                missing_df = self.map.get_missing_variables()
+                df_list = []
+                for var in missing_df.index:
+                    df_list.append(
+                        {'standard_units': missing_df.loc[var, 'standard_units'],
+                         'sampling': '',}
+                        )
+                add_df = pd.DataFrame(
+                    data=df_list, index=missing_df.translation_name.tolist()
+                    )
+                df = pd.concat([df, add_df])
         if to_list:
             return self._construct_header_strings(header_frame=df)
         return df
@@ -380,7 +387,6 @@ class file_parser():
         header_lines = self.construct_header(to_list=True)
         data = self.construct_table_data()
         data = data.reset_index()
-        pdb.set_trace()
         timestamps = data['index'].apply(dt.datetime.strftime, 
                                          format='%Y-%m-%d %H:%M:%S')
         data['TIMESTAMP'] = timestamps
@@ -417,34 +423,28 @@ class file_parser():
     #--------------------------------------------------------------------------
     def _do_unit_conversion(self, df):
         
-        conversion_dict = {'Fco2': _convert_co2, 'RH': _convert_RH}
         conversion_df = self.map.get_conversion_variables()
-        for var in conversion_df.translation_name:
-            if not var in df.columns:
+        constructor = var_constructor(df=df)
+        for var in conversion_df.index:
+            name = conversion_df.loc[var, 'translation_name']
+            existing_units = conversion_df.loc[var, 'site_units']
+            if not name in df.columns:
                 continue
-            func = conversion_dict[var]
-            existing_units = (
-                conversion_df.loc[conversion_df.translation_name==var, 
-                                  'site_units']
-                .item()
+            df[name] = (
+                constructor.convert_variable(variable=name, 
+                                             from_units=existing_units)
                 )
-            df[var] = func(df, from_units=existing_units)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _calculate_missing_variables(self, df):
         
-        missing_df = (
-            self.map.site_df.loc[self.map.site_df.Missing &
-                                 self.map.site_df.Required]
-            )
+        missing_df = self.map.get_missing_variables()
         constructor = var_constructor(df=df)
         for var in missing_df.index:
-            standard_name = missing_df.loc[var, 'standard_name']
+            name = missing_df.loc[var, 'translation_name']
             try:
-                df[standard_name] = (
-                    constructor.construct_variable(standard_name)
-                    )
+                df[name] = constructor.construct_variable(variable=name)
             except KeyError:
                 print(
                     'Warning: missing variable ({}) with no generation function!'
@@ -475,61 +475,6 @@ class file_parser():
         return ','.join(['"{}"'.format(x) for x in dummy_list]) + '\n'
     #--------------------------------------------------------------------------
     
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-### FUNCTIONS ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _convert_co2(data, from_units='mg/m^2/s'):
-    
-    if from_units == 'mg/m^2/s':
-        return data.Fco2 * 1000 / 44
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _convert_RH(data, from_units='frac'):
-    
-    if from_units == 'frac':
-        return data.RH * 100
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _calculate_es(data):
-    
-    return 0.6106 * np.exp(17.27 * data.Ta / (data.Ta + 237.3))
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _calculate_e(data):
-    
-    return _calculate_es(data) * data.RH / 100
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _calculate_AH(data):
-    
-    return (
-        _calculate_e(data) / data.ps * 
-        _calc_molar_density(data) * 18
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _calc_molar_density(data):
-    
-    return data.ps * 1000 / ((data.Ta + 273.15) * 8.3143)
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _calc_CO2_mole_fraction(data):
-    
-    return (
-        (data.CO2_density / 44) / 
-        _calc_molar_density(data) * 10**3
-        )
-    pass
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -590,15 +535,15 @@ class var_constructor():
     #--------------------------------------------------------------------------
     def _calculate_e(self):
         
-        return _calculate_es(self.data) * self.data.RH / 100
+        return self._calculate_es() * self.data.RH / 100
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
     def _calculate_AH(self):
         
         return (
-            _calculate_e(self.data) / self.data.ps * 
-            _calc_molar_density(self.data) * 18
+            self._calculate_e() / self.data.ps * 
+            self._calc_molar_density() * 18
             )
     #--------------------------------------------------------------------------
     
@@ -613,20 +558,25 @@ class var_constructor():
         
         return (
             (self.data.CO2_density / 44) / 
-            _calc_molar_density(self.data) * 10**3
+            self._calc_molar_density() * 10**3
             )
         pass
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+### MAIN CODE ###
+#------------------------------------------------------------------------------
+
+SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin']
+
 if __name__=='__main__':
     
     for site in SITE_PROC_LIST:
         print ('Parsing site {}:'.format(site))
         output_path = (
-            pathlib.Path(PATH_TO_DATA.format(site)) / 
-            '{}_merged_std.dat'.format(site)
+            PATHS.slow_fluxes(site=site) / '{}_merged_std.dat'.format(site)
             )
         parser = file_parser(site=site)
         parser.make_output_file(dest=output_path)
