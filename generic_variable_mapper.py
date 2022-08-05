@@ -348,10 +348,9 @@ class file_parser():
                 )
         header_df = pd.DataFrame(
             data=zip(splits_list[1], splits_list[2]), 
-            index=splits_list[0], columns=['units', 'sampling']
+            index=splits_list[0], columns=['standard_units', 'sampling']
             )
         timestamp = pd.DataFrame(header_df.loc['TIMESTAMP']).T
-        timestamp.rename({'units': 'standard_units'}, axis=1, inplace=True)
         ref_df = self.map.get_variable_fields(table=table)
         ref_df = ref_df.assign(
             sampling = header_df.loc[ref_df.site_name, 'sampling'].tolist()
@@ -435,21 +434,23 @@ class file_parser():
     #--------------------------------------------------------------------------
     def _calculate_missing_variables(self, df):
         
-        constructor_dict = {'AH_sensor': _calculate_AH}
-        missing_reqd_df = (
+        missing_df = (
             self.map.site_df.loc[self.map.site_df.Missing &
                                  self.map.site_df.Required]
             )
-        for var in missing_reqd_df.standard_name:
+        constructor = var_constructor(df=df)
+        for var in missing_df.index:
+            standard_name = missing_df.loc[var, 'standard_name']
             try:
-                func = constructor_dict[var]
+                df[standard_name] = (
+                    constructor.construct_variable(standard_name)
+                    )
             except KeyError:
                 print(
                     'Warning: missing variable ({}) with no generation function!'
                     .format(var)
                     )
                 continue
-            df[var] = func(df)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -552,7 +553,7 @@ class var_constructor():
         
         functions_dict = {'es': self._calculate_es(),
                           'e': self._calculate_e(),
-                          'AH': self._calculate_AH(),
+                          'AH_sensor': self._calculate_AH(),
                           'molar_density': self._calc_molar_density(),
                           'CO2_mole_fraction': self._calc_CO2_mole_fraction()}
         return functions_dict[variable]
