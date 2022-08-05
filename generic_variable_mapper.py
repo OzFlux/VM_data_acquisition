@@ -74,25 +74,10 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_conversion_data(self):
+    def get_conversion_variables(self):
         
-        return self.site_df.loc[self.site_df.conversion]
+        return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
     #--------------------------------------------------------------------------   
-
-    #--------------------------------------------------------------------------
-    def get_required_variables(self, which='all'):
-        
-        response_list = ['missing', 'all']
-        if not which in response_list:
-            raise KeyError(
-                'Arg "which" must be one of: {}'
-                .format(', '.join(response_list))
-                )
-        all_df = self.site_df.loc[self.site_df.Required==True]
-        if which == 'all':
-            return all_df    
-        return all_df.loc[pd.isnull(all_df.site_name) & (all_df.Required)]
-    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------    
     def get_repeat_variables(self, names_only=False):
@@ -104,19 +89,6 @@ class mapper():
         if not names_only:
             return data            
         return data.index.unique().tolist()
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------    
-    def get_standard_name_mapping(self, table):
-        
-        return dict(zip(
-            self.get_variable_list(
-                table=table, returns='site_name'
-                ),
-            self.get_variable_list(
-                table=table, returns='translation_name'
-                )
-            ))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------    
@@ -141,49 +113,16 @@ class mapper():
 
         return list(self.site_df.table_name.dropna().unique())
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
-    def get_variable_list(self, table, returns='long_name'):
-        """
-        Get a list of the variables mapped in the variable map spreasheet.
-
-        Parameters
-        ----------
-        table : str, optional
-            The table for which to return variables. The default is None 
-            (returns all variables).
-        returns : str, optional
-            The variable column to return (can be 'site name', 'standard_name', 
-            or 'long name'). The default is 'long_name'.
-
-        Raises
-        ------
-        KeyError
-            Raised if either table name or returns arg is invalid.
-
-        Returns
-        -------
-        list
-            List of the variables that meet the criteria.
-
-        """
-
+    def get_variable_fields(self, table, field='all'):
+        
         if not table in self.get_table_list():
             raise KeyError('Table not found!')
-        return_list = [
-            'long_name', 'site_name', 'standard_name', 'translation_name'
-            ]
-        if not returns in return_list:
-            raise KeyError(
-                '"Returns" arg must be one of the following: {}'
-                .format(', '.join(return_list))
-                )
-        temp_df = self.site_df.reset_index()
-        if table:
-            return (
-                temp_df.loc[temp_df.table_name==table, returns].tolist()
-                )
-        return temp_df[returns].tolist()
+        if field == 'all':
+            return self.site_df.loc[self.site_df.table_name == table]
+        local_df = self.site_df.reset_index()
+        return local_df.loc[local_df.table_name == table, field].tolist()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -253,7 +192,14 @@ class mapper():
             master_df.loc[master_df.Required==True].index.tolist()
             )
         missing_list = [x for x in required_list if not x in site_df.index]
+        if 'IRGA automatic gain control' in missing_list:
+            if 'IRGA signal' in site_df.index:
+                missing_list.remove('IRGA automatic gain control')
+        if 'IRGA signal' in missing_list:
+            if 'IRGA automatic gain control' in site_df.index:
+                missing_list.remove('IRGA signal')
         site_df = pd.concat([site_df, master_df.loc[missing_list]])
+        site_df['Missing'] = pd.isnull(site_df.site_name)
         
         # Format and return
         site_df.index.name = 'long_name'
@@ -265,87 +211,72 @@ class mapper():
 #------------------------------------------------------------------------------
 class file_parser():
 
-    def __init__(self, site, concatenate_backups=False):
+    def __init__(self, site):
 
         self.paths = pm.paths(site)
         self.map = mapper(site=site)
         self._conversion_dict = {'Fco2': {'mg/m^2/s': _convert_co2},
                                  'RH': {'frac': _convert_RH}}
         self.site = site
-        self.concatenate_backups = concatenate_backups
 
     #--------------------------------------------------------------------------
     ### METHODS (PUBLIC) ###
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_table_data(self, table, standardise_vars=False, 
-                       convert_units=False, apply_limits=False, 
-                       pass_all_vars=False):
-        
-        files_to_concat = self.get_table_files(table=table)
-        df = (pd.concat(
-            [pd.read_csv(file, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-                         index_col=['TIMESTAMP'],
-                         na_values='NAN', sep=',', engine='c',
-                         on_bad_lines='warn')
-            for file in files_to_concat]
-            )
+    def _get_table_data(self, table):
+
+        file_name = self.get_table_file(table=table)
+        df = (
+            pd.read_csv(file_name, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
+                        index_col=['TIMESTAMP'], #usecols=variables,
+                        na_values='NAN', sep=',', engine='c',
+                        on_bad_lines='warn')
             .drop_duplicates()
             .sort_index()
             )
-        if not pass_all_vars:
-            variables = (
-                ['RECORD'] +
-                self.map.get_variable_list(table=table, returns='site_name')
-                )
-            df = df[variables]
+        variables = (
+            ['RECORD'] +
+            self.map.get_variable_fields(table=table, field='site_name')
+            )        
+        df = df[variables]
         freq = self._get_table_freq(df)
         new_index = (
             pd.date_range(start=df.index[0], end=df.index[-1], freq=freq)
             )
         df.drop('RECORD', axis=1, inplace=True)
-        if standardise_vars:
-            rename_dict = self.map.get_standard_name_mapping(table=table)
-            df.rename(rename_dict, axis=1, inplace=True)
-            if convert_units:
-                self._do_unit_conversion(df=df)
-            if apply_limits:
-                self._apply_limits(df=df)
+        rename_dict = dict(zip(
+            self.map.get_variable_fields(table=table, field='site_name'),
+            self.map.get_variable_fields(table=table, field='translation_name')
+            ))
+        df.rename(rename_dict, axis=1, inplace=True)
+        self._do_unit_conversion(df=df)
+        self._apply_limits(df=df)
         return df.reindex(new_index)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_table_files(self, table):
+    def get_table_file(self, table):
 
         if not table in self.map.get_table_list():
             raise KeyError('Table not found!')
-        if self.concatenate_backups:
-            return list(
-                self.paths.slow_fluxes.glob('*{}.*'.format(table))
-                )
-        return list(
-            self.paths.slow_fluxes.glob('*{}.dat'.format(table))
-            )
+        gen = self.paths.slow_fluxes.glob('*{}.dat'.format(table))
+        l = [x for x in gen]
+        if not len(l) == 1:
+            raise RuntimeError('More than one file with that string found!')
+        return l[0]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def merge_tables(self, standardise_vars=False, convert_units=False, 
-                     apply_limits=False, pass_all_vars=False):
+    def construct_table_data(self, table=None):
         
+        if table:
+            return self._get_table_data(table=table)
         tables = self.map.get_table_list()
-        try:
-            tables.remove('site_details')
-        except ValueError:
-            pass
         df_list, date_list, freq_list = [], [], []
         for table in tables:
             print ('Getting table {}...'.format(table))
-            this_df = self.get_table_data(
-                table=table, standardise_vars=standardise_vars,
-                convert_units=convert_units, apply_limits=apply_limits,
-                pass_all_vars=pass_all_vars
-                )
+            this_df = self._get_table_data(table=table)
             df_list.append(this_df)
             date_list += [this_df.index[0], this_df.index[-1]]
             freq_list.append(this_df.index.freq)
@@ -362,15 +293,14 @@ class file_parser():
         for this_df in df_list:
             this_df = this_df.reindex(new_index)
         df = pd.concat(df_list, axis=1)
-        if standardise_vars:
-            df = df[self.map.site_df.translation_name]
+        self._calculate_missing_variables(df=df)
         return df
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
     def read_raw_header(self, table):
         
-        table_path = self.get_table_files(table=table)[0]
+        table_path = self.get_table_file(table=table)
         header_list = []
         with open(table_path) as f:
             for i in range(4):
@@ -390,57 +320,53 @@ class file_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_header_frame(self, table):
+    def construct_header(self, table=None, to_list=False, add_missing=True):
+        
+        if table:
+            df = self._construct_table_header_frame(table=table)
+        else:
+            df = pd.concat(
+                [self._construct_table_header_frame(table=table) 
+                 for table in self.map.get_table_list()]
+                )
+            df = df[~df.index.duplicated()]
+        if add_missing:
+            pass
+        if to_list:
+            return self._construct_header_strings(header_frame=df)
+        return df
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _construct_table_header_frame(self, table):
         
         header_list = self.read_raw_header(table=table)[1:]
         splits_list = []
         for i, line in enumerate(header_list):
             splits_list.append(
-                [x.replace('"', '')for x in line.replace('\n', '').split(',')]
+                [x.replace('"', '') for x in line.replace('\n', '').split(',')]
                 )
-        output_df = pd.DataFrame(
+        header_df = pd.DataFrame(
             data=zip(splits_list[1], splits_list[2]), 
             index=splits_list[0], columns=['units', 'sampling']
             )
-        output_df.drop('RECORD', inplace=True)
-        output_df.index.name = 'variable'
-        return output_df
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def merge_header_frames(self, standardise_vars=False, convert_units=False):
-        
-        header_frame = (
-            pd.concat([self.get_header_frame(table=table) 
-                       for table in self.map.get_table_list()]
-                      )
+        timestamp = pd.DataFrame(header_df.loc['TIMESTAMP']).T
+        timestamp.rename({'units': 'standard_units'}, axis=1, inplace=True)
+        ref_df = self.map.get_variable_fields(table=table)
+        ref_df = ref_df.assign(
+            sampling = header_df.loc[ref_df.site_name, 'sampling'].tolist()
             )
-        header_frame = header_frame[~header_frame.index.duplicated()]
-        timestamp = pd.DataFrame(header_frame.loc['TIMESTAMP']).T
-        try:
-            header_frame = header_frame.loc[self.map.site_df.site_name.tolist()]
-        except KeyError:
-            pdb.set_trace()
-        site_name_list = header_frame.index.tolist()
-        if standardise_vars:
-            header_frame.index = self.map.site_df.loc[
-                self.map.site_df.site_name==site_name_list,
-                'translation_name'
-                ]
-        if convert_units:
-            header_frame.loc[:, 'units'] = self.map.site_df.standard_units.tolist()
-        else:
-            header_frame.loc[:, 'units'] = self.map.site_df.site_units.tolist()
-        return pd.concat([timestamp, header_frame])
+        output_df = ref_df[['standard_units', 'sampling']]
+        output_df.index = ref_df['translation_name']
+        output_df.index.name = 'variable_name'
+        return pd.concat([timestamp, output_df])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def make_header(self, standardise_vars=False, convert_units=False):
+    def _construct_header_strings(self, header_frame):
         
-        header_frame = self.merge_header_frames(
-            standardise_vars=standardise_vars, convert_units=convert_units
-            ).reset_index()
         string_list = [self._make_dummy_header()]
+        header_frame = header_frame.reset_index()
         for column in header_frame.columns:
             string_list.append(
                 ','.join(['"{}"'.format(x) for x in header_frame[column]])
@@ -452,13 +378,10 @@ class file_parser():
     #--------------------------------------------------------------------------
     def make_output_file(self, dest):
         
-        header_lines = self.make_header(
-            standardise_vars=True, convert_units=True
-            )
-        data = self.merge_tables(
-            standardise_vars=True, convert_units=True, apply_limits=True
-            )
+        header_lines = self.construct_header(to_list=True)
+        data = self.construct_table_data()
         data = data.reset_index()
+        pdb.set_trace()
         timestamps = data['index'].apply(dt.datetime.strftime, 
                                          format='%Y-%m-%d %H:%M:%S')
         data['TIMESTAMP'] = timestamps
@@ -495,17 +418,38 @@ class file_parser():
     #--------------------------------------------------------------------------
     def _do_unit_conversion(self, df):
         
-        conversion_df = self.map.get_conversion_data()
+        conversion_dict = {'Fco2': _convert_co2, 'RH': _convert_RH}
+        conversion_df = self.map.get_conversion_variables()
         for var in conversion_df.translation_name:
             if not var in df.columns:
                 continue
-            conversion_dict = self._conversion_dict[var]
+            func = conversion_dict[var]
             existing_units = (
                 conversion_df.loc[conversion_df.translation_name==var, 
-                                  'site_units'].item()
+                                  'site_units']
+                .item()
                 )
-            conversion_func = conversion_dict[existing_units]
-            df[var] = df[var].apply(conversion_func)
+            df[var] = func(df, from_units=existing_units)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _calculate_missing_variables(self, df):
+        
+        constructor_dict = {'AH_sensor': _calculate_AH}
+        missing_reqd_df = (
+            self.map.site_df.loc[self.map.site_df.Missing &
+                                 self.map.site_df.Required]
+            )
+        for var in missing_reqd_df.standard_name:
+            try:
+                func = constructor_dict[var]
+            except KeyError:
+                print(
+                    'Warning: missing variable ({}) with no generation function!'
+                    .format(var)
+                    )
+                continue
+            df[var] = func(df)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -537,54 +481,143 @@ class file_parser():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _convert_co2(data):
+def _convert_co2(data, from_units='mg/m^2/s'):
     
-    return data * 1000 / 44
+    if from_units == 'mg/m^2/s':
+        return data.Fco2 * 1000 / 44
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _convert_RH(data):
+def _convert_RH(data, from_units='frac'):
     
-    return data * 100
+    if from_units == 'frac':
+        return data.RH * 100
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _calculate_es(Ta_data):
+def _calculate_es(data):
     
-    return 0.6106 * np.exp(17.27 * Ta_data / (Ta_data + 237.3))
+    return 0.6106 * np.exp(17.27 * data.Ta / (data.Ta + 237.3))
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _calculate_e(Ta_data, RH_data):
+def _calculate_e(data):
     
-    return _calculate_es(Ta_data=Ta_data) * RH_data / 100
+    return _calculate_es(data) * data.RH / 100
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _calculate_AH(Ta_data, RH_data, ps_data):
+def _calculate_AH(data):
     
     return (
-        _calculate_e(Ta_data, RH_data) / ps_data * 
-        _calc_molar_density(Ta_data, ps_data) * 18
+        _calculate_e(data) / data.ps * 
+        _calc_molar_density(data) * 18
         )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _calc_molar_density(Ta_data, ps_data):
+def _calc_molar_density(data):
     
-    return ps_data * 1000 / ((Ta_data + 273.15) * 8.3143)
+    return data.ps * 1000 / ((data.Ta + 273.15) * 8.3143)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _calc_CO2_mole_fraction(CO2Dens_data, Ta_data, ps_data):
+def _calc_CO2_mole_fraction(data):
     
     return (
-        (CO2Dens_data / 44) / 
-        _calc_molar_density(Ta_data, ps_data) * 10**3
+        (data.CO2_density / 44) / 
+        _calc_molar_density(data) * 10**3
         )
     pass
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+class var_constructor():
+    
+    def __init__(self, df):
+        
+        self.data = df
+
+    #--------------------------------------------------------------------------
+    def get_header_fragment(self, variable):
+        
+        units_dict = {'es': 'kPa', 'e': 'kPa', 'AH': 'g/m^3', 
+                      'molar_density': 'mol/m^3', 
+                      'CO2_mole_fraction': 'umol/mol'}
+        return {'standard_units': units_dict[variable], 'sampling': ''}
+    #--------------------------------------------------------------------------    
+
+    #--------------------------------------------------------------------------    
+    def construct_variable(self, variable):
+        
+        functions_dict = {'es': self._calculate_es(),
+                          'e': self._calculate_e(),
+                          'AH': self._calculate_AH(),
+                          'molar_density': self._calc_molar_density(),
+                          'CO2_mole_fraction': self._calc_CO2_mole_fraction()}
+        return functions_dict[variable]
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------    
+    def convert_variable(self, variable, from_units):
+        
+        functions_dict = {'Fco2': self._convert_Fco2(from_units),
+                          'RH': self._convert_RH(from_units)}
+        return functions_dict[variable]
+    #--------------------------------------------------------------------------    
+
+    #--------------------------------------------------------------------------
+    def _convert_Fco2(self, from_units='mg/m^2/s'):
+        
+        if from_units == 'mg/m^2/s':
+            return self.data.Fco2 * 1000 / 44
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _convert_RH(self, from_units='frac'):
+        
+        if from_units == 'frac':
+            return self.data.RH * 100
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _calculate_es(self):
+        
+        return 0.6106 * np.exp(17.27 * self.data.Ta / (self.data.Ta + 237.3))
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _calculate_e(self):
+        
+        return _calculate_es(self.data) * self.data.RH / 100
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _calculate_AH(self):
+        
+        return (
+            _calculate_e(self.data) / self.data.ps * 
+            _calc_molar_density(self.data) * 18
+            )
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _calc_molar_density(self):
+        
+        return self.data.ps * 1000 / ((self.data.Ta + 273.15) * 8.3143)
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _calc_CO2_mole_fraction(self):
+        
+        return (
+            (self.data.CO2_density / 44) / 
+            _calc_molar_density(self.data) * 10**3
+            )
+        pass
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 
 if __name__=='__main__':
     
