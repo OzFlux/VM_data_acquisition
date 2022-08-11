@@ -46,6 +46,16 @@ class paths():
                 self._check_exists(path=path)
             return path
         
+    def RTMC_snapshot_directory(self, site=None, check_exists=False):
+        
+        path = get_path(
+            base_path='data', data_stream='flux_RTMC', site=site
+            )
+        if check_exists:
+            self._check_exists(path=path)
+        return path
+
+        
     def RTMC_template(self, check_exists=False):
         
         return get_path(base_path='RTMC_project_template')
