@@ -49,6 +49,21 @@ PATHS = pm.paths()
 class mapper():
     
     def __init__(self, site):
+        """
+        Class to generate mapping functions from site-specific variables to 
+        universal standard (where possible, nomenclature is based on the 
+                            guidance in the PFP Wiki)
+
+        Parameters
+        ----------
+        site : str
+            The site for which to generate the map.
+
+        Returns
+        -------
+        None.
+
+        """
 
         self.site = site        
         self.site_df = self._make_site_df()
@@ -59,12 +74,58 @@ class mapper():
 
     #--------------------------------------------------------------------------
     def get_conversion_variables(self):
-        
+        """
+        Get the variables in the mapping spreadsheet that require conversion 
+        from non-standard units
+
+        Parameters
+        ----------
+        None.
+
+        Returns
+        -------
+        dataframe.
+
+        """
+                
         return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
     #--------------------------------------------------------------------------   
 
+    #--------------------------------------------------------------------------
+    def get_missing_variables(self):
+        """
+        Get the variables in the mapping spreadsheet that are required but do
+        are not available in the raw data
+
+        Parameters
+        ----------
+        None.
+
+        Returns
+        -------
+        dataframe.
+
+        """
+        
+        return self.site_df.loc[self.site_df.Missing & self.site_df.Required]
+    #--------------------------------------------------------------------------
+
     #--------------------------------------------------------------------------    
     def get_repeat_variables(self, names_only=False):
+        """
+        Get the variables in the mapping spreadsheet that have multiple
+        instruments (e.g. soil instruments)
+        
+        Parameters
+        ----------
+        names_only : bool
+            If True, returns a list of the variable long names. If False,
+        
+        Returns
+        -------
+        dataframe or list.
+        
+        """
         
         data = self.site_df[self.site_df.index.duplicated(keep=False)]
         if len(data) == 0:
@@ -76,9 +137,12 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_missing_variables(self):
+    def get_soil_variables(self):
         
-        return self.site_df.loc[self.site_df.Missing & self.site_df.Required]
+        return pd.concat(
+            [self.site_df.loc[x] for x in self.site_df.index.unique()
+             if 'Soil' in x]
+            )
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------    

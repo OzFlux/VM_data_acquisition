@@ -9,29 +9,6 @@ from configparser import ConfigParser
 import pathlib
 
 #------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class paths_2():
-    
-    def __init__(self, placeholder='<site>', site=None):
-
-        self._config = ConfigParser()
-        self._config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
-        self.site = site
-        self.xl_variable_map = get_path(base_path='xl_variable_map')
-        self.slow_fluxes = get_path(
-            base_path='data', data_stream='flux_slow', site=self.site
-            )
-        base_image = get_path(base_path='site_images')
-        if site:
-            self.tower_image = base_image / '{}_tower.jpg'.format(site)
-            self.contour_image = base_image / '{}_contour.png'.format(site)
-        else:
-            self.tower_image = base_image
-            self.contour_image = base_image
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 class paths():
     
     def __init__(self):
@@ -68,7 +45,37 @@ class paths():
             if check_exists:
                 self._check_exists(path=path)
             return path
+        
+    def RTMC_template(self, check_exists=False):
+        
+        return get_path(base_path='RTMC_project_template')
     
+    def RTMC_data_file(self, site=None, check_exists=False):
+        
+        path = get_path(
+            base_path='data', data_stream='flux_slow', site=site
+            )
+        file = '{}_merged_std.dat'
+        if site:
+            file = file.format(site)
+            path = path / file
+            if check_exists:
+                self._check_exists(path=path)
+            return path
+        return path / file
+
+    def RTMC_details_file(self, site=None, check_exists=False):
+        
+        path = get_path(base_path='site_details')
+        file = '{}_details.dat'
+        if site:
+            file = file.format(site)
+            path = path / file
+            if check_exists:
+                self._check_exists(path=path)
+            return path
+        return path
+        
     def _check_exists(self, path):
         
         if not path.exists():
