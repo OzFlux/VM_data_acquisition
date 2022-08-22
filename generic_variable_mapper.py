@@ -10,9 +10,8 @@ Issues:
     - need to do a comprehensive check of the files to be concatenated before
       doing the concat - pandas is good at reconciling different files but this
       could have unintended consequences
-    - remove direct manipulation of site dataframe from the file parser (this 
-      necessitates the use of self.map.etc... particularly in the output file
-      method)
+    - mapper should be able to create an rtmc spreadsheet linking rtmc 
+      components to variables
 
 @author: imchugh
 """
@@ -67,6 +66,7 @@ class mapper():
 
         self.site = site        
         self.site_df = self._make_site_df()
+        self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
     
     #--------------------------------------------------------------------------
     ### PUBLIC METHODS ###
@@ -90,6 +90,14 @@ class mapper():
                 
         return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
     #--------------------------------------------------------------------------   
+
+    #--------------------------------------------------------------------------   
+    def get_logger_list(self, long_name=None):
+        
+        if long_name:
+            return self.site_df.loc[long_name, 'logger_name']
+        return list(self.site_df.logger_name.dropna().unique())
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_missing_variables(self):
@@ -154,7 +162,7 @@ class mapper():
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def get_table_list(self):
+    def get_table_list(self, long_name=None):
         """
         List all the unique tables for the relevant site in the variable map
         spreadsheet
@@ -165,6 +173,8 @@ class mapper():
             The list of tables.
         """
 
+        if long_name:
+            return self.site_df.loc[long_name, 'table_name']
         return list(self.site_df.table_name.dropna().unique())
     #--------------------------------------------------------------------------
 
@@ -211,8 +221,10 @@ class mapper():
         # Concatenate the logger_name and the table_name to make the file source 
         # name (only applied if 'logger_name_in_source' arg is True)
         def func(s):
-           return '{}.dat'.format('_'.join(s.tolist()))
-    
+            if len(s.dropna()) == 0:
+                return np.nan
+            return '{}.dat'.format('_'.join(s.tolist()))
+
         # Create the site dataframe
         site_df = pd.read_excel(
             PATHS.variable_map(), sheet_name=self.site, usecols=IMPORT_LIST,
@@ -237,27 +249,21 @@ class mapper():
             {'Variable name': 'standard_name', 
              'Variable units': 'standard_units'}, 
             axis=1, inplace=True
-            )        
-           
+            )       
+        
         # Join and generate variables that require input from both sources
         site_df = site_df.join(master_df)
         site_df = site_df.assign(
             conversion=site_df.site_units!=site_df.standard_units,
-            translation_name=np.where(site_df.index.duplicated(keep=False),
+            translation_name=np.where(~pd.isnull(site_df.site_label), 
                                       site_df.site_label, site_df.standard_name)
             )
-        
+                
         # Add critical variables that are missing from the primary datasets
         required_list = (
             master_df.loc[master_df.Required==True].index.tolist()
             )
         missing_list = [x for x in required_list if not x in site_df.index]
-        if 'IRGA automatic gain control' in missing_list:
-            if 'IRGA signal' in site_df.index:
-                missing_list.remove('IRGA automatic gain control')
-        if 'IRGA signal' in missing_list:
-            if 'IRGA automatic gain control' in site_df.index:
-                missing_list.remove('IRGA signal')
         site_df = pd.concat([site_df, master_df.loc[missing_list]])
         site_df['Missing'] = pd.isnull(site_df.site_name)
         site_df.loc[site_df.Missing, 'translation_name'] = (
@@ -270,7 +276,140 @@ class mapper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class file_parser():
+class _RTMC_syntax_generator():
+    
+    def __init__(self, site_df):
+        
+        self.site_df = site_df
+
+    #--------------------------------------------------------------------------
+    def _get_init_dict(self, start_cond):
+        
+        start_dict = {
+            'start': 'StartRelativeToNewest({},OrderCollected);',
+            'start_absolute': 'StartAtRecord(0,0,OrderCollected);'
+            }
+        if not start_cond:
+            return {}
+        return {'start_cond': start_dict[start_cond]}
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_scaled_to_range(self, eval_string):
+        
+        return (
+            '({ev} - MinRun({ev})) / (MaxRun({ev}) - MinRun({ev}))'
+            .format(ev=eval_string)
+            )
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def get_alias_string(self, long_name, **kwargs):
+        
+        variable = self._get_variable_frame(long_name=long_name)
+        alias_list = variable.translation_name.tolist()
+        source_list = [
+            '"DataFile:merged.{}"'.format(x) for x in alias_list
+            ]
+        combined_list = [
+            'Alias({});'.format(x[0] + ',' + x[1])
+            for x in zip(alias_list, source_list)
+            ]
+        return self._str_joiner(combined_list, joiner='\r\n')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_variable_frame(self, long_name):
+        
+        variable = self.site_df.loc[long_name]
+        if isinstance(variable, pd.core.series.Series):
+            variable = variable.to_frame().T
+        return variable
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_aliased_output(
+            self, long_name, multiple_to_avg=True, as_str=True, 
+            start_cond=None, scaled_to_range=False
+            ):
+        
+        variable = self._get_variable_frame(long_name=long_name)
+        alias_string = self.get_alias_string(long_name=long_name) 
+        eval_string = '+'.join(variable.translation_name.tolist())
+        if scaled_to_range:
+            eval_string = self._get_scaled_to_range(eval_string=eval_string)
+            start_cond = 'start_absolute'
+        n = len(variable)
+        if n > 1:
+            if multiple_to_avg:
+                eval_string = '({0})/{1}'.format(eval_string, n)
+            else:
+                raise NotImplementedError('Only averages implemented!')
+        strings_dict = self._get_init_dict(start_cond=start_cond)
+        strings_dict.update(
+            {'alias_string': alias_string, 'eval_string': eval_string}
+            )
+        if as_str:
+            return self._str_joiner(list(strings_dict.values()))            
+        return strings_dict
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def get_soil_heat_storage(
+            self, Cp=1800, seconds=1800, layer_depth=0.08, as_str=True,
+            start_cond=None):
+        
+        avg_dict = (
+            self.get_aliased_output(long_name='Soil temperature', as_str=False)
+            )
+        alias_string = self._str_joiner(
+            [avg_dict['alias_string'], 'Alias(Cp,{});'.format(Cp)],
+            joiner='\r\n'
+            )
+        eval_string = (
+            'Cp*(({avg})-Last({avg}))/{secs}*1/{dp}'
+            .format(avg=avg_dict['eval_string'], secs=seconds, dp=layer_depth)
+            )
+        strings_dict = self._get_init_dict(start_cond=start_cond)
+        strings_dict.update(
+            {'alias_string': alias_string, 'eval_string': eval_string}
+            )
+        if as_str:
+            return self._str_joiner(list(strings_dict.values()))
+        return strings_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_corrected_soil_heat_flux(
+            self, Cp=1800, seconds=1800, layer_depth=0.08
+            ):
+        
+        stor_dict = self.get_soil_heat_storage(
+            Cp=Cp, seconds=seconds, layer_depth=layer_depth, as_str=False
+            )
+        flux_dict = self.get_aliased_output(
+            long_name='Soil heat flux at depth z', as_str=False
+            )
+        all_alias = self._str_joiner(
+            str_list=[flux_dict['alias_string'], stor_dict['alias_string']],
+                      joiner='\r\n')
+        output_string = (
+            '{flux}+{store}'.format(flux=flux_dict['eval_string'],
+                                    store=stor_dict['eval_string'])
+            )
+        return self._str_joiner([all_alias, output_string])
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def _str_joiner(self, str_list, joiner='\r\n\r\n'):
+
+        return joiner.join(str_list)
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class file_merger():
 
     def __init__(self, site):
 
@@ -287,9 +426,8 @@ class file_parser():
         file_name = self.get_table_file(table=table)
         df = (
             pd.read_csv(file_name, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-                        index_col=['TIMESTAMP'], #usecols=variables,
-                        na_values='NAN', sep=',', engine='c',
-                        on_bad_lines='warn')
+                        index_col=['TIMESTAMP'], na_values='NAN', sep=',', 
+                        engine='c', on_bad_lines='warn')
             .drop_duplicates()
             .sort_index()
             )
@@ -345,7 +483,7 @@ class file_parser():
                 )
         new_index = pd.date_range(
             start=np.array(date_list).min(), 
-            end=np.array(date_list).max(), 
+            end=np.array(date_list).min(), 
             freq=freq_list[0]
             )
         for this_df in df_list:
@@ -560,12 +698,13 @@ class var_constructor():
     #--------------------------------------------------------------------------    
     def construct_variable(self, variable):
         
-        functions_dict = {'es': self._calculate_es(),
-                          'e': self._calculate_e(),
-                          'AH_sensor': self._calculate_AH(),
-                          'molar_density': self._calc_molar_density(),
-                          'CO2_mole_fraction': self._calc_CO2_mole_fraction()}
-        return functions_dict[variable]
+        functions_dict = {'es': self._calculate_es,
+                          'e': self._calculate_e,
+                          'AH_sensor': self._calculate_AH,
+                          'molar_density': self._calculate_molar_density,
+                          'CO2_mole_fraction': self._calculate_CO2_mole_fraction,
+                          'RH': self._calculate_RH}
+        return functions_dict[variable]()
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------    
@@ -607,22 +746,31 @@ class var_constructor():
         
         return (
             self._calculate_e() / self.data.ps * 
-            self._calc_molar_density() * 18
+            self._calculate_molar_density() * 18
             )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _calculate_RH(self):
+        
+        e = ((self.data.AH_sensor / 18) / self._calculate_molar_density() *
+             self.data.ps)
+        es = self._calculate_es()
+        return e / es * 100
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def _calc_molar_density(self):
+    def _calculate_molar_density(self):
         
         return self.data.ps * 1000 / ((self.data.Ta + 273.15) * 8.3143)
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def _calc_CO2_mole_fraction(self):
+    def _calculate_CO2_mole_fraction(self):
         
         return (
             (self.data.CO2_density / 44) / 
-            self._calc_molar_density() * 10**3
+            self._calculate_molar_density() * 10**3
             )
         pass
     #--------------------------------------------------------------------------
@@ -633,7 +781,7 @@ class var_constructor():
 ### MAIN CODE ###
 #------------------------------------------------------------------------------
 
-SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin']
+SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin', 'Fletcherview', 'Litchfield']
 
 if __name__=='__main__':
     
@@ -642,5 +790,5 @@ if __name__=='__main__':
         output_path = (
             PATHS.slow_fluxes(site=site) / '{}_merged_std.dat'.format(site)
             )
-        parser = file_parser(site=site)
+        parser = file_merger(site=site)
         parser.make_output_file(dest=output_path)

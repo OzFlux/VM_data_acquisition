@@ -23,7 +23,8 @@ import time_functions as tf
 ### Constants ###
 #------------------------------------------------------------------------------
 
-SITES = ['Boyagin', 'Calperum', 'CowBay', 'Gingin', 'GreatWesternWoodlands', 'RobsonCreek', 'Fletcherview']
+SITES = ['Boyagin', 'Calperum', 'CowBay', 'Gingin', 'GreatWesternWoodlands', 
+         'RobsonCreek', 'Fletcherview', 'Litchfield']
 # CAMERAS = {'Boyagin': 'ccfc-1859'}
 
 #------------------------------------------------------------------------------
