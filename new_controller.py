@@ -11,6 +11,7 @@ Created on Fri Jul 29 14:13:29 2022
 
 from matplotlib.pyplot import cm
 import numpy as np
+import pandas as pd
 import sys
 import pdb
 
@@ -91,14 +92,19 @@ def line_plot_parser(long_name, screen_name, component_name):
     
     try:
         df = mapper.site_df.loc[long_name]
+        if isinstance(df, pd.core.series.Series):
+            df = df.to_frame().T
     except KeyError:
         'No data for this variable!'
         return
     plot_editor = parser.get_editor_by_component_name(
         screen=screen_name, component_name=component_name, 
         )
-    old_labels = plot_editor.get_trace_labels()
-    new_labels = list(df.translation_name)
+    old_labels = [
+        x for x in plot_editor.get_trace_labels() 
+        if plot_editor.get_axis_by_label(x)=='left'
+        ]
+    new_labels = df.translation_name.tolist()      
     if len(old_labels) > len(new_labels):
         drop_labels = old_labels[len(new_labels):]
         for this_label in drop_labels:
@@ -109,15 +115,18 @@ def line_plot_parser(long_name, screen_name, component_name):
         colour = next(palette)
         calculation_str = '"DataFile:merged.{}"'.format(new_label)
         try:
-            old_label = old_labels[i]
+            elem_label = old_labels[i]
             plot_editor.set_trace_attributes_by_label(
-                label=old_label, calculation=calculation_str, rgb=colour,
-                new_label=new_label
-                )
+                label=elem_label, calculation=calculation_str, rgb=colour,
+                new_label=new_label, title=new_label)
         except IndexError:
-            plot_editor.create_trace_element_by_label(new_label=new_label)
+            elem_label = new_labels[0]
+            plot_editor.duplicate_trace_element_by_label(
+                old_label=elem_label, new_label=new_label
+                )
             plot_editor.set_trace_attributes_by_label(
-                label=new_label, calculation=calculation_str, rgb=colour)
+                label=new_label, calculation=calculation_str, rgb=colour,
+                title=new_label)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -127,6 +136,7 @@ def line_plot_parser(long_name, screen_name, component_name):
 # Create the mapper and parser objects
 mapper = gvm.mapper(site=site)
 parser = rxp.rtmc_parser(PATHS.RTMC_template(check_exists=True))
+site = sys.argv[1]
 
 #------------------------------------------------------------------------------
 # Background configs
@@ -236,7 +246,7 @@ soil_moist_StatusBar_editor = parser.get_editor_by_component_name(
     )
 StatusBar_moist_str = (
     mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil temperature', scaled_to_range=True, 
+        long_name='Soil water content', scaled_to_range=True, 
         start_cond='start_absolute'
         )
     )
@@ -258,6 +268,7 @@ line_plot_parser(long_name='Soil temperature', screen_name='Soil',
                  component_name='Time Series Chart1')
 
 # Reconfigure the soil moisture plot
+# pdb.set_trace()
 line_plot_parser(long_name='Soil water content', screen_name='Soil', 
                  component_name='Time Series Chart2')
 
