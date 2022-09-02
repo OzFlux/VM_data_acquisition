@@ -65,7 +65,7 @@ class mapper():
         """
 
         self.site = site        
-        self.site_df = self._make_site_df()
+        self.site_df = _make_site_df(site=site)
         self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
     
     #--------------------------------------------------------------------------
@@ -90,6 +90,12 @@ class mapper():
                 
         return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
     #--------------------------------------------------------------------------   
+
+    #--------------------------------------------------------------------------   
+    def get_file_list(self):
+        
+        return self.site_df.file_name.dropna().unique()
+    #--------------------------------------------------------------------------  
 
     #--------------------------------------------------------------------------   
     def get_logger_list(self, long_name=None):
@@ -179,14 +185,14 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variable_fields(self, table, field='all'):
+    def get_variable_fields(self, table_file, field='all'):
         
-        if not table in self.get_table_list():
+        if not table_file in self.get_file_list():
             raise KeyError('Table not found!')
         if field == 'all':
-            return self.site_df.loc[self.site_df.table_name == table]
+            return self.site_df.loc[self.site_df.file_name == table_file]
         local_df = self.site_df.reset_index()
-        return local_df.loc[local_df.table_name == table, field].tolist()
+        return local_df.loc[local_df.file_name == table_file, field].tolist()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -421,9 +427,9 @@ class file_merger():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _get_table_data(self, table):
+    def _get_table_data(self, table_file):
 
-        file_name = self.get_table_file(table=table)
+        file_name = self.get_table_file(table_file=table_file)
         df = (
             pd.read_csv(file_name, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
                         index_col=['TIMESTAMP'], na_values='NAN', sep=',', 
@@ -433,7 +439,7 @@ class file_merger():
             )
         variables = (
             ['RECORD'] +
-            self.map.get_variable_fields(table=table, field='site_name')
+            self.map.get_variable_fields(table_file=table_file, field='site_name')
             )        
         df = df[variables]
         freq = self._get_table_freq(df)
@@ -442,8 +448,8 @@ class file_merger():
             )
         df.drop('RECORD', axis=1, inplace=True)
         rename_dict = dict(zip(
-            self.map.get_variable_fields(table=table, field='site_name'),
-            self.map.get_variable_fields(table=table, field='translation_name')
+            self.map.get_variable_fields(table_file=table_file, field='site_name'),
+            self.map.get_variable_fields(table_file=table_file, field='translation_name')
             ))
         df.rename(rename_dict, axis=1, inplace=True)
         self._do_unit_conversion(df=df)
@@ -452,29 +458,29 @@ class file_merger():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_table_file(self, table):
+    def get_table_file(self, table_file):
 
-        if not table in self.map.get_table_list():
+        if not table_file in self.map.get_file_list():
             raise KeyError('Table not found!')
-        gen = PATHS.slow_fluxes(site=self.site).glob('*{}.dat'.format(table))
-        l = [x for x in gen]
-        if not len(l) == 1:
-            raise RuntimeError('More than one file with that string found!')
-        return l[0]
+        full_path = PATHS.slow_fluxes(site=self.site) / table_file
+        if not full_path.exists:
+            raise FileNotFoundError('File {} not found!'.format(table_file))
+        return full_path
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def construct_table_data(self, table=None):
+    def construct_table_data(self, table_file=None):
         
-        if table:
-            return self._get_table_data(table=table)
-        tables = self.map.get_table_list()
-        df_list, date_list, freq_list = [], [], []
-        for table in tables:
+        if table_file:
+            return self._get_table_data(table_file=table_file)
+        file_list = self.map.get_file_list()
+        df_list, start_list, end_list, freq_list = [], [], [], []
+        for table in file_list:
             print ('Getting table {}...'.format(table))
-            this_df = self._get_table_data(table=table)
+            this_df = self._get_table_data(table_file=table)
             df_list.append(this_df)
-            date_list += [this_df.index[0], this_df.index[-1]]
+            start_list += [this_df.index[0]]
+            end_list += [this_df.index[-1]]
             freq_list.append(this_df.index.freq)
         if not all(x == freq_list[0] for x in freq_list):
             raise NotImplementedError(
@@ -482,21 +488,20 @@ class file_merger():
                 'resampling not implemented yet'
                 )
         new_index = pd.date_range(
-            start=np.array(date_list).min(), 
-            end=np.array(date_list).min(), 
+            start=np.array(start_list).max(), 
+            end=np.array(end_list).min(), 
             freq=freq_list[0]
             )
-        for this_df in df_list:
-            this_df = this_df.reindex(new_index)
         df = pd.concat(df_list, axis=1)
+        df = df.reindex(new_index)
         self._calculate_missing_variables(df=df)
         return df
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def read_raw_header(self, table):
+    def read_raw_header(self, table_file):
         
-        table_path = self.get_table_file(table=table)
+        table_path = self.get_table_file(table_file=table_file)
         header_list = []
         with open(table_path) as f:
             for i in range(4):
@@ -505,12 +510,12 @@ class file_merger():
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def get_program_info(self, table):
+    def get_program_info(self, table_file):
         
         PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 
                           'serial_num', 'OS_version', 'program_name', 
                           'program_sig', 'table_name']
-        header_list = self.read_raw_header(table=table)
+        header_list = self.read_raw_header(table_file=table_file)
         string_list = [x.replace('"', '') for x in 
                        header_list[0].replace('\n', '').split(',')]
         output_dict = dict(zip(PROG_INFO_LIST, string_list))
@@ -519,14 +524,14 @@ class file_merger():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def construct_header(self, table=None, to_list=False, add_missing=True):
+    def construct_header(self, table_file=None, to_list=False, add_missing=True):
         
-        if table:
-            df = self._construct_table_header_frame(table=table)
+        if table_file:
+            df = self._construct_table_header_frame(table_file=table_file)
         else:
             df = pd.concat(
-                [self._construct_table_header_frame(table=table) 
-                 for table in self.map.get_table_list()]
+                [self._construct_table_header_frame(table_file=table_file) 
+                 for table_file in self.map.get_file_list()]
                 )
             df = df[~df.index.duplicated()]
             if add_missing:
@@ -547,9 +552,9 @@ class file_merger():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _construct_table_header_frame(self, table):
+    def _construct_table_header_frame(self, table_file):
         
-        header_list = self.read_raw_header(table=table)[1:]
+        header_list = self.read_raw_header(table_file=table_file)[1:]
         splits_list = []
         for i, line in enumerate(header_list):
             splits_list.append(
@@ -560,7 +565,7 @@ class file_merger():
             index=splits_list[0], columns=['standard_units', 'sampling']
             )
         timestamp = pd.DataFrame(header_df.loc['TIMESTAMP']).T
-        ref_df = self.map.get_variable_fields(table=table)
+        ref_df = self.map.get_variable_fields(table_file=table_file)
         ref_df = ref_df.assign(
             sampling = header_df.loc[ref_df.site_name, 'sampling'].tolist()
             )
@@ -775,6 +780,86 @@ class var_constructor():
         pass
     #--------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _make_site_df(site):
+    """
+
+
+    Parameters
+    ----------
+    path : TYPE
+        DESCRIPTION.
+    site : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+   
+    IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
+                   'Logger name', 'Disable', 'Long name', 'File name']
+    RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
+                   'Variable units': 'site_units', 'Table name': 'table_name',
+                   'Logger name': 'logger_name', 'File name': 'file_name'}
+   
+    # Concatenate the logger_name and the table_name to make the file source 
+    # name (only applied if 'logger_name_in_source' arg is True)
+    def func(s):
+        if len(s.dropna()) == 0:
+            return np.nan
+        return '{}.dat'.format('_'.join(s.tolist()))
+
+    # Create the site dataframe
+    site_df = pd.read_excel(
+        PATHS.variable_map(), sheet_name=site, usecols=IMPORT_LIST,
+        converters={'Variable units': lambda x: x if len(x) > 0 else None},
+        index_col='Long name'
+        )
+    site_df = site_df.loc[np.isnan(site_df.Disable)]
+    site_df.rename(RENAME_DICT, axis=1, inplace=True)
+    file_name = site_df.file_name.where(
+        ~pd.isnull(site_df.file_name), 
+        site_df[['logger_name', 'table_name']].apply(func, axis=1)
+        )
+    site_df = site_df.assign(file_name=file_name)
+
+    # Make the master dataframe
+    master_df = pd.read_excel(
+        PATHS.variable_map(), sheet_name='master_variables', 
+        index_col='Long name',
+        converters={'Variable units': lambda x: x if len(x) > 0 else None}
+    )
+    master_df.rename(
+        {'Variable name': 'standard_name', 
+         'Variable units': 'standard_units'}, 
+        axis=1, inplace=True
+        )       
+    
+    # Join and generate variables that require input from both sources
+    site_df = site_df.join(master_df)
+    site_df = site_df.assign(
+        conversion=site_df.site_units!=site_df.standard_units,
+        translation_name=np.where(~pd.isnull(site_df.site_label), 
+                                  site_df.site_label, site_df.standard_name)
+        )
+            
+    # Add critical variables that are missing from the primary datasets
+    required_list = (
+        master_df.loc[master_df.Required==True].index.tolist()
+        )
+    missing_list = [x for x in required_list if not x in site_df.index]
+    site_df = pd.concat([site_df, master_df.loc[missing_list]])
+    site_df['Missing'] = pd.isnull(site_df.site_name)
+    site_df.loc[site_df.Missing, 'translation_name'] = (
+        site_df.loc[site_df.Missing, 'standard_name']
+        )
+    site_df.index.name = 'long_name'
+    return site_df
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

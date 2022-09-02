@@ -22,16 +22,16 @@ import pdb
 import generic_variable_mapper as gvm
 import rtmc_xml_parser_new as rxp
 import paths_manager as pm
+sys.path.append('../site_details')
+import site_details as sd
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
 
-# Set the site name
-site = 'Litchfield'
-
 # Get the paths module
 PATHS = pm.paths()
+SITE_DEETS = sd.site_details()
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
@@ -134,9 +134,9 @@ def line_plot_parser(long_name, screen_name, component_name):
 #------------------------------------------------------------------------------
 
 # Create the mapper and parser objects
+site = sys.argv[1]
 mapper = gvm.mapper(site=site)
 parser = rxp.rtmc_parser(PATHS.RTMC_template(check_exists=True))
-site = sys.argv[1]
 
 #------------------------------------------------------------------------------
 # Background configs
@@ -161,7 +161,14 @@ settings_editor.get_set_snapshot_destination(text=snapshot_destination)
 # System screen configs
 #------------------------------------------------------------------------------
 
-# Change the the comm status alarm component calculation string
+# Change the UTC offset argument to the correct one for site
+time_editor = parser.get_editor_by_component_name(
+    screen='System', component_name='Segmented Time1'
+    )
+utc_offset = str(int(SITE_DEETS.df.loc[site, 'UTC_offset']*-60))
+time_editor.get_set_element_offset_text(text=utc_offset)
+
+# Change the comm status alarm component calculation string
 logger_name = mapper.get_logger_list(long_name='CO2 flux')
 if not isinstance(logger_name, float):
     calculation_str = get_comm_status_string(logger_name=logger_name)
