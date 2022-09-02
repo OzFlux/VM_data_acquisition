@@ -20,18 +20,10 @@ import pdb
 #------------------------------------------------------------------------------
 
 import generic_variable_mapper as gvm
-import rtmc_xml_parser_new as rxp
+import rtmc_xml_parser as rxp
 import paths_manager as pm
 sys.path.append('../site_details')
 import site_details as sd
-
-#------------------------------------------------------------------------------
-### CONSTANTS ###
-#------------------------------------------------------------------------------
-
-# Get the paths module
-PATHS = pm.paths()
-SITE_DEETS = sd.site_details()
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
@@ -134,6 +126,8 @@ def line_plot_parser(long_name, screen_name, component_name):
 #------------------------------------------------------------------------------
 
 # Create the mapper and parser objects
+PATHS = pm.paths()
+deets = sd.site_details()
 site = sys.argv[1]
 mapper = gvm.mapper(site=site)
 parser = rxp.rtmc_parser(PATHS.RTMC_template(check_exists=True))
@@ -165,7 +159,7 @@ settings_editor.get_set_snapshot_destination(text=snapshot_destination)
 time_editor = parser.get_editor_by_component_name(
     screen='System', component_name='Segmented Time1'
     )
-utc_offset = str(int(SITE_DEETS.df.loc[site, 'UTC_offset']*-60))
+utc_offset = str(int(deets.df.loc[site, 'UTC_offset']*-60))
 time_editor.get_set_element_offset_text(text=utc_offset)
 
 # Change the comm status alarm component calculation string
@@ -261,7 +255,6 @@ soil_moist_StatusBar_editor.get_set_pointer_calculation_text(
     text=StatusBar_moist_str
     )
 
-
 #------------------------------------------------------------------------------
 # Soil screen configs
 #------------------------------------------------------------------------------
@@ -275,7 +268,6 @@ line_plot_parser(long_name='Soil temperature', screen_name='Soil',
                  component_name='Time Series Chart1')
 
 # Reconfigure the soil moisture plot
-# pdb.set_trace()
 line_plot_parser(long_name='Soil water content', screen_name='Soil', 
                  component_name='Time Series Chart2')
 

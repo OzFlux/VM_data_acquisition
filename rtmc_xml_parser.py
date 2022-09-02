@@ -6,32 +6,19 @@ Created on Wed May  4 11:23:06 2022
 @author: imchugh
 """
 
+from copy import deepcopy
 import pdb
 import pathlib
 import xml.etree.ElementTree as ET
 
 #------------------------------------------------------------------------------
-### CONSTANTS
-#------------------------------------------------------------------------------
-COMPONENT_DICT = {'Image': '10702',
-                  'Digital': '10101',
-                  'TimeSeriesChart': '10602',
-                  'Time': '10108',
-                  'BasicStatusBar': '10002',
-                  'MultiStateAlarm': '10207',
-                  'CommStatusAlarm': '10205',
-                  'MultiStateImage': '10712',
-                  'NoDataAlarm': '10204',
-                  'WindRose': '10606',
-                  'RotaryGauge': '10503'}
-
-RTMC_IMAGE_PATH = (
-    'E:\\Cloudstor\\Network_documents\\RTMC_files\\Static_images\\Site_images'
-    )
-#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### CLASSES
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+### COMPONENT EDITING CLASSES ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -61,6 +48,31 @@ class Digital_editor():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class BasicSettings_editor():
+
+    def __init__(self, elem):
+
+        self.elem = elem
+        
+    def get_set_snapshot_destination(self, text=None):
+
+        snapshot_element = self.elem.find('snapshot_directory')
+        if not text:
+            return snapshot_element.text
+        snapshot_element.text = text
+        
+    def get_set_snapshot_screen_state(self, screen, state=None):
+
+        enabled_element = self.elem.find(
+            './Screens/screen[@screen_name="{}"]/snapshot_enabled'
+            .format(screen)
+            )
+        if not state:
+            return enabled_element.text
+        enabled_element.text = state
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class BasicStatusBar_editor(Digital_editor):
 
     #--------------------------------------------------------------------------
@@ -68,14 +80,43 @@ class BasicStatusBar_editor(Digital_editor):
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_set_pointer_calculation_text(self, pointer, text=None):
+    def get_set_pointer_calculation_text(self, pointer=None, text=None):
 
         """Get and set pointer calculation element"""
         d = {'max': 'max_pointer', 'min': 'min_pointer'}
-        element = self.elem.find('./{}/calculation'.format(d[pointer]))
+        if not pointer:
+            element = self.elem.find('Pointers/pointer/calculation')
+        else:
+            element = self.elem.find('./{}/calculation'.format(d[pointer]))
         if not text:
             return element.text
         element.text = text
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class FileSource_editor():
+
+    def __init__(self, elem):
+
+        self.elem = elem
+   
+    #--------------------------------------------------------------------------
+    def get_set_source_file(self, path=None):
+
+        settings_elem = self.elem.find('settings')
+        if not path:
+            return settings_elem.attrib['file-name']
+        settings_elem.attrib['file-name'] = path
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_set_source_name(self, name=None):
+
+        if not name:
+            return self.elem.attrib['name']
+        self.elem.attrib['name'] = name
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -94,32 +135,6 @@ class Image_editor():
         if not text:
             return location_element.text
         location_element.text = text
-    #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class FileSource_editor():
-
-    def __init__(self, elem):
-
-        self.elem = elem
-
-    #--------------------------------------------------------------------------
-    def get_set_source_file(self, path=None):
-
-        settings_elem = self.elem.find('settings')
-        if not path:
-            return settings_elem.attrib['file-name']
-        settings_elem.attrib['file-name'] = path
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_set_source_name(self, name=None):
-
-        if not name:
-            return self.elem.attrib['name']
-        self.elem.attrib['name'] = name
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -161,6 +176,16 @@ class TimeSeriesChart_editor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_axis_by_label(self, label):
+
+        elem = self.get_trace_element_by_label(label=label)
+        axis = elem.find('trace').attrib['vertical-axis']
+        if axis == '1':
+            return 'right'
+        return 'left'
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_trace_elements(self):
 
         return self.elem.findall('Traces/traces')
@@ -175,23 +200,59 @@ class TimeSeriesChart_editor():
     #--------------------------------------------------------------------------
     def get_trace_element_by_label(self, label):
 
-        elems = self.get_trace_elements()
-        for x in elems:
-            try:
-                if x.attrib['label'] == label:
-                    return x
-            except KeyError:
-                next
+        return self.elem.find('Traces/traces[@label="{}"]'.format(label))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_set_trace_calculation_by_label(self, label, text=None):
+    def get_set_trace_calculation_by_label(self, label, calculation_text=None,
+                                           label_text=None):
 
         elem = self.get_trace_element_by_label(label=label)
         calculation_elem = elem.find('calculation')
-        if not text:
+        if not calculation_text:
             return calculation_elem.text
-        calculation_elem.text = text
+        calculation_elem.text = calculation_text
+        if label_text:
+            elem.attrib['label'] = label_text
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def set_trace_attributes_by_label(
+            self, label, **kwargs):
+
+        elem = self.get_trace_element_by_label(label=label)
+        if 'new_label' in kwargs:
+            elem.attrib['label'] = kwargs['new_label']
+        if 'calculation' in kwargs:
+            calculation_elem = elem.find('calculation')
+            calculation_elem.text = kwargs['calculation']
+        if 'rgb' in kwargs:
+            colours_elem = elem.find('trace/pen')
+            colours_elem.attrib['colour'] = kwargs['rgb']
+        if 'title' in kwargs:
+            title_elem = elem.find('trace')
+            title_elem.attrib['title'] = kwargs['title']    
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    def drop_trace_element_by_label(self, label):
+        
+        parent_elem = self.elem.find('Traces')
+        child_elem = self.get_trace_element_by_label(label=label)
+        parent_elem.remove(child_elem)
+        n_child_elems = len(self.get_trace_labels())
+        parent_elem.attrib['count'] = str(n_child_elems)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def duplicate_trace_element_by_label(self, old_label, new_label):
+        
+        parent_elem = self.elem.find('Traces')
+        child_elem = deepcopy(self.get_trace_element_by_label(label=old_label))
+        child_elem.attrib['label'] = new_label
+        parent_elem.append(child_elem)
+        n_child_elems = len(self.get_trace_labels())
+        parent_elem.attrib['count'] = str(n_child_elems)
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -236,24 +297,24 @@ class rtmc_parser():
         self.parent_map = {c: p for p in self.tree.iter() for c in p}
         self.state_change = False
         self._COMP_DICT = {
-            '10702': {'type_name': 'Image', 'function': Image_editor},
-            '10101': {'type_name': 'Digital', 'function': Digital_editor},
+            '10702': {'type_name': 'Image', 'class': Image_editor},
+            '10101': {'type_name': 'Digital', 'class': Digital_editor},
             '10602': {'type_name': 'Time Series Chart',
-                      'function': TimeSeriesChart_editor},
-            '10106': {'type_name': 'Time', 'function': Time_editor},
-            '10108': {'type_name': 'Segmented Time', 'function': Time_editor},
+                      'class': TimeSeriesChart_editor},
+            '10106': {'type_name': 'Time', 'class': Time_editor},
+            '10108': {'type_name': 'Segmented Time', 'class': Time_editor},
             '10002': {'type_name': 'Basic Status Bar',
-                      'function': BasicStatusBar_editor},
+                      'class': BasicStatusBar_editor},
             '10207': {'type_name': 'Multi-State Alarm',
-                      'function': Digital_editor},
+                      'class': Digital_editor},
             '10205': {'type_name': 'Comm Status Alarm',
-                      'function': Digital_editor},
+                      'class': Digital_editor},
             '10712': {'type_name': 'Multi-State Image',
-                      'function': Digital_editor},
+                      'class': Digital_editor},
             '10204': {'type_name': 'No Data Alarm',
-                      'function': Digital_editor},
-            '10606': {'type_name': 'Wind Rose', 'function': WindRose_editor},
-            '10503': {'type_name': 'Rotary Gauge', 'function': Digital_editor}
+                      'class': Digital_editor},
+            '10606': {'type_name': 'Wind Rose', 'class': WindRose_editor},
+            '10503': {'type_name': 'Rotary Gauge', 'class': Digital_editor}
             }
 
     #--------------------------------------------------------------------------
@@ -261,22 +322,30 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def add_element(self, parent_elem, child_elem):
+    def get_component_editor(self, element):
+        """
+        Get the appropriate editor for the passed element type.
 
-        parent_elem.append(child_elem)
-    #--------------------------------------------------------------------------
+        Parameters
+        ----------
+        element : xml.etree.ElementTree.Element
+            The element for which to find the editor.
 
-    #--------------------------------------------------------------------------
-    def drop_element(self, parent_elem, child_elem):
+        Raises
+        ------
+        Exception
+            Raise if something other than an element, or an element of unknown
+            type, is passed.
 
-        parent_elem.remove(child_elem)
-    #--------------------------------------------------------------------------
+        Returns
+        -------
+        Class
+            Editor class for the element type.
 
-    #--------------------------------------------------------------------------
-    def get_editor(self, element):
+        """
 
         funcs_dict = {
-            x: self._COMP_DICT[x]['function'] for x in self._COMP_DICT
+            x: self._COMP_DICT[x]['class'] for x in self._COMP_DICT
             }
         try:
             type_id = element.attrib['type']
@@ -296,11 +365,27 @@ class rtmc_parser():
 
     #--------------------------------------------------------------------------
     def get_editor_by_component_name(self, screen, component_name):
+        """
+        Get the component from the xml tree and get the appropriate editor.
+
+        Parameters
+        ----------
+        screen : str
+            RTMC screen to parse for the given component.
+        component_name : str
+            The component name for the requested element.
+
+        Returns
+        -------
+        Class
+            Editor class for the element type.
+
+        """
 
         element = self.get_component_element_by_name(
             screen=screen, component_name=component_name
             )
-        return self.get_editor(element)
+        return self.get_component_editor(element)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -316,7 +401,7 @@ class rtmc_parser():
 
         Returns
         -------
-        xml_element
+        xml.etree.ElementTree.Element
             Returns list of xml screen elements if screen is None.
 
         """
@@ -332,9 +417,33 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
     def get_component_element_by_type(self, screen, component_type=None,
                                       look_in_groups=True):
+        """
+        Get all elements of component_type for a given screen.
+
+        Parameters
+        ----------
+        screen : str
+            RTMC screen to parse for the given component type.
+        component_type : str, optional
+            The component type. The default is None.
+        look_in_groups : bool, optional
+            Whether to open and look in groups. This is untested, and groups 
+            have been eliminated from the project. Possibly delete.
+            The default is True.
+
+        Returns
+        -------
+        list
+            A list of elements of the requested type.
+
+        """
 
         if component_type:
-            component_idx = COMPONENT_DICT[component_type]
+            component_dict = {
+                self._COMP_DICT[x]['type_name']: x 
+                for x in self._COMP_DICT.keys()
+                }
+            component_idx = component_dict[component_type]
         screen_element = self.get_screen_element(screen=screen)
         component_list = screen_element.findall('./Components/component')
         if not component_type:
@@ -350,7 +459,7 @@ class rtmc_parser():
         for group in group_list:
             component_list += [
                 x for x in group.findall('Components/component') if
-                x.attrib['type'] in COMPONENT_DICT.values()
+                x.attrib['type'] in component_dict.values()
                 ]
         return component_list
     #--------------------------------------------------------------------------
@@ -358,6 +467,29 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
     def get_component_element_by_name(self, screen, component_name=None,
                                       raise_if_missing=True):
+        """
+        Get the xml element of component_name from a given screen.
+
+        Parameters
+        ----------
+        screen : str
+            RTMC screen to parse for the given component type.
+        component_name : str
+            The component name for the requested element. The default is None.
+        raise_if_missing : bool, optional
+            Whether to raise error if element is not found. The default is True.
+
+        Raises
+        ------
+        KeyError
+            Raise if raise_if_missing is True and element is not found.
+
+        Returns
+        -------
+        xml.etree.ElementTree.Element
+            The requested component element from the xml tree.
+
+        """
 
         screen_element = self.get_screen_element(screen=screen)
         if not component_name:
@@ -377,6 +509,20 @@ class rtmc_parser():
 
     #--------------------------------------------------------------------------
     def get_edited_screen_component_elements(self, screen):
+        """
+        Get all elements that have manually edited names on the screen. Redundant.
+
+        Parameters
+        ----------
+        screen : str
+            RTMC screen to parse for the edited component elements.
+
+        Returns
+        -------
+        list
+            All edited component elements for screen.
+
+        """
 
         components = self.get_component_element_by_name(screen=screen)
         return [
@@ -386,15 +532,85 @@ class rtmc_parser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_file_source_editor(self):
+    def get_file_source_editor(self, source_type):
+        """
+        Get editor for getting and setting file-based data sources.
 
+        Parameters
+        ----------
+        source_type : str
+            The file source type ('data' or 'details') for which to get the 
+            editor.
+
+        Raises
+        ------
+        KeyError
+            Raise if anything other than 'data' or 'details' is passed to 
+            source_type.
+
+        Returns
+        -------
+        Class
+            File source editor class.
+
+        """
+
+        type_dict = {'data': 'DataFile', 'details': 'DetailsFile'}
+        if not source_type in type_dict.keys():
+            raise KeyError(
+                '"file_type" arg must be one of: {}'
+                .format(', '.join(type_dict.keys()))
+                )
         return FileSource_editor(
-            elem=self.root.find('Sources/source/[@name="Site_details"]')
+            elem=self.root.find(
+                'Sources/source/[@name="{}"]'.format(type_dict[source_type])
+                )
             )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_basic_settings_editor(self):
+        """
+        Get the settings editor :)
+
+        Returns
+        -------
+        Class
+            Settings editor. This class can be expanded arbitrarily as need 
+            arises.
+
+        """
+        
+        return BasicSettings_editor(elem=self.root)
+    #-------------------------------------------------------------------------- 
+
+    #--------------------------------------------------------------------------
     def write_to_file(self, file_name):
+        """
+        Write changes back to a new file (no overwrite of template file 
+                                          allowed).
+
+        Parameters
+        ----------
+        file_name : str
+            The target path and file name to write to.
+
+        Raises
+        ------
+        FileNotFoundError
+            Raised if the path passed to 'file_name' is not valid.
+        TypeError
+            Raised if the file extension of the string passed to 'file_name' is 
+            not rtmc2.
+        FileExistsError
+            Raised if the user passes the same path as the path to the 
+            template.
+
+        Returns
+        -------
+        None.
+
+        """
 
         file_name_fmt = pathlib.Path(file_name)
         if not file_name_fmt.parent.exists:
@@ -403,11 +619,7 @@ class rtmc_parser():
                 )
         if not file_name_fmt.suffix == '.rtmc2':
             raise TypeError('File extension must be ".rtmc2"')
+        if file_name_fmt == self.path:
+            raise FileExistsError('No overwrite of template file allowed!')
         self.tree.write(str(file_name_fmt))
     #--------------------------------------------------------------------------
-
-    # #--------------------------------------------------------------------------
-    # def rename_component_element(self, element, new_name):
-
-    #     element.attrib['name'] = new_name
-    # #--------------------------------------------------------------------------
