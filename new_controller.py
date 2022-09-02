@@ -2,6 +2,10 @@
 """
 Created on Fri Jul 29 14:13:29 2022
 
+This script uses a bunch of custom modules to edit a template rtmc file and 
+write back the changes to a new file. It only works for sites that have had 
+standard output files written.
+
 @author: jcutern-imchugh
 """
 
@@ -147,7 +151,9 @@ details_source_editor = parser.get_file_source_editor(source_type='details')
 details_source_editor.get_set_source_file(path=details_data_source)
 
 # Change the data path for the snapshot output
-snapshot_destination = str(PATHS.RTMC_snapshot_directory(site=site, check_exists=True))
+snapshot_destination = str(
+    PATHS.RTMC_snapshot_directory(site=site, check_exists=True)
+    )
 settings_editor = parser.get_basic_settings_editor()
 settings_editor.get_set_snapshot_destination(text=snapshot_destination)
 
