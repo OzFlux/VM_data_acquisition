@@ -64,7 +64,7 @@ class mapper():
         """
 
         self.site = site        
-        self.site_df = _make_site_df(site=site)
+        self.site_df = self._make_site_df()
         self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
     
     #--------------------------------------------------------------------------
@@ -92,12 +92,36 @@ class mapper():
 
     #--------------------------------------------------------------------------   
     def get_file_list(self):
+        """
+        Returns a list of all files documented in the mapping spreadsheet.
+
+        Returns
+        -------
+        list
+            List of the files.
+
+        """
         
         return self.site_df.file_name.dropna().unique()
     #--------------------------------------------------------------------------  
 
     #--------------------------------------------------------------------------   
     def get_logger_list(self, long_name=None):
+        """
+        Returns a list of all loggers documented in the mapping spreadsheet, or 
+        the logger name for the variable if long_name supplied.
+
+        Parameters
+        ----------
+        long_name : str, optional
+            The variable for which to return the logger name. The default is None.
+
+        Returns
+        -------
+        list
+            List of logger names.
+
+        """
         
         if long_name:
             return self.site_df.loc[long_name, 'logger_name']
@@ -109,10 +133,6 @@ class mapper():
         """
         Get the variables in the mapping spreadsheet that are required but do
         are not available in the raw data
-
-        Parameters
-        ----------
-        None.
 
         Returns
         -------
@@ -127,7 +147,7 @@ class mapper():
     def get_repeat_variables(self, names_only=False):
         """
         Get the variables in the mapping spreadsheet that have multiple
-        instruments (e.g. soil instruments)
+        instruments (e.g. soil instruments).
         
         Parameters
         ----------
@@ -151,6 +171,16 @@ class mapper():
 
     #--------------------------------------------------------------------------
     def get_soil_variables(self):
+        """
+        Return the subframe of the complete dataframe containing only the soil
+        variables.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            Frame containing the variables.
+
+        """
         
         return pd.concat(
             [self.site_df.loc[x] for x in self.site_df.index.unique()
@@ -160,6 +190,22 @@ class mapper():
     
     #--------------------------------------------------------------------------    
     def get_variable_limits(self, variable, by_field='translation_name'):
+        """
+        Get the plausible limits for a given variable.
+
+        Parameters
+        ----------
+        variable : str
+            Name of the variable for which to return the limits.
+        by_field : str, optional
+            The field to query for variable. The default is 'translation_name'.
+
+        Returns
+        -------
+        pd.core.series.Series
+            Series containing the limits.
+
+        """
         
         return self.site_df.loc[
             self.site_df[by_field] == variable, ['Max', 'Min']
@@ -218,7 +264,7 @@ class mapper():
         """
        
         IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-                       'Logger name', 'Disable', 'Default value', 'Long name']
+                       'Logger name', 'Disable', 'Long name']
         RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
                        'Variable units': 'site_units', 'Table name': 'table_name',
                        'Logger name': 'logger_name'}
@@ -321,6 +367,15 @@ class _RTMC_syntax_generator():
             for x in zip(alias_list, source_list)
             ]
         return self._str_joiner(combined_list, joiner='\r\n')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_comm_status_string(logger_name):
+        
+        return (
+            '"Server:__statistics__.{}_std.Collection State" > 2 '
+            .format(logger_name)
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------

@@ -23,7 +23,7 @@ import pdb
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import generic_variable_mapper as gvm
+import variable_mapper as vm
 import rtmc_xml_parser as rxp
 import paths_manager as pm
 sys.path.append('../site_details')
@@ -133,7 +133,7 @@ def line_plot_parser(long_name, screen_name, component_name):
 PATHS = pm.paths()
 deets = sd.site_details()
 site = sys.argv[1]
-mapper = gvm.mapper(site=site)
+mapper = vm.mapper(site=site)
 parser = rxp.rtmc_parser(PATHS.RTMC_template(check_exists=True))
 
 #------------------------------------------------------------------------------
@@ -209,9 +209,38 @@ except FileNotFoundError:
     print('No tower image found for {}'.format(site))
     pass
 
+# Reconfigure the signal diagnostic plot to use the correct IRGA signal type
+signal_str = mapper.rtmc_syntax_generator.get_aliased_output(
+    long_name='IRGA signal'
+    )
+line_plot_editor = parser.get_editor_by_component_name(
+    screen='System', component_name='Time Series Chart1'
+    )
+line_plot_editor.get_set_trace_calculation_by_label(
+    label='Signal', calculation_text=signal_str)
+
+# Reconfigure the signal digital output to use the correct IRGA signal type
+digital_editor = parser.get_editor_by_component_name(
+    screen='System', component_name='Digital13'
+    )
+digital_editor.get_set_element_calculation_text(text=signal_str)
+
 #------------------------------------------------------------------------------
 # Turbulent_flux screen configs
 #------------------------------------------------------------------------------
+
+# Reconfigure the mean water trace of the time series
+digital_moist_str = (
+    mapper.rtmc_syntax_generator.get_aliased_output(
+        long_name='Soil water content'
+        )
+    )
+line_plot_editor = parser.get_editor_by_component_name(
+    screen='Turbulent_flux', component_name='Time Series Chart2'
+    )
+line_plot_editor.get_set_trace_calculation_by_label(
+    label='Sws', calculation_text=digital_moist_str
+    )
 
 # Reconfigure the mean soil temperature and basic status bar
 digital_temp_str = (
@@ -237,11 +266,6 @@ soil_T_StatusBar_editor.get_set_pointer_calculation_text(
     )
 
 # Reconfigure the mean soil moisture and basic status bar
-digital_moist_str = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil water content'
-        )
-    )
 soil_moist_digital_editor = parser.get_editor_by_component_name(
     screen='Turbulent_flux', component_name='Digital4'
     )

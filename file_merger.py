@@ -13,6 +13,7 @@ import csv
 import datetime as dt
 import numpy as np
 import pandas as pd
+import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -315,7 +316,8 @@ class var_constructor():
         
         units_dict = {'es': 'kPa', 'e': 'kPa', 'AH': 'g/m^3', 
                       'molar_density': 'mol/m^3', 
-                      'CO2_mole_fraction': 'umol/mol'}
+                      'CO2_mole_fraction': 'umol/mol',
+                      'CO2_density': 'mg/m^3'}
         return {'standard_units': units_dict[variable], 'sampling': ''}
     #--------------------------------------------------------------------------    
 
@@ -327,7 +329,8 @@ class var_constructor():
                           'AH_sensor': self._calculate_AH,
                           'molar_density': self._calculate_molar_density,
                           'CO2_mole_fraction': self._calculate_CO2_mole_fraction,
-                          'RH': self._calculate_RH}
+                          'RH': self._calculate_RH,
+                          'CO2_density': self._calculate_CO2_density}
         return functions_dict[variable]()
     #--------------------------------------------------------------------------
     
@@ -397,6 +400,14 @@ class var_constructor():
             self._calculate_molar_density() * 10**3
             )
         pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _calculate_CO2_density(self):
+        
+        return (
+            self.data.CO2 / 10**3 * self._calculate_molar_density() * 44
+            )
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -485,7 +496,7 @@ def _make_site_df(site):
 ### MAIN CODE ###
 #------------------------------------------------------------------------------
 
-SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin', 'Fletcherview', 'Litchfield']
+SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin', 'Fletcherview', 'Litchfield', 'RobsonCreek']
 
 if __name__=='__main__':
     
