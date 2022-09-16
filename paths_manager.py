@@ -7,6 +7,7 @@ Created on Mon Aug  1 16:43:45 2022
 
 from configparser import ConfigParser
 import pathlib
+import pdb
 
 #------------------------------------------------------------------------------
 class paths():
@@ -15,6 +16,7 @@ class paths():
 
         self._config = ConfigParser()
         self._config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
+        self._placeholder = '<site>'
         
     def variable_map(self, check_exists=False):
         
@@ -22,6 +24,25 @@ class paths():
         if check_exists:
             self._check_exists(path=path)
         return path
+
+    def get_application_path(self, application, check_exists=True, as_str=False):
+        
+        path = pathlib.Path(self._config['APPLICATIONS'][application])
+        if check_exists:
+            self._check_exists(path=path)
+        if as_str:
+            return str(path)
+        return path
+    
+    def get_remote_path(self, resource, stream=None, site=None):
+        
+        path = self._config['REMOTE_PATH'][resource]
+        if site:
+            path = self._insert_site_str(path, site=site)
+        if stream:
+            stream_path = self._config['REMOTE_PATH'][stream]
+            return pathlib.Path(path) / stream_path
+        return pathlib.Path(path)
     
     def slow_fluxes(self, site=None, check_exists=False):
         
@@ -31,6 +52,16 @@ class paths():
         if check_exists:
             self._check_exists(path=path)
         return path
+    
+    def get_local_path(self, resource, stream=None, site=None, check_exists=True):
+        
+        path = self._config['BASE_PATH'][resource]
+        if site:
+            path = self._insert_site_str(path, site=site)
+        if stream:
+            stream_path = self._config['DATA_STREAM'][stream]
+            return pathlib.Path(path) / stream_path
+        return pathlib.Path(path)
     
     def RTMC_site_images(self, img_type=None, site=None, check_exists=False):
         
@@ -70,11 +101,14 @@ class paths():
             file = file.format(site)
             path = path / file
             if check_exists:
-                self._check_exists(path=path)
+                try:
+                    self._check_exists(path=path)
+                except FileNotFoundError:
+                    pdb.set_trace()
             return path
         return path / file
 
-    def RTMC_details_file(self, site=None, check_exists=False):
+    def RTMC_site_details_file(self, site=None, check_exists=False):
         
         path = get_path(base_path='site_details')
         file = '{}_details.dat'
@@ -90,6 +124,10 @@ class paths():
         
         if not path.exists():
             raise FileNotFoundError('No such path!')
+            
+    def _insert_site_str(self, target_str, site):
+        
+        return target_str.replace(self._placeholder, site)
             
 #------------------------------------------------------------------------------
 def get_path(base_path, data_stream=None, sub_dirs=None, site=None,

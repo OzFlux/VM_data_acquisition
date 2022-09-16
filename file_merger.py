@@ -19,7 +19,7 @@ import pdb
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import generic_variable_mapper as gvm
+import variable_mapper as vm
 import paths_manager as pm
 
 #------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ class file_merger():
     def __init__(self, site):
 
         self.site = site
-        self.map = gvm.mapper(site=site)
+        self.map = vm.mapper(site=site)
 
     #--------------------------------------------------------------------------
     ### METHODS (PUBLIC) ###
@@ -59,7 +59,9 @@ class file_merger():
             )
         variables = (
             ['RECORD'] +
-            self.map.get_variable_fields(table_file=table_file, field='site_name')
+            self.map.get_variable_fields(
+                table_file=table_file, field='site_name'
+                ).tolist()
             )        
         df = df[variables]
         freq = self._get_table_freq(df)
@@ -68,8 +70,12 @@ class file_merger():
             )
         df.drop('RECORD', axis=1, inplace=True)
         rename_dict = dict(zip(
-            self.map.get_variable_fields(table_file=table_file, field='site_name'),
-            self.map.get_variable_fields(table_file=table_file, field='translation_name')
+            self.map.get_variable_fields(
+                table_file=table_file, field='site_name'
+                ).tolist(),
+            self.map.get_variable_fields(
+                table_file=table_file, field='translation_name'
+                ).tolist()
             ))
         df.rename(rename_dict, axis=1, inplace=True)
         self._do_unit_conversion(df=df)
@@ -124,8 +130,10 @@ class file_merger():
         table_path = self.get_table_file(table_file=table_file)
         header_list = []
         with open(table_path) as f:
-            for i in range(4):
-                header_list.append(f.readline())
+            for i, line in enumerate(csv.reader(f)):
+                if i==4:
+                    break
+                header_list.append(line)
         return header_list
     #--------------------------------------------------------------------------
     
@@ -135,11 +143,10 @@ class file_merger():
         PROG_INFO_LIST = ['format', 'station_name', 'logger_type', 
                           'serial_num', 'OS_version', 'program_name', 
                           'program_sig', 'table_name']
-        header_list = self.read_raw_header(table_file=table_file)
-        string_list = [x.replace('"', '') for x in 
-                       header_list[0].replace('\n', '').split(',')]
+        string_list = self.read_raw_header(table_file=table_file)[0]
         output_dict = dict(zip(PROG_INFO_LIST, string_list))
-        output_dict.update({'raw_string': header_list[0]})
+        raw_string = ','.join(['"{}"'.format(x) for x in string_list]) + '\n'
+        output_dict.update({'raw_string': raw_string})
         return output_dict
     #--------------------------------------------------------------------------
 
@@ -175,14 +182,9 @@ class file_merger():
     def _construct_table_header_frame(self, table_file):
         
         header_list = self.read_raw_header(table_file=table_file)[1:]
-        splits_list = []
-        for i, line in enumerate(header_list):
-            splits_list.append(
-                [x.replace('"', '') for x in line.replace('\n', '').split(',')]
-                )
         header_df = pd.DataFrame(
-            data=zip(splits_list[1], splits_list[2]), 
-            index=splits_list[0], columns=['standard_units', 'sampling']
+            data=zip(header_list[1], header_list[2]), 
+            index=header_list[0], columns=['standard_units', 'sampling']
             )
         timestamp = pd.DataFrame(header_df.loc['TIMESTAMP']).T
         ref_df = self.map.get_variable_fields(table_file=table_file)

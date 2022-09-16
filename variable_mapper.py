@@ -20,8 +20,6 @@ Issues:
 ### STANDARD IMPORTS ###
 #------------------------------------------------------------------------------
 
-import csv
-import datetime as dt
 import numpy as np
 import pandas as pd
 
@@ -230,14 +228,38 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variable_fields(self, table_file, field='all'):
+    def get_variable_fields(self, table_file, field=None):
+        """
+        Return the variables associated with a particular table file (and field
+        if specified)
+
+        Parameters
+        ----------
+        table_file : str
+            The name of the table file for which to return the data.
+        field : str, optional
+            The name of the field to return. The default is 'all'.
+
+        Raises
+        ------
+        KeyError
+            DESCRIPTION.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame or pd.core.series.Series
+            If field == None, returns the dataframe containing the subset of 
+            variables found in that table, otherwise returns a series of all 
+            variable values for that field.
+
+        """
         
         if not table_file in self.get_file_list():
             raise KeyError('Table not found!')
-        if field == 'all':
+        if not field:
             return self.site_df.loc[self.site_df.file_name == table_file]
         local_df = self.site_df.reset_index()
-        return local_df.loc[local_df.file_name == table_file, field].tolist()
+        return local_df.loc[local_df.file_name == table_file, field]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -247,19 +269,19 @@ class mapper():
     #--------------------------------------------------------------------------
     def _make_site_df(self, logger_name_in_file=True):
         """
-    
+        Create the dataframe that contains the data to allow mapping from
+        site variable names to standard variable names
     
         Parameters
         ----------
-        path : TYPE
-            DESCRIPTION.
-        site : TYPE
-            DESCRIPTION.
+        logger_name_in_file : bool, optional
+            If true, combines logger name with table name to create file name. 
+            The default is True.
     
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        pd.core.frame.DataFrame
+            Dataframe.
     
         """
        
@@ -335,6 +357,21 @@ class _RTMC_syntax_generator():
 
     #--------------------------------------------------------------------------
     def _get_init_dict(self, start_cond):
+        """
+        Get the requested RTMC-formatted start condition.
+
+        Parameters
+        ----------
+        start_cond : str
+            The start condition required.
+
+        Returns
+        -------
+        dict
+            A dictionary with key 'start_cond' and the RTMC start condition
+            string as value.
+
+        """
         
         start_dict = {
             'start': 'StartRelativeToNewest({},OrderCollected);',
@@ -347,6 +384,21 @@ class _RTMC_syntax_generator():
 
     #--------------------------------------------------------------------------
     def _get_scaled_to_range(self, eval_string):
+        """
+        Scale an RTMC evaluated string relative to its range.
+
+        Parameters
+        ----------
+        eval_string : str
+            The string that will be evaluated by RTMC.
+
+        Returns
+        -------
+        str
+            RTMC-readable string to generate a variable scaled relative to its
+            range (max - min).
+
+        """
         
         return (
             '({ev} - MinRun({ev})) / (MaxRun({ev}) - MinRun({ev}))'
@@ -355,7 +407,21 @@ class _RTMC_syntax_generator():
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
-    def get_alias_string(self, long_name, **kwargs):
+    def get_alias_string(self, long_name):
+        """
+        Generate an RTMC-valid alias structure.
+
+        Parameters
+        ----------
+        long_name : str
+            The variable for which to return the alias string.
+
+        Returns
+        -------
+        str
+            Formatted RTMC alias string.
+
+        """
         
         variable = self._get_variable_frame(long_name=long_name)
         alias_list = variable.translation_name.tolist()
@@ -370,8 +436,29 @@ class _RTMC_syntax_generator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_comm_status_string(logger_name):
+    def get_comm_status_string(self, logger_name):
+        """
         
+
+        Parameters
+        ----------
+        logger_name : TYPE
+            DESCRIPTION.
+
+        Raises
+        ------
+        KeyError
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+        
+        if not logger_name in self.site_df.logger_name:
+            raise KeyError('No such logger name in table!')
         return (
             '"Server:__statistics__.{}_std.Collection State" > 2 '
             .format(logger_name)

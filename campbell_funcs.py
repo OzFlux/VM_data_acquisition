@@ -11,13 +11,13 @@ import datetime as dt
 import os
 import pandas as pd
 import pathlib
-import shutil
 import sys
-import pdb
 
 ### Custom modules ###
 import site_utils as su
-import time_functions as tf
+sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
+
+import sparql_site_details as sd
 
 #------------------------------------------------------------------------------
 ### Constants ###
@@ -25,8 +25,7 @@ import time_functions as tf
 
 SITES = ['Boyagin', 'Calperum', 'CowBay', 'Gingin', 'GreatWesternWoodlands', 
          'RobsonCreek', 'Fletcherview', 'Litchfield']
-# CAMERAS = {'Boyagin': 'ccfc-1859'}
-
+SITE_DETAILS = sd.site_details()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -217,20 +216,30 @@ def make_site_info_TOA5(site, num_to_str=None):
         * TypeError if num_to_str not of type list
     """
    
+    rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude', 
+                   'elevation': 'Elevation', 'time_zone': 'Time zone', 
+                   'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
+   
     # Construct site details dataframe and add sunrise / sunset times
-    details = su.get_site_details(site)
-    sun = tf.get_sunrise_sunset_local(lat=str(details.Latitude), 
-                                      lon=str(details.Longitude), 
-                                      elev=details.Elevation, 
-                                      tz=details['Time zone'], 
-                                      date=dt.datetime.now())
-    utc_offset = tf.get_timezone_utc_offset(details['Time zone'], 
-                                            date=dt.datetime.now())
-    details['sunrise'] = sun['rising'].strftime('%H:%M')
-    details['sunset'] = sun['setting'].strftime('%H:%M')
-    details['UTC offset'] = utc_offset.seconds / 3600
-    details['10Hz file'] = get_latest_10Hz_file(site=site)
-    df = pd.DataFrame(details).T
+    details = SITE_DETAILS.get_single_site_details(site=site).copy()
+    details.rename(rename_dict, inplace=True)
+    details_new = pd.concat([
+        pd.Series({'Start year': details.date_commissioned.year}),
+        details[rename_dict.values()]
+        ])
+    details_new.name = details.name
+    for var in ['Elevation', 'Time step']:
+        details_new.loc[var] = details_new.loc[var].astype(int)
+    details_new['sunrise'] = (
+        SITE_DETAILS.get_sunrise(site=site, date=dt.datetime.now(), which='next')
+        .strftime('%H:%M')
+        )
+    details_new['sunset'] = (
+        SITE_DETAILS.get_sunset(site=site, date=dt.datetime.now(), which='next')
+        .strftime('%H:%M')
+        )
+    details_new['10Hz file'] = get_latest_10Hz_file(site=site)
+    df = pd.DataFrame(details_new).T
     
     # Check passed num_to_str arg is correct
     if not num_to_str:
@@ -252,7 +261,7 @@ def make_site_info_TOA5(site, num_to_str=None):
         if do_flag:
             df.loc[:, this_col]='"{}"'.format(df.loc[:, this_col].item())
     header = ['TOA5', df.index[0], 'CR1000', '9999', 'cr1000.std.99.99', 
-              'CPU:noprogram.cr1', '9999', 'site_details']           
+              'CPU:noprogram.cr1', '9999', 'site_details']      
     toa5_class = TOA5_file_constructor(data=df, header=header)
     return toa5_class
 #------------------------------------------------------------------------------
@@ -267,7 +276,6 @@ def get_latest_10Hz_file(site):
     try:
         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
     except ValueError:
-        # raise FileNotFoundError('Damn, no files').with_traceback(e.__traceback__)
         return 'No files'
 #------------------------------------------------------------------------------
 
@@ -285,98 +293,3 @@ def get_latest_10Hz_files():
               'Latest_10Hz']
     return TOA5_file_constructor(data=df, header=header)
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def get_latest_phenocam_file(site, img_type='true'):
-    
-#     """Get the name of the newest phenocam image"""
-    
-#     data_path = (
-#         su.get_path(base_path='data', data_stream='phenocam', site=site,
-#                     check_exists=True)
-#         )
-#     gen = data_path.rglob('*overstorey_oblique*')
-#     file_list = []
-#     for file_path in gen:
-#         if img_type == 'true':
-#             if not 'NDVI' in str(file_path):
-#                 file_list.append(file_path)
-#         elif img_type == 'NDVI':
-#             if 'NDVI' in str(file_path):
-#                 file_list.append(file_path)
-#     try:
-#         return max(file_list, key=os.path.getctime)
-#     except ValueError as e:
-#         raise RuntimeError('Damn, no files').with_traceback(e.__traceback__)
-# #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def get_latest_phenocam_files(img_type='true'):
-    
-#     result_dict = {}
-#     for site in SITES:
-#         try:
-#             result_dict[site] = (
-#                 '"{}"'.format(
-#                 get_latest_phenocam_file(site=site, img_type=img_type).name
-#                 ))
-#         except (FileNotFoundError, RuntimeError):
-#             continue
-#     index = [dt.datetime.now().date()]
-#     df = pd.DataFrame(data=result_dict, index=index)
-#     toa5_class = TOA5_file_constructor(data=df)
-#     return toa5_class
-# #------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-### Main ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    
-    # If passed 'update_10Hz' as argument:
-    # if sys.argv[1] == 'update_10Hz':
-    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_fast_data.dat'
-    #     a = get_latest_10Hz_files()
-    #     a.output_file(path)
-
-    # # If passed 'update_PhenoImages' as argument:
-    # if sys.argv[1] == 'update_PhenoImages':
-    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam.dat'
-    #     a = get_latest_phenocam_files()
-    #     a.output_file(path)
-    #     copy_latest_phenocam_files()
-
-    # # If passed 'update_PhenoImages_NDVI' as argument:
-    # if sys.argv[1] == 'update_PhenoImages_NDVI':
-    #     path = su.get_path(base_path='generic_RTMC_files') / 'latest_phenocam_NDVI.dat'
-    #     a = get_latest_phenocam_files(img_type='NDVI')
-    #     a.output_file(path)
-    #     copy_latest_phenocam_files(img_type='NDVI')
-    
-    # If passed 'update site details' as argument
-    if sys.argv[1] == 'update_site_details':
-        try:
-            site = sys.argv[2]
-            path = (
-                su.get_path(base_path='generic_RTMC_files', check_exists=True) / 
-                '{}_details.dat'.format(site)
-                )
-            a = make_site_info_TOA5(site=site, num_to_str=['Start year'])
-            a.output_file(path)
-        except IndexError: # If not passed a site name from batch file
-            site_list = su.get_site_list()
-            for site in SITES:
-                try:
-                    path = (
-                        su.get_path(base_path='generic_RTMC_files', 
-                                    check_exists=True) / 
-                        '{}_details.dat'.format(site)
-                        )
-                    a = make_site_info_TOA5(site=site, num_to_str=['Start year'])
-                    a.output_file(path)
-                except FileNotFoundError:
-                    print ('No directory for site {}'.format(site))
-                    next
