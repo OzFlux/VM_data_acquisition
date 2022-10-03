@@ -20,7 +20,6 @@ import pandas as pd
 import pathlib
 import subprocess as spc
 import sys
-import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -91,7 +90,8 @@ class tasks_manager():
         """
         
         return pd.read_excel(
-            PATHS.variable_map(), sheet_name='Tasks', index_col='Site'
+            PATHS.get_local_path(resource='xl_variable_map'), 
+            sheet_name='Tasks', index_col='Site'
             )
     #--------------------------------------------------------------------------
 
@@ -279,8 +279,10 @@ class tasks_manager():
             application='rclone', as_str=True, check_exists=False
             )
         if 'cloudstor' in target_dir:
+            logging.info('Checking for remote directory...')
             rslt = spc.run([app_str, 'lsd', target_dir], capture_output=True)
-            rslt.check_returncode()        
+            rslt.check_returncode()
+            logging.info('Found valid remote - copying now!')
         exec_list = [
             'copy', '--transfers', '36', '--progress', '--checksum',
             '--checkers', '48', '--timeout', '0'
@@ -290,8 +292,13 @@ class tasks_manager():
                 exec_list.append('--exclude')
                 exec_list.append(str(pathlib.Path('{}/**'.format(this_dir))))
         exec_list = [app_str] + exec_list + [source_dir, target_dir]
-        rslt = spc.run(exec_list, capture_output=True)
-        rslt.check_returncode()
+        rslt = spc.Popen(exec_list, stdout=spc.PIPE, stderr=spc.STDOUT)
+        (out, err) = rslt.communicate()
+        if out:
+            logging.info(out.decode())
+            logging.info('Copy complete')
+        if err:
+            logging.ERROR(err.decode())
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

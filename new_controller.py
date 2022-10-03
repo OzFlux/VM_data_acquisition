@@ -27,7 +27,7 @@ import variable_mapper as vm
 import rtmc_xml_parser as rxp
 import paths_manager as pm
 sys.path.append('../site_details')
-import site_details as sd
+import sparql_site_details as sd
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
@@ -146,13 +146,15 @@ data_source_editor = parser.get_file_source_editor(source_type='data')
 data_source_editor.get_set_source_file(path=logger_data_source)
 
 # Change the data path for the details data
-details_data_source = str(PATHS.RTMC_details_file(site=site, check_exists=True))
+details_data_source = str(
+    PATHS.get_local_path(resource='site_details')
+    )
 details_source_editor = parser.get_file_source_editor(source_type='details')
 details_source_editor.get_set_source_file(path=details_data_source)
 
 # Change the data path for the snapshot output
 snapshot_destination = str(
-    PATHS.RTMC_snapshot_directory(site=site, check_exists=True)
+    PATHS.get_local_path(resource='data', stream='rtmc', site=site)
     )
 settings_editor = parser.get_basic_settings_editor()
 settings_editor.get_set_snapshot_destination(text=snapshot_destination)
