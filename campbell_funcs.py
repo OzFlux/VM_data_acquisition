@@ -8,24 +8,27 @@ Created on Thu Oct 21 20:13:00 2021
 
 ### Standard modules ###
 import datetime as dt
+import logging
 import os
 import pandas as pd
 import pathlib
 import sys
 
 ### Custom modules ###
-import site_utils as su
+# import site_utils as su
+import paths_manager as pm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
-
 import sparql_site_details as sd
+
 
 #------------------------------------------------------------------------------
 ### Constants ###
 #------------------------------------------------------------------------------
 
-SITES = ['Boyagin', 'Calperum', 'CowBay', 'Gingin', 'GreatWesternWoodlands', 
-         'RobsonCreek', 'Fletcherview', 'Litchfield']
+PATHS = pm.paths()
 SITE_DETAILS = sd.site_details()
+logger = logging.getLogger(__name__)
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -125,9 +128,12 @@ def _make_TOA5_data(data) -> list:
         date_index = df.index.to_pydatetime()
         df.index = [x.strftime('%Y-%m-%d %H:%M:%S') for x in date_index]
     except AttributeError:
-        if len(df) > 1:
-            raise RuntimeError('Dataframes with length > 1 must have a '
-                               'datetime index!')
+        try:
+            if len(df) > 1:
+                raise RuntimeError('Dataframes with length > 1 must have a '
+                                   'datetime index!')
+        except RuntimeError:
+            logger.error('Exception occurred: ', exc_info=True)
         date_index = (
             [dt.datetime.combine(dt.datetime.now().date(), 
                                  dt.datetime.min.time())
@@ -221,6 +227,7 @@ def make_site_info_TOA5(site, num_to_str=None):
                    'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
    
     # Construct site details dataframe and add sunrise / sunset times
+    logger.info('Generating site details file')
     details = SITE_DETAILS.get_single_site_details(site=site).copy()
     details.rename(rename_dict, inplace=True)
     details_new = pd.concat([
@@ -270,8 +277,7 @@ def make_site_info_TOA5(site, num_to_str=None):
 def get_latest_10Hz_file(site):
     
     data_path = (
-        su.get_path(base_path='data', data_stream='flux_fast',
-                    site=site, check_exists=True)
+        PATHS.get_local_path(resource='data', stream='flux_fast', site=site)
         )
     try:
         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
@@ -279,17 +285,17 @@ def get_latest_10Hz_file(site):
         return 'No files'
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def get_latest_10Hz_files():
+# #------------------------------------------------------------------------------
+# def get_latest_10Hz_files():
     
-    result_dict = {}
-    for site in SITES:
-        latest_file = get_latest_10Hz_file(site)
-        result_dict[site] = '"{}"'.format(latest_file.name)
-    index = [dt.datetime.now().date()]
-    df = pd.DataFrame(data=result_dict, index=index)
-    header = ['TOA5', 'NoStation', 'CR1000', '9999',
-              'cr1000.std.99.99', 'CPU:noprogram.cr1', '9999',
-              'Latest_10Hz']
-    return TOA5_file_constructor(data=df, header=header)
-#------------------------------------------------------------------------------
+#     result_dict = {}
+#     for site in SITES:
+#         latest_file = get_latest_10Hz_file(site)
+#         result_dict[site] = '"{}"'.format(latest_file.name)
+#     index = [dt.datetime.now().date()]
+#     df = pd.DataFrame(data=result_dict, index=index)
+#     header = ['TOA5', 'NoStation', 'CR1000', '9999',
+#               'cr1000.std.99.99', 'CPU:noprogram.cr1', '9999',
+#               'Latest_10Hz']
+#     return TOA5_file_constructor(data=df, header=header)
+# #------------------------------------------------------------------------------
