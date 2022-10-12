@@ -20,6 +20,7 @@ import pandas as pd
 import pathlib
 import subprocess as spc
 import sys
+import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -29,6 +30,7 @@ import campbell_funcs as cf
 import file_merger as fm
 import paths_manager as pm
 import process_10hz_data as ptd
+import rclone_transfer as rt
 
 #------------------------------------------------------------------------------
 
@@ -38,6 +40,7 @@ import process_10hz_data as ptd
 
 # Import the paths object to get designated paths to data streams
 PATHS = pm.paths()
+log_byte_limit = 10**6
 
 #------------------------------------------------------------------------------
 
@@ -56,7 +59,7 @@ def _set_logger(site, task):
     this_logger = logging.getLogger()
     this_logger.setLevel(logging.INFO)
     handler = logging.handlers.RotatingFileHandler(logger_write_path, 
-                                                   maxBytes=10**6)
+                                                   maxBytes=log_byte_limit)
     formatter = logging.Formatter(
         '%(asctime)s %(levelname)s [%(name)s] %(message)s'
         )
@@ -172,28 +175,16 @@ class tasks_manager():
                                      RTMC).
 
         """
-        
-        logging.info(f'Begin push of data stream "{stream}" for site "{site}"')
-        exclude_dict = {'flux_fast': 'TMP'}
-        to_remote = PATHS.get_remote_path(
-            resource='cloudstor', stream=stream, site=site
-            )
-        from_local = PATHS.get_local_path(
-            resource='data', stream=stream, site=site, check_exists=True
-            )
-        exclude_dirs = [] if not stream in exclude_dict else exclude_dict[stream]
-        self._rclone_push_pull_generic(
-            source_dir=str(from_local), target_dir=str(to_remote),
-            exclude_dirs=exclude_dirs
-            )
+
+        rt.rclone_push_data(site=site, stream=stream)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def rclone_pull_data(self, site):
+    def rclone_pull_data(self, site, stream):
         """
         Pull data from Cloudstor to local folders. Currently limited to slow
         data.
-
+    
         Parameters
         ----------
         site : str
@@ -201,19 +192,10 @@ class tasks_manager():
         stream : str
             The data stream to pull (limited to flux_slow, flux_fast and 
                                      RTMC).
-
+    
         """
-        
-        stream = 'flux_slow'
-        from_remote = PATHS.get_remote_path(
-            resource='cloudstor', stream=stream, site=site
-            )
-        to_local = PATHS.get_local_path(
-            resource='data', stream=stream, site=site, check_exists=True
-            )     
-        self._rclone_push_pull_generic(
-            source_dir=str(from_remote), target_dir=str(to_local),
-            )
+
+        rt.rclone_pull_data(site=site, stream=stream)
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -272,61 +254,34 @@ class tasks_manager():
             task_function(site=site)
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _rclone_push_pull_generic(self, source_dir, target_dir, exclude_dirs):
-
-        app_str = PATHS.get_application_path(
-            application='rclone', as_str=True, check_exists=False
-            )
-        if 'cloudstor' in target_dir:
-            logging.info('Checking for remote directory...')
-            rslt = spc.run([app_str, 'lsd', target_dir], capture_output=True)
-            rslt.check_returncode()
-            logging.info('Found valid remote - copying now!')
-        exec_list = [
-            'copy', '--transfers', '36', '--progress', '--checksum',
-            '--checkers', '48', '--timeout', '0'
-            ]
-        if exclude_dirs:
-            for this_dir in exclude_dirs:
-                exec_list.append('--exclude')
-                exec_list.append(str(pathlib.Path('{}/**'.format(this_dir))))
-        exec_list = [app_str] + exec_list + [source_dir, target_dir]
-        rslt = spc.Popen(exec_list, stdout=spc.PIPE, stderr=spc.STDOUT)
-        (out, err) = rslt.communicate()
-        if out:
-            logging.info(out.decode())
-            logging.info('Copy complete')
-        if err:
-            logging.ERROR(err.decode())
-    #--------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### MAIN PROGRAM ###
 #------------------------------------------------------------------------------
 
-# Main function
-def main():
+# Parse single task for single site and log it
+def parse_task(task, site):
+    
+    tasks = tasks_manager()
+    logger = _set_logger(site=site, task=task)
+    logger.info(f'Running task "{task}" for site {site}')
+    tasks.run_task(site=site, task_string=task)
+    logger.info('Task complete\n')
+    logger.handlers.clear()
+
+# Main function - first arg passed is task name, second arg (site) is optional;
+# if not passed, run for all sites for which task is enabled (in spreadsheet);
+# if passed, check that task is enabled for that site and run if so (otherwise do nothing). 
+if __name__=='__main__':
     
     tasks = tasks_manager()
     task = sys.argv[1]
+    site_list = tasks.get_site_list_for_task(task_string=task)
     try:
         site = sys.argv[2]
-        logger = _set_logger(site=site, task=task)
-        logger.info(f'Running task "{task}" for site {site}')
-        tasks.run_task(site=site, task_string=task)
-        logger.handlers.clear()
+        if site in site_list:
+            parse_task(task=task, site=site)
     except IndexError:
-        site_list = tasks.get_site_list_for_task(task_string=task)
-        for site in site_list:
-            logger = _set_logger(site=site, task=task)
-            logger.info(f'Running task "{task}" for site {site}')
-            tasks.run_task(site=site, task_string=task)    
-            logger.info('Done')
-            logger.handlers.clear()
-
-if __name__=='__main__':
-    
-    main()
+        for site in site_list:          
+            parse_task(task=task, site=site)
