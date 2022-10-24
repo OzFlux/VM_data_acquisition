@@ -493,19 +493,3 @@ def _make_site_df(site):
     site_df.index.name = 'long_name'
     return site_df
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# ### MAIN CODE ###
-# #------------------------------------------------------------------------------
-
-# SITE_PROC_LIST = ['Calperum', 'Gingin', 'Boyagin', 'Fletcherview', 'Litchfield', 'RobsonCreek']
-
-# if __name__=='__main__':
-    
-#     for site in SITE_PROC_LIST:
-#         print ('Parsing site {}:'.format(site))
-#         output_path = (
-#             PATHS.slow_fluxes(site=site) / '{}_merged_std.dat'.format(site)
-#             )
-#         parser = file_merger(site=site)
-#         parser.make_output_file(dest=output_path)

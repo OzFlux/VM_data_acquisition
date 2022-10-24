@@ -17,8 +17,6 @@ Cloudstor.
 import logging
 from logging import handlers
 import pandas as pd
-import pathlib
-import subprocess as spc
 import sys
 import pdb
 
@@ -33,16 +31,11 @@ import process_10hz_data as ptd
 import rclone_transfer as rt
 
 #------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 ### INITIALISATION ###
 #------------------------------------------------------------------------------
 
-# Import the paths object to get designated paths to data streams
 PATHS = pm.paths()
 log_byte_limit = 10**6
-
-#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
