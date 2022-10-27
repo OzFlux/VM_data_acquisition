@@ -34,12 +34,10 @@ import pdb
 
 class L1_constructor():
     
-    def __init__(self, input_path, file_substr_list, freq=30, output_path=None,
-                 n_header_lines=4):
+    def __init__(self, input_path, file_substr_list, output_path=None, freq=30):
         
         self.substr_list = file_substr_list
         self.freq = freq
-        self.n_header_lines = n_header_lines
         self.input_path = pathlib.Path(input_path)
         if not self.input_path.exists():
             raise FileNotFoundError('Input directory not found!')
@@ -49,21 +47,12 @@ class L1_constructor():
                 raise FileNotFoundError('Output directory not found!')
         else:
             self.output_path = self.input_path
-
-    def get_date_min(self):
-        
-        dates_df = self.get_file_dates()
-        return dates_df.start_date.min()
-                
-    def get_date_max(self):
-        
-        dates_df = self.get_file_dates()
-        return dates_df.end_date.max()
-    
+   
     def get_date_range(self):
-        
+
+        dates_df = self.get_file_dates()
         return pd.date_range(
-            start=self.get_date_min(), end=self.get_date_max(), 
+            start=dates_df.start_date.min(), end=dates_df.end_date.min(), 
             freq=str(self.freq) + 'T'
             )
     
@@ -99,44 +88,70 @@ class L1_constructor():
             dates_list.append(get_file_dates(file=file))
         return pd.DataFrame(data=dates_list, index=[x.name for x in file_list])
         
-    def get_file_headers(self, file_name, as_frame=False):
+    def get_file_headers(self, file_name, as_frame=False, n_header_lines=4,
+                         incl_prog_info=True):
         
         self._check_file_name(file_name)
         headers = []
         with open(self.input_path / file_name) as f:
-            for i in range(self.n_header_lines):
+            for i in range(n_header_lines):
                 headers.append(f.readline())
+        if not incl_prog_info:
+            headers = headers[1:]
         if not as_frame:
             return headers
         header_list = (
             [x.replace('"', '').strip().split(',') for x in headers]
             )
-        padded_header = (
-            header_list[0] + 
-            [''] * (len(header_list[1]) - len(header_list[0]))
-            )
-        header_list = [padded_header] + header_list[1:]
-        headers_df = pd.DataFrame(
-            data=header_list, 
-            index=['Program Info', 'Name', 'Units', 'Sampling']
-            )
+        index = ['Name', 'Units', 'Sampling']
+        if incl_prog_info:
+            padded_header = (
+                header_list[0] + 
+                [''] * (len(header_list[1]) - len(header_list[0]))
+                )
+            header_list = [padded_header] + header_list[1:]
+            index = ['Program Info'] + index
+        headers_df = pd.DataFrame(data=header_list, index=index)
         return headers_df
                 
-    def write_to_excel(self, file_name=None, na_values='', std_dates=True):
+    def write_to_excel(self, file_name=None, write_to_file=None, na_values='', 
+                       std_dates=True, incl_prog_info=True):
         
         if file_name:
             self._check_file_name(file_name=file_name)
             file_list = [file_name]
+            std_dates = False
         else:
             file_list = self.get_file_list()
-        with pd.ExcelWriter(self.output_path / 'filename.xlsx') as writer:
+        if write_to_file:
+            if not write_to_file.split('.')[-1] == 'xlsx':
+                raise SyntaxError('"write_to_file" argument must have .xlsx '
+                                  'file extension!')
+        else:
+            write_to_file = 'outfile.xlsx'
+        start_row = 5 if incl_prog_info else 4
+        with pd.ExcelWriter(self.output_path / write_to_file) as writer:
             for file in file_list:
                 print (f'Parsing file {file}...')
-                headers_df = self.get_file_headers(file_name=file, as_frame=True)
+                headers_df = (
+                    self.get_file_headers(file_name=file, as_frame=True,
+                                          incl_prog_info=incl_prog_info)
+                    )
                 df = self.get_file_data(file_name=file, std_dates=std_dates).reset_index()
                 headers_df.to_excel(writer, sheet_name=file, index=False)
                 df.to_excel(writer, sheet_name=file, header=False, index=False, 
-                            startrow=5, na_rep=na_values)
+                            startrow=start_row, na_rep=na_values)
+                
+    def append_to_excel(self, path):
+        
+        xl = pd.ExcelFile(path)
+        sheets = xl.sheet_names
+        # df_dict = {
+        #     sheet_name: xl.parse(sheet_name, usecols='TIMESTAMP') 
+        #     for sheet_name in xl.sheet_names
+        #     }
+        pdb.set_trace()
+        
                 
     def _check_file_name(self, file_name):
         
@@ -165,7 +180,7 @@ def get_file_dates(file):
     return {'start_date': start_date, 'end_date': end_date}
 
 in_path = 'E:/Sites/Calperum/Flux/Slow'
-out_path = 'E:/Test_site'
+out_path = in_path
 substr_list = ['core', 'extras', 'flux', 'met', 'rad', 'soil']
 ob = L1_constructor(
     input_path=in_path, output_path=out_path, file_substr_list=substr_list
