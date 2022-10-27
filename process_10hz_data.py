@@ -182,7 +182,7 @@ class CardConvert_parser():
             to_dir = _make_dir(f)
             try:
                 (from_dir / f).rename(to_dir / f)    
-            except FileNotFoundError:
+            except TypeError:
                 pdb.set_trace()
                 _make_dir(f)
         self.CardConvert_process_flag = True
@@ -324,13 +324,13 @@ def _make_dir(file_name, understorey=False):
         sub_dirs_list += [split_dict['Day']]
     target_path = PATHS.get_local_path(
         resource='data', stream='flux_fast', site='Calperum', 
-        subdirs=sub_dirs_list, as_str=True
+        subdirs=sub_dirs_list
         )
     if understorey:
         target_path = _replace_dir_for_understorey(inpath=target_path)
     try: 
         target_path.mkdir(parents=True)
-    except FileExistsError: 
+    except (FileExistsError, AttributeError): 
         pass
     return target_path
 #------------------------------------------------------------------------------
