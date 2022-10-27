@@ -53,15 +53,20 @@ class paths():
             self._check_exists(path=path)
         return path
     
-    def get_local_path(self, resource, stream=None, site=None, check_exists=True):
+    def get_local_path(self, resource, stream=None, site=None, subdirs=[],
+                       check_exists=True, as_str=False):
         
         path = self._config['BASE_PATH'][resource]
         if site:
-            path = self._insert_site_str(path, site=site)
+            path = pathlib.Path(self._insert_site_str(path, site=site))
+        path = pathlib.Path(path)
         if stream:
-            stream_path = self._config['DATA_STREAM'][stream]
-            return pathlib.Path(path) / stream_path
-        return pathlib.Path(path)
+            path = path / self._config['DATA_STREAM'][stream]
+        if subdirs:
+            path = _add_subdirs(path=path, subdirs_list=subdirs)
+        if as_str:
+            return str(path)
+        return path
     
     def RTMC_site_images(self, img_type=None, site=None, check_exists=False):
         
@@ -130,6 +135,13 @@ class paths():
         return target_str.replace(self._placeholder, site)
             
 #------------------------------------------------------------------------------
+def _add_subdirs(path, subdirs_list):
+
+    for subdir in subdirs_list:
+        path = path / subdir
+    return path
+
+
 def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
              check_exists=False):
 

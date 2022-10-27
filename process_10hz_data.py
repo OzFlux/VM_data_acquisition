@@ -20,6 +20,7 @@ import subprocess as spc
 import sys
 
 import site_utils as su
+import paths_manager as pm
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -34,6 +35,7 @@ INIT_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0'
 FILENAME_FORMAT = {
     'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4, 'Day': 5
     }
+PATHS = pm.paths()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -67,9 +69,12 @@ class CardConvert_parser():
 
     def _cross_check_for_proc_files(self):
         
-        archive_path = su.get_path(base_path='data', data_stream='flux_fast',
-                                   site=self.SiteName, sub_dirs='TOB3',
-                                   check_exists=True)        
+        archive_path = (
+            PATHS.get_local_path(
+                resource='data', stream='flux_fast', site=self.SiteName,
+                subdirs=['TOB3']
+                )
+            )   
         archived_files = [x.name for x in archive_path.rglob('TOB3*.dat')]
         raw_files = self.get_raw_files()
         dupes_list = [x for x in raw_files if x in archived_files]
@@ -116,7 +121,7 @@ class CardConvert_parser():
 
         """Return the site-specific ccf file path"""
 
-        path = su.get_path(base_path='ccf_config')
+        path = PATHS.get_local_path(resource='ccf_config', site=self.SiteName)
         file_name = '{0}_{1}.ccf'.format(self.out_format, self.SiteName)
         return path / file_name    
 
@@ -124,9 +129,10 @@ class CardConvert_parser():
 
         """Return the site-specific raw data path"""
 
-        data_path = su.get_path(base_path='data', data_stream='flux_fast',
-                                site=self.SiteName, sub_dirs='TMP',
-                                check_exists=True)
+        data_path = PATHS.get_local_path(
+            resource='data', stream='flux_fast', site=self.SiteName, 
+            subdirs=['TMP']
+            )
         if self.understorey_flag:
             return _replace_dir_for_understorey(inpath=data_path)
         return data_path
@@ -158,27 +164,6 @@ class CardConvert_parser():
                                             expected_name=expected_name)
         return raw_files               
 
-    def _make_dir(self, file_name):
-    
-        """Get the required child directory name(s) for the file"""
-    
-        split_list = file_name.split('.')[0].split('_')
-        split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
-        year_month = '_'.join([split_dict['Year'], split_dict['Month']])
-        sub_dirs_list = [split_dict['Format'], year_month]
-        if not split_dict['Format'] == 'TOB3':
-            sub_dirs_list += [split_dict['Day']]
-        target_path = su.get_path(base_path='data', data_stream='flux_fast',
-                                  sub_dirs='/'.join(sub_dirs_list), 
-                                  site=self.SiteName)
-        if self.understorey_flag:
-            target_path = _replace_dir_for_understorey(inpath=target_path)
-        try: 
-            target_path.mkdir(parents=True)
-        except FileExistsError: 
-            pass
-        return target_path
-
     def run_CardConvert(self):
 
         """Run CardConvert and move raw files"""
@@ -187,15 +172,19 @@ class CardConvert_parser():
             raise RuntimeError('Process has already run!')
         files_to_convert = self.get_raw_files()
         self.write_ccf_file()
-        cc_path = str(su.get_path(base_path='CardConvert'))
+        cc_path = str(PATHS.get_application_path(application='CardConvert'))
         spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
         rslt = spc.run(spc_args)
         if not rslt.returncode == 0:
             raise RuntimeError('Command line execution of CardConvert failed!')
         from_dir = self.get_raw_data_path()
         for f in files_to_convert:
-            to_dir = self._make_dir(f)
-            (from_dir / f).rename(to_dir / f)    
+            to_dir = _make_dir(f)
+            try:
+                (from_dir / f).rename(to_dir / f)    
+            except FileNotFoundError:
+                pdb.set_trace()
+                _make_dir(f)
         self.CardConvert_process_flag = True
 
     def write_ccf_file(self):
@@ -240,11 +229,12 @@ class CardConvert_parser():
         path = self.get_raw_data_path()
         for filename in self.get_converted_files():
             new_filename = _demangle_filename(filename)
-            new_path = self._make_dir(new_filename)
+            new_path = _make_dir(new_filename)
             if self.timestamp_is_end:
                 new_filename = (
-                    _roll_filename_datetime(file_name=new_filename,
-                                            data_interval=self.time_step)
+                    _roll_filename_datetime(
+                        file_name=new_filename, data_interval=self.time_step
+                        )
                     )
             old_file = path / filename
             new_file = new_path / new_filename
@@ -322,7 +312,7 @@ def _get_rounded_mins(mins, interval):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _make_dir(file_name):
+def _make_dir(file_name, understorey=False):
 
     """Get the required child directory name(s) for the file"""
 
@@ -335,12 +325,13 @@ def _make_dir(file_name):
     site = split_dict['Site']
     if 'Under' in site:
         site = site.replace
-    target_path = su.get_path(base_path='data', data_stream='flux_fast',
-                              sub_dirs='/'.join(sub_dirs_list), 
-                              site=split_dict['Site'])
-    try: 
-        target_path.mkdir(parents=True)
-    except FileExistsError: 
+    target_path = PATHS.get_local_path(
+        resource='data', stream='flux_fast', site='Calperum', 
+        subdirs=sub_dirs_list, as_str=True
+        )
+    if understorey:
+        target_path = _replace_dir_for_understorey(inpath=target_path)
+    if target_path.exists:
         pass
     return target_path
 #------------------------------------------------------------------------------
