@@ -322,16 +322,15 @@ def _make_dir(file_name, understorey=False):
     sub_dirs_list = [split_dict['Format'], year_month]
     if not split_dict['Format'] == 'TOB3':
         sub_dirs_list += [split_dict['Day']]
-    site = split_dict['Site']
-    if 'Under' in site:
-        site = site.replace
     target_path = PATHS.get_local_path(
         resource='data', stream='flux_fast', site='Calperum', 
         subdirs=sub_dirs_list, as_str=True
         )
     if understorey:
         target_path = _replace_dir_for_understorey(inpath=target_path)
-    if target_path.exists:
+    try: 
+        target_path.mkdir(parents=True)
+    except FileExistsError: 
         pass
     return target_path
 #------------------------------------------------------------------------------
