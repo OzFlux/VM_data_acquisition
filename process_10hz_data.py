@@ -19,7 +19,6 @@ import pdb
 import subprocess as spc
 import sys
 
-import site_utils as su
 import paths_manager as pm
 
 #------------------------------------------------------------------------------
