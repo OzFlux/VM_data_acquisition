@@ -27,7 +27,7 @@ import pdb
 import campbell_funcs as cf
 import file_merger as fm
 import paths_manager as pm
-import process_10hz_data as ptd
+import process_10hz_data_new as ptd
 import rclone_transfer as rt
 
 #------------------------------------------------------------------------------
@@ -194,7 +194,7 @@ class tasks_manager():
     #--------------------------------------------------------------------------
     def reformat_10Hz_data(self, site):
         
-            pass
+        ptd.main(site=site)
     #--------------------------------------------------------------------------
     
     #--------------------------------------------------------------------------
@@ -234,7 +234,7 @@ class tasks_manager():
             'Rclone_push_RTMC': {
                 'function': self.rclone_push_data, 'stream': 'RTMC'
                 },
-            'Reformat_10Hz': {
+            'reformat_10Hz': {
                 'function': self.reformat_10Hz_data, 'stream': None
                 },
             }
