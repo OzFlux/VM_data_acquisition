@@ -4,13 +4,13 @@
 Created on Wed Jul  6 12:05:35 2022
 
 Issues:
-    - currently the units in the raw file are overriden by what is contained 
-      in the site spreadsheet; maybe need to reconcile these / allow choice 
+    - currently the units in the raw file are overriden by what is contained
+      in the site spreadsheet; maybe need to reconcile these / allow choice
       about which are used
     - need to do a comprehensive check of the files to be concatenated before
       doing the concat - pandas is good at reconciling different files but this
       could have unintended consequences
-    - mapper should be able to create an rtmc spreadsheet linking rtmc 
+    - mapper should be able to create an rtmc spreadsheet linking rtmc
       components to variables
 
 @author: imchugh
@@ -43,11 +43,11 @@ PATHS = pm.paths()
 
 #------------------------------------------------------------------------------
 class mapper():
-    
+
     def __init__(self, site):
         """
-        Class to generate mapping functions from site-specific variables to 
-        universal standard (where possible, nomenclature is based on the 
+        Class to generate mapping functions from site-specific variables to
+        universal standard (where possible, nomenclature is based on the
                             guidance in the PFP Wiki)
 
         Parameters
@@ -61,10 +61,10 @@ class mapper():
 
         """
 
-        self.site = site        
+        self.site = site
         self.site_df = self._make_site_df()
         self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
-    
+
     #--------------------------------------------------------------------------
     ### PUBLIC METHODS ###
     #--------------------------------------------------------------------------
@@ -72,7 +72,7 @@ class mapper():
     #--------------------------------------------------------------------------
     def get_conversion_variables(self):
         """
-        Get the variables in the mapping spreadsheet that require conversion 
+        Get the variables in the mapping spreadsheet that require conversion
         from non-standard units
 
         Parameters
@@ -84,11 +84,11 @@ class mapper():
         dataframe.
 
         """
-                
-        return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
-    #--------------------------------------------------------------------------   
 
-    #--------------------------------------------------------------------------   
+        return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_file_list(self):
         """
         Returns a list of all files documented in the mapping spreadsheet.
@@ -99,14 +99,14 @@ class mapper():
             List of the files.
 
         """
-        
-        return self.site_df.file_name.dropna().unique()
-    #--------------------------------------------------------------------------  
 
-    #--------------------------------------------------------------------------   
+        return self.site_df.file_name.dropna().unique()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_logger_list(self, long_name=None):
         """
-        Returns a list of all loggers documented in the mapping spreadsheet, or 
+        Returns a list of all loggers documented in the mapping spreadsheet, or
         the logger name for the variable if long_name supplied.
 
         Parameters
@@ -120,7 +120,7 @@ class mapper():
             List of logger names.
 
         """
-        
+
         if long_name:
             return self.site_df.loc[long_name, 'logger_name']
         return list(self.site_df.logger_name.dropna().unique())
@@ -137,33 +137,33 @@ class mapper():
         dataframe.
 
         """
-        
+
         return self.site_df.loc[self.site_df.Missing & self.site_df.Required]
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------    
+    #--------------------------------------------------------------------------
     def get_repeat_variables(self, names_only=False):
         """
         Get the variables in the mapping spreadsheet that have multiple
         instruments (e.g. soil instruments).
-        
+
         Parameters
         ----------
         names_only : bool
             If True, returns a list of the variable long names. If False,
-        
+
         Returns
         -------
         dataframe or list.
-        
+
         """
-        
+
         data = self.site_df[self.site_df.index.duplicated(keep=False)]
         if len(data) == 0:
             print('No repeat variables found!')
             return
         if not names_only:
-            return data            
+            return data
         return data.index.unique().tolist()
     #--------------------------------------------------------------------------
 
@@ -179,14 +179,14 @@ class mapper():
             Frame containing the variables.
 
         """
-        
+
         return pd.concat(
             [self.site_df.loc[x] for x in self.site_df.index.unique()
              if 'Soil' in x]
             )
     #--------------------------------------------------------------------------
-    
-    #--------------------------------------------------------------------------    
+
+    #--------------------------------------------------------------------------
     def get_variable_limits(self, variable, by_field='translation_name'):
         """
         Get the plausible limits for a given variable.
@@ -204,12 +204,12 @@ class mapper():
             Series containing the limits.
 
         """
-        
+
         return self.site_df.loc[
             self.site_df[by_field] == variable, ['Max', 'Min']
             ]
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def get_table_list(self, long_name=None):
         """
@@ -248,12 +248,12 @@ class mapper():
         Returns
         -------
         pd.core.frame.DataFrame or pd.core.series.Series
-            If field == None, returns the dataframe containing the subset of 
-            variables found in that table, otherwise returns a series of all 
+            If field == None, returns the dataframe containing the subset of
+            variables found in that table, otherwise returns a series of all
             variable values for that field.
 
         """
-        
+
         if not table_file in self.get_file_list():
             raise KeyError('Table not found!')
         if not field:
@@ -264,34 +264,34 @@ class mapper():
 
     #--------------------------------------------------------------------------
     ### PRIVATE METHODS ###
-    #--------------------------------------------------------------------------   
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _make_site_df(self, logger_name_in_file=True):
         """
         Create the dataframe that contains the data to allow mapping from
         site variable names to standard variable names
-    
+
         Parameters
         ----------
         logger_name_in_file : bool, optional
-            If true, combines logger name with table name to create file name. 
+            If true, combines logger name with table name to create file name.
             The default is True.
-    
+
         Returns
         -------
         pd.core.frame.DataFrame
             Dataframe.
-    
+
         """
-       
+
         IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
                        'Logger name', 'Disable', 'Long name']
-        RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
+        RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name',
                        'Variable units': 'site_units', 'Table name': 'table_name',
                        'Logger name': 'logger_name'}
-       
-        # Concatenate the logger_name and the table_name to make the file source 
+
+        # Concatenate the logger_name and the table_name to make the file source
         # name (only applied if 'logger_name_in_source' arg is True)
         def func(s):
             if len(s.dropna()) == 0:
@@ -314,24 +314,24 @@ class mapper():
 
         # Make the master dataframe
         master_df = pd.read_excel(
-            PATHS.variable_map(), sheet_name='master_variables', 
+            PATHS.variable_map(), sheet_name='master_variables',
             index_col='Long name',
             converters={'Variable units': lambda x: x if len(x) > 0 else None}
         )
         master_df.rename(
-            {'Variable name': 'standard_name', 
-             'Variable units': 'standard_units'}, 
+            {'Variable name': 'standard_name',
+             'Variable units': 'standard_units'},
             axis=1, inplace=True
-            )       
-        
+            )
+
         # Join and generate variables that require input from both sources
         site_df = site_df.join(master_df)
         site_df = site_df.assign(
             conversion=site_df.site_units!=site_df.standard_units,
-            translation_name=np.where(~pd.isnull(site_df.site_label), 
+            translation_name=np.where(~pd.isnull(site_df.site_label),
                                       site_df.site_label, site_df.standard_name)
             )
-                
+
         # Add critical variables that are missing from the primary datasets
         required_list = (
             master_df.loc[master_df.Required==True].index.tolist()
@@ -345,14 +345,14 @@ class mapper():
         site_df.index.name = 'long_name'
         return site_df
     #--------------------------------------------------------------------------
-        
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class _RTMC_syntax_generator():
-    
+
     def __init__(self, site_df):
-        
+
         self.site_df = site_df
 
     #--------------------------------------------------------------------------
@@ -372,7 +372,7 @@ class _RTMC_syntax_generator():
             string as value.
 
         """
-        
+
         start_dict = {
             'start': 'StartRelativeToNewest({},OrderCollected);',
             'start_absolute': 'StartAtRecord(0,0,OrderCollected);'
@@ -399,13 +399,13 @@ class _RTMC_syntax_generator():
             range (max - min).
 
         """
-        
+
         return (
             '({ev} - MinRun({ev})) / (MaxRun({ev}) - MinRun({ev}))'
             .format(ev=eval_string)
             )
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def get_alias_string(self, long_name):
         """
@@ -422,7 +422,7 @@ class _RTMC_syntax_generator():
             Formatted RTMC alias string.
 
         """
-        
+
         variable = self._get_variable_frame(long_name=long_name)
         alias_list = variable.translation_name.tolist()
         source_list = [
@@ -438,7 +438,7 @@ class _RTMC_syntax_generator():
     #--------------------------------------------------------------------------
     def get_comm_status_string(self, logger_name):
         """
-        
+
 
         Parameters
         ----------
@@ -456,8 +456,8 @@ class _RTMC_syntax_generator():
             DESCRIPTION.
 
         """
-        
-        if not logger_name in self.site_df.logger_name:
+
+        if not logger_name in self.site_df.logger_name.tolist():
             raise KeyError('No such logger name in table!')
         return (
             '"Server:__statistics__.{}_std.Collection State" > 2 '
@@ -467,7 +467,7 @@ class _RTMC_syntax_generator():
 
     #--------------------------------------------------------------------------
     def _get_variable_frame(self, long_name):
-        
+
         variable = self.site_df.loc[long_name]
         if isinstance(variable, pd.core.series.Series):
             variable = variable.to_frame().T
@@ -476,12 +476,12 @@ class _RTMC_syntax_generator():
 
     #--------------------------------------------------------------------------
     def get_aliased_output(
-            self, long_name, multiple_to_avg=True, as_str=True, 
+            self, long_name, multiple_to_avg=True, as_str=True,
             start_cond=None, scaled_to_range=False
             ):
-        
+
         variable = self._get_variable_frame(long_name=long_name)
-        alias_string = self.get_alias_string(long_name=long_name) 
+        alias_string = self.get_alias_string(long_name=long_name)
         eval_string = '+'.join(variable.translation_name.tolist())
         if scaled_to_range:
             eval_string = self._get_scaled_to_range(eval_string=eval_string)
@@ -497,15 +497,15 @@ class _RTMC_syntax_generator():
             {'alias_string': alias_string, 'eval_string': eval_string}
             )
         if as_str:
-            return self._str_joiner(list(strings_dict.values()))            
+            return self._str_joiner(list(strings_dict.values()))
         return strings_dict
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def get_soil_heat_storage(
             self, Cp=1800, seconds=1800, layer_depth=0.08, as_str=True,
             start_cond=None):
-        
+
         avg_dict = (
             self.get_aliased_output(long_name='Soil temperature', as_str=False)
             )
@@ -530,7 +530,7 @@ class _RTMC_syntax_generator():
     def get_corrected_soil_heat_flux(
             self, Cp=1800, seconds=1800, layer_depth=0.08
             ):
-        
+
         stor_dict = self.get_soil_heat_storage(
             Cp=Cp, seconds=seconds, layer_depth=layer_depth, as_str=False
             )
@@ -546,7 +546,7 @@ class _RTMC_syntax_generator():
             )
         return self._str_joiner([all_alias, output_string])
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def _str_joiner(self, str_list, joiner='\r\n\r\n'):
 

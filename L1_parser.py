@@ -21,43 +21,45 @@ import pdb
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-
+import variable_mapper as vm
+import paths_manager as pm
 
 #------------------------------------------------------------------------------
 ### INITIALISATIONS ###
 #------------------------------------------------------------------------------
 
+PATHS = pm.paths()
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
 #------------------------------------------------------------------------------
 
 class L1_constructor():
-    
+
     def __init__(self, input_path, file_substr_list, output_path=None, freq=30):
-        
+
         self.substr_list = file_substr_list
         self.freq = freq
         self.input_path = pathlib.Path(input_path)
         if not self.input_path.exists():
             raise FileNotFoundError('Input directory not found!')
         if output_path:
-            self.output_path = pathlib.Path(output_path)        
+            self.output_path = pathlib.Path(output_path)
             if not self.output_path.exists():
                 raise FileNotFoundError('Output directory not found!')
         else:
             self.output_path = self.input_path
-   
+
     def get_date_range(self):
 
         dates_df = self.get_file_dates()
         return pd.date_range(
-            start=dates_df.start_date.min(), end=dates_df.end_date.min(), 
+            start=dates_df.start_date.min(), end=dates_df.end_date.min(),
             freq=str(self.freq) + 'T'
             )
-    
+
     def get_file_list(self, complete_path=False):
-        
+
         file_list = []
         for f in self.input_path.glob('*.dat'):
             for s in self.substr_list:
@@ -66,13 +68,13 @@ class L1_constructor():
         if complete_path:
             return file_list
         return [x.name for x in file_list]
-    
+
     def get_file_data(self, file_name, std_dates=False):
-        
+
         self._check_file_name(file_name=file_name)
         df = pd.read_csv(
-            self.input_path / file_name, skiprows=[0,2,3], 
-            parse_dates=['TIMESTAMP'], index_col=['TIMESTAMP'], 
+            self.input_path / file_name, skiprows=[0,2,3],
+            parse_dates=['TIMESTAMP'], index_col=['TIMESTAMP'],
             na_values='NAN', sep=',', engine='c', on_bad_lines='warn')
         df.drop_duplicates(inplace=True)
         if std_dates:
@@ -81,16 +83,16 @@ class L1_constructor():
         return df
 
     def get_file_dates(self):
-        
+
         file_list = self.get_file_list(complete_path=True)
         dates_list = []
         for file in file_list:
             dates_list.append(get_file_dates(file=file))
         return pd.DataFrame(data=dates_list, index=[x.name for x in file_list])
-        
+
     def get_file_headers(self, file_name, as_frame=False, n_header_lines=4,
                          incl_prog_info=True):
-        
+
         self._check_file_name(file_name)
         headers = []
         with open(self.input_path / file_name) as f:
@@ -106,17 +108,17 @@ class L1_constructor():
         index = ['Name', 'Units', 'Sampling']
         if incl_prog_info:
             padded_header = (
-                header_list[0] + 
+                header_list[0] +
                 [''] * (len(header_list[1]) - len(header_list[0]))
                 )
             header_list = [padded_header] + header_list[1:]
             index = ['Program Info'] + index
         headers_df = pd.DataFrame(data=header_list, index=index)
         return headers_df
-                
-    def write_to_excel(self, file_name=None, write_to_file=None, na_values='', 
+
+    def write_to_excel(self, file_name=None, write_to_file=None, na_values='',
                        std_dates=True, incl_prog_info=True):
-        
+
         if file_name:
             self._check_file_name(file_name=file_name)
             file_list = [file_name]
@@ -139,28 +141,17 @@ class L1_constructor():
                     )
                 df = self.get_file_data(file_name=file, std_dates=std_dates).reset_index()
                 headers_df.to_excel(writer, sheet_name=file, index=False)
-                df.to_excel(writer, sheet_name=file, header=False, index=False, 
+                df.to_excel(writer, sheet_name=file, header=False, index=False,
                             startrow=start_row, na_rep=na_values)
-                
-    def append_to_excel(self, path):
-        
-        xl = pd.ExcelFile(path)
-        sheets = xl.sheet_names
-        # df_dict = {
-        #     sheet_name: xl.parse(sheet_name, usecols='TIMESTAMP') 
-        #     for sheet_name in xl.sheet_names
-        #     }
-        pdb.set_trace()
-        
-                
+
     def _check_file_name(self, file_name):
-        
+
         file_list = self.get_file_list()
         if not file_name in file_list:
             raise FileNotFoundError('File not found!')
 
 def get_file_dates(file):
-    
+
     date_format = '"%Y-%m-%d %H:%M:%S"'
     with open(file, 'rb') as f:
         while True:
@@ -171,13 +162,21 @@ def get_file_dates(file):
                     )
                 break
             except ValueError:
-                pass            
+                pass
         f.seek(2, os.SEEK_END)
         while f.read(1) != b'\n':
             f.seek(-2, os.SEEK_CUR)
         last_line_list = f.readline().decode().split(',')
         end_date = dt.datetime.strptime(last_line_list[0], date_format)
     return {'start_date': start_date, 'end_date': end_date}
+
+def main(site):
+
+    mapper = vm.mapper(site=site)
+    read_write_path = PATHS.get_local_path(
+        resource='Data', stream='flux_slow', site='Calperum'
+        )
+
 
 in_path = 'E:/Sites/Calperum/Flux/Slow'
 out_path = in_path

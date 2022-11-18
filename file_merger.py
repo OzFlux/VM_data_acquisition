@@ -62,8 +62,11 @@ class file_merger():
             self.map.get_variable_fields(
                 table_file=table_file, field='site_name'
                 ).tolist()
-            )        
-        df = df[variables]
+            )
+        try:
+            df = df[variables]
+        except KeyError:
+            pdb.set_trace()
         freq = self._get_table_freq(df)
         new_index = (
             pd.date_range(start=df.index[0], end=df.index[-1], freq=freq)
@@ -412,84 +415,4 @@ class var_constructor():
             )
     #--------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _make_site_df(site):
-    """
-
-
-    Parameters
-    ----------
-    path : TYPE
-        DESCRIPTION.
-    site : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
-
-    """
-   
-    IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-                   'Logger name', 'Disable', 'Long name', 'File name']
-    RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name', 
-                   'Variable units': 'site_units', 'Table name': 'table_name',
-                   'Logger name': 'logger_name', 'File name': 'file_name'}
-   
-    # Concatenate the logger_name and the table_name to make the file source 
-    # name (only applied if 'logger_name_in_source' arg is True)
-    def func(s):
-        if len(s.dropna()) == 0:
-            return np.nan
-        return '{}.dat'.format('_'.join(s.tolist()))
-
-    # Create the site dataframe
-    site_df = pd.read_excel(
-        PATHS.variable_map(), sheet_name=site, usecols=IMPORT_LIST,
-        converters={'Variable units': lambda x: x if len(x) > 0 else None},
-        index_col='Long name'
-        )
-    site_df = site_df.loc[np.isnan(site_df.Disable)]
-    site_df.rename(RENAME_DICT, axis=1, inplace=True)
-    file_name = site_df.file_name.where(
-        ~pd.isnull(site_df.file_name), 
-        site_df[['logger_name', 'table_name']].apply(func, axis=1)
-        )
-    site_df = site_df.assign(file_name=file_name)
-
-    # Make the master dataframe
-    master_df = pd.read_excel(
-        PATHS.variable_map(), sheet_name='master_variables', 
-        index_col='Long name',
-        converters={'Variable units': lambda x: x if len(x) > 0 else None}
-    )
-    master_df.rename(
-        {'Variable name': 'standard_name', 
-         'Variable units': 'standard_units'}, 
-        axis=1, inplace=True
-        )       
-    
-    # Join and generate variables that require input from both sources
-    site_df = site_df.join(master_df)
-    site_df = site_df.assign(
-        conversion=site_df.site_units!=site_df.standard_units,
-        translation_name=np.where(~pd.isnull(site_df.site_label), 
-                                  site_df.site_label, site_df.standard_name)
-        )
-            
-    # Add critical variables that are missing from the primary datasets
-    required_list = (
-        master_df.loc[master_df.Required==True].index.tolist()
-        )
-    missing_list = [x for x in required_list if not x in site_df.index]
-    site_df = pd.concat([site_df, master_df.loc[missing_list]])
-    site_df['Missing'] = pd.isnull(site_df.site_name)
-    site_df.loc[site_df.Missing, 'translation_name'] = (
-        site_df.loc[site_df.Missing, 'standard_name']
-        )
-    site_df.index.name = 'long_name'
-    return site_df
 #------------------------------------------------------------------------------
