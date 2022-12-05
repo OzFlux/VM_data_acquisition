@@ -158,7 +158,8 @@ class raw_file_handler(generic_handler):
     def get_raw_file_list(self):
         l = list(self.raw_data_path.glob('TOB3*.dat'))
         if not l:
-            logging.error('No new raw files to parse in target directory')
+            msg = 'No new raw files to parse in target directory'
+            logging.error(msg); raise RuntimeError(msg)
         return list(self.raw_data_path.glob('TOB3*.dat'))
     #--------------------------------------------------------------------------
 
