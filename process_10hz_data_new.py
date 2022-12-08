@@ -14,7 +14,6 @@ To do:
 import datetime as dt
 import logging
 import numpy as np
-import pdb
 import subprocess as spc
 import sys
 
@@ -45,31 +44,51 @@ ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
 
 #------------------------------------------------------------------------------
 class generic_handler():
+    """Base class that sets attributes and file format checking methods"""
 
     #--------------------------------------------------------------------------
     def __init__(self, site):
 
-        if 'Under' in site:
-            site = site.replace('Under', '')
-            self.understorey = True
-        else:
-            self.understorey = False
-        site_details = DETAILS.get_single_site_details(site=site)
+        self.file_site_name = site
+        self.stream = 'flux_fast' if not 'Under' in site else 'flux_fast_aux'
+        self.site = site.replace('Under', '')
+        site_details = DETAILS.get_single_site_details(site=self.site)
         intvl = str(int(
             1000 / int(site_details.freq_hz)
             )) + 'ms'
-        self.site = site
         self.time_step = site_details.time_step
         self.interval = intvl
-        self.stream = 'flux_fast' if not self.understorey else 'flux_fast_aux'
         self.raw_data_path = PATHS.get_local_path(
             resource='data', stream=self.stream, subdirs=['TMP'],
             site=self.site
             )
+        self.checks_flag = False
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _check_file_name_format(self, file, expected_format):
+        """
+        Check the file format conforms to expected convention.
+
+        Parameters
+        ----------
+        file : str
+            The file name to check.
+        expected_format : str
+            Sets whether the format to check for is TOB3 (raw) or TOA5.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if number of elements following split (based on '_') is wrong.
+        TypeError
+            Raised if time or other critical elements are not what is expected.
+
+        Returns
+        -------
+        None.
+
+        """
 
         # initialisations
         gen_err_str = (
@@ -96,8 +115,8 @@ class generic_handler():
 
         # Make comparison dictionary for expected format
         ex_dict = {
-            'Format': expected_format, 'Site': self.site, 'Freq': self.interval,
-            'Ext': 'dat'
+            'Format': expected_format, 'Site': self.file_site_name,
+            'Freq': self.interval, 'Ext': 'dat'
             }
 
         # Check critical non-time elements
@@ -127,11 +146,11 @@ class generic_handler():
 #------------------------------------------------------------------------------
 class raw_file_handler(generic_handler):
 
+    """Inherits from base class generic_handler and adds methods for raw files"""
     #--------------------------------------------------------------------------
     def __init__(self, site):
 
         super().__init__(site)
-        self.checks_flag = False
         self.destination_base_path = PATHS.get_local_path(
             resource='data', stream=self.stream, subdirs=['TOB3'],
             site=self.site
@@ -140,10 +159,24 @@ class raw_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def check_files(self):
+        """
+        Parses the available raw files (if any) to check whether they have been
+        previously parsed or format is bad.
+
+        Raises
+        ------
+        FileExistsError
+            Raised if file has already been moved to final storage.
+
+        Returns
+        -------
+        None.
+
+        """
 
         logging.info('Checking raw file integrity...')
         existing_list = [
-            file.name for file in self.destination_base_path.rglob('TOA5*.dat')
+            file.name for file in self.destination_base_path.rglob('TOB3*.dat')
             ]
         for file in self.get_raw_file_list():
             self._check_file_name_format(file=file.name, expected_format='TOB3')
@@ -156,6 +189,21 @@ class raw_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def get_raw_file_list(self):
+        """
+        Check for new raw files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if no new files.
+
+        Returns
+        -------
+        list
+            List of files.
+
+        """
+
         l = list(self.raw_data_path.glob('TOB3*.dat'))
         if not l:
             msg = 'No new raw files to parse in target directory'
@@ -165,6 +213,14 @@ class raw_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def move_data_to_final_storage(self):
+        """
+        Move raw files to final storage
+
+        Returns
+        -------
+        None.
+
+        """
 
         if not self.checks_flag:
             return
@@ -181,6 +237,20 @@ class raw_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def _dir_from_file(self, file):
+        """
+        Generate requisite directory from file name.
+
+        Parameters
+        ----------
+        file : str
+            File name.
+
+        Returns
+        -------
+        str
+            Dir name.
+
+        """
 
         elem_list = file.split('.')[0].split('_')
         elem_dict = {
@@ -193,12 +263,14 @@ class raw_file_handler(generic_handler):
 
 #------------------------------------------------------------------------------
 class processed_file_handler(generic_handler):
+    """Inherits from base class generic_handler and adds methods for converted
+    files"""
 
     #--------------------------------------------------------------------------
     def __init__(self, site):
 
         super().__init__(site)
-        self.checks_flag = False
+        # self.checks_flag = False
         self.rename_flag = False
         self.destination_base_path = PATHS.get_local_path(
             resource='data', stream=self.stream, subdirs=['TOA5'],
@@ -208,6 +280,20 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def check_files(self):
+        """
+        Parses the available processed files to check whether they have been
+        previously parsed or format is bad.
+
+        Raises
+        ------
+        FileExistsError
+            Raised if file has already been moved to final storage.
+
+        Returns
+        -------
+        None.
+
+        """
 
         logging.info('Checking formatted file integrity...')
         existing_list = [
@@ -224,6 +310,20 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def get_converted_file_list(self):
+        """
+        Check for new processed files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if files have already been renamed.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
 
         if self.rename_flag:
             msg = 'Files already renamed'
@@ -233,6 +333,20 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def get_renamed_file_list(self):
+        """
+        Check for new renamed files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if files haven't already been renamed.
+
+        Returns
+        -------
+        generator
+            Contains the relevant contents of the directory (all TOA5 files).
+
+        """
 
         if not self.rename_flag:
             msg = 'Files not renamed yet!'
@@ -242,6 +356,19 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def move_data_to_final_storage(self):
+        """
+        Move the processed data to final storage.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if check and rename flags are not high.
+
+        Returns
+        -------
+        None.
+
+        """
 
         if not self.checks_flag:
             msg = 'Files not checked yet!'
@@ -261,6 +388,20 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def _dir_from_file(self, file):
+        """
+        Generates the requisite directory name based on the file name.
+
+        Parameters
+        ----------
+        file : str
+            File name for which to generate the directory name.
+
+        Returns
+        -------
+        list
+            DESCRIPTION.
+
+        """
 
         format_dict = FILENAME_FORMAT.copy()
         format_dict.update({'HrMin': 6})
@@ -285,6 +426,14 @@ class processed_file_handler(generic_handler):
 
     #--------------------------------------------------------------------------
     def rename_files(self):
+        """
+        Rename the coverted files.
+
+        Returns
+        -------
+        None.
+
+        """
 
         logging.info('Renaming converted files:')
         for file in self.get_converted_file_list():
@@ -304,7 +453,7 @@ class processed_file_handler(generic_handler):
 
         Parameters
         ----------
-        file_name : str
+        file : str
             The existing filename to be demangled.
 
         Returns
@@ -352,8 +501,8 @@ def run_CardConvert(site):
 
     Parameters
     ----------
-    CardConvert_config_path : pathlib.Path
-        Path to the CardConvert config file.
+    site : str
+        The site for which to run CardConvert.
 
     Raises
     ------
@@ -384,16 +533,14 @@ def run_CardConvert(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def write_ccf_file(site, overwrite=True):
+def write_ccf_file(site, time_step, overwrite=True):
     """
-    Write ccf configuration file.
+
 
     Parameters
     ----------
-    raw_data_path : pathlib.Path
-        Path to the input (written to the configuration file).
-    output_file_path : pathlib.Path
-        Path to the output directory (written to the configuration file).
+    site : str
+        The site for which to write the ccf file.
     time_step : int
         Averaging interval in minutes of the data.
     overwrite : Bool, optional
@@ -410,16 +557,13 @@ def write_ccf_file(site, overwrite=True):
 
     """
 
-
-    if 'Under' in site:
-        site = site.replace('Under', '')
-        understorey = True
-    else:
-        understorey = False
-    details = DETAILS.get_single_site_details(site=site)
-    stream = 'flux_fast' if not understorey else 'flux_fast_aux'
+    logging.info('Writing CardConvert configuration file...')
+    site_file_name = site
+    site = site.replace('Under', '')
+    stream = 'flux_fast' if not 'Under' in site_file_name else 'flux_fast_aux'
     path_to_file = (
-        PATHS.get_local_path(resource='ccf_config') / f'TOA5_{site}.ccf'
+        PATHS.get_local_path(resource='ccf_config') /
+        f'TOA5_{site_file_name}.ccf'
         )
     path_to_data = PATHS.get_local_path(
         resource='data', stream=stream, subdirs=['TMP'], site=site
@@ -428,6 +572,9 @@ def write_ccf_file(site, overwrite=True):
     # Skip it if overwrite is not enabled
     if not overwrite:
         if path_to_file.exists():
+            logging.info(
+                'File exists, overwrite flag is False, skipping write...'
+                )
             return
 
     # Construct the dictionary
@@ -436,9 +583,10 @@ def write_ccf_file(site, overwrite=True):
     write_dict.update(CCF_DICT)
 
     # Get and set the bale interval
-    bale_intvl_frac = 1 / (1440 / details.time_step)
+    bale_intvl_frac = 1 / (1440 / time_step)
     if bale_intvl_frac > 1:
-        raise RuntimeError('Error! Minutes must sum to less than 1 day!')
+        msg = 'Error! Minutes must sum to less than 1 day!'
+        logging.error(msg); raise RuntimeError(msg)
     bale_intvl = (
         str(int(CCF_DICT['BaleInterval']) - 1 + round(bale_intvl_frac, 10))
         )
@@ -449,6 +597,7 @@ def write_ccf_file(site, overwrite=True):
         f.write('[main]\n')
         for this_item in write_dict:
             f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
+    logging.info('Done!')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -457,17 +606,17 @@ def write_ccf_file(site, overwrite=True):
 
 def main(site, overwrite_ccf=True):
 
-    # Make the ccf file
-    logging.info('Writing CardConvert configuration file...')
-    write_ccf_file(site=site, overwrite=overwrite_ccf)
-    logging.info('Done!')
-
     # Instantiate raw file handler
     raw_handler = raw_file_handler(site=site)
 
     # Check raw files
     files_to_process = raw_handler.get_raw_file_list()
     raw_handler.check_files()
+
+    # Make the ccf file
+    write_ccf_file(
+        site=site, time_step=raw_handler.time_step, overwrite=overwrite_ccf
+        )
 
     # Run CardConvert
     run_CardConvert(site=site)
