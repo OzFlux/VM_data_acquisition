@@ -134,7 +134,6 @@ class tasks_manager():
             )
         maker = cf.make_site_info_TOA5(site=site, num_to_str=['Start year'])
         maker.output_file(output_path)
-
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------

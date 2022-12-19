@@ -15,7 +15,6 @@ import pathlib
 import sys
 
 ### Custom modules ###
-# import site_utils as su
 import paths_manager as pm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
 import sparql_site_details as sd
@@ -27,7 +26,7 @@ import sparql_site_details as sd
 
 PATHS = pm.paths()
 SITE_DETAILS = sd.site_details()
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 #------------------------------------------------------------------------------
 
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 #------------------------------------------------------------------------------
 class TOA5_file_constructor():
 
-    """Class for construction of TOA5 files"""    
+    """Class for construction of TOA5 files"""
 
     def __init__(self, data, header=None, units=None, samples=None):
 
@@ -53,7 +52,7 @@ class TOA5_file_constructor():
                 samples = len(data.columns)
         except AssertionError:
             raise IndexError('Length of units, sampling and dataframe columns '
-                             'must match!')
+                             'must match if specified!')
         self.data = data
         self.header = header
         self.units = units
@@ -87,7 +86,7 @@ class TOA5_file_constructor():
     def output_file(self, file_path):
 
         """Write output to file
-        
+
         Args:
             * file_path (str or Pathlib.Path): full path and filename for \
               output
@@ -113,7 +112,7 @@ def _make_TOA5_data(data) -> list:
     """Turn the dataframe data into text lines; for multiple record \
        dataframes a datetime index is required, since all logger records are \
        structured this way
-    
+
     Args:
         * data (dataframe): dataframe containing columns in desired variable \
           order
@@ -121,7 +120,7 @@ def _make_TOA5_data(data) -> list:
         * a TOA5-formatted data line str
     Raises:
         *
-    """    
+    """
 
     df = data.copy()
     try:
@@ -133,9 +132,9 @@ def _make_TOA5_data(data) -> list:
                 raise RuntimeError('Dataframes with length > 1 must have a '
                                    'datetime index!')
         except RuntimeError:
-            logger.error('Exception occurred: ', exc_info=True)
+            logging.error('Exception occurred: ', exc_info=True)
         date_index = (
-            [dt.datetime.combine(dt.datetime.now().date(), 
+            [dt.datetime.combine(dt.datetime.now().date(),
                                  dt.datetime.min.time())
              .strftime('%Y-%m-%d %H:%M:%S')]
             )
@@ -147,14 +146,14 @@ def _make_TOA5_data(data) -> list:
 def _make_TOA5_header(header=None) -> str:
 
     """Make a TOA5-formatted header
-    
+
     Args:
         * header (list): list of elements to use for header (uses default if None)
     Returns:
         * a TOA5-formatted header line str
     Raises:
         * Runtimeerror if not eight elements in passed header list
-    """    
+    """
 
     default_header = ['TOA5', 'NoStation', 'CR1000', '9999',
                       'cr1000.std.99.99', 'CPU:noprogram.cr1', '9999',
@@ -169,14 +168,14 @@ def _make_TOA5_header(header=None) -> str:
 def _make_TOA5_line(line_type, list_or_int) -> str:
 
     """Make a TOA5-formatted line
-    
+
     Args:
-        * line_type (str): either 'units' or 'samples' 
+        * line_type (str): either 'units' or 'samples'
         * list_or_int (list or int): either a list of elements or an integer \
           requesting the number of default elements
     Returns:
         * a TOA5-formatted line str of requested type
-    """    
+    """
 
     if line_type == 'units':
         default_str = 'unitless'
@@ -195,7 +194,7 @@ def _make_TOA5_line(line_type, list_or_int) -> str:
 
 def _make_TOA5_variable_names(df):
 
-    """Make a TOA5-formatted variable name line"""    
+    """Make a TOA5-formatted variable name line"""
 
     return (
         ','.join(['"TIMESTAMP"'] +
@@ -212,7 +211,7 @@ def _make_TOA5_variable_names(df):
 def make_site_info_TOA5(site, num_to_str=None):
 
     """Make TOA5 constructor containing details from site_master
-    
+
     Args:
         * num_to_str (list): variables to encase in double quotes \
           (will be read as str)
@@ -221,13 +220,13 @@ def make_site_info_TOA5(site, num_to_str=None):
     Raises:
         * TypeError if num_to_str not of type list
     """
-   
-    rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude', 
-                   'elevation': 'Elevation', 'time_zone': 'Time zone', 
+
+    rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude',
+                   'elevation': 'Elevation', 'time_zone': 'Time zone',
                    'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
-   
+
     # Construct site details dataframe and add sunrise / sunset times
-    logger.info('Generating site details file')
+    logging.info('Generating site details file')
     details = SITE_DETAILS.get_single_site_details(site=site).copy()
     details.rename(rename_dict, inplace=True)
     details_new = pd.concat([
@@ -247,14 +246,14 @@ def make_site_info_TOA5(site, num_to_str=None):
         )
     details_new['10Hz file'] = get_latest_10Hz_file(site=site)
     df = pd.DataFrame(details_new).T
-    
+
     # Check passed num_to_str arg is correct
     if not num_to_str:
         num_to_str = []
     else:
         if not isinstance(num_to_str, list):
             raise TypeError('num_to_str must be of type list!')
-    
+
     # Add double quotes to all non-numeric data or numeric data we want as str
     for this_col in df.columns:
         do_flag = False
@@ -267,15 +266,15 @@ def make_site_info_TOA5(site, num_to_str=None):
                 do_flag = True
         if do_flag:
             df.loc[:, this_col]='"{}"'.format(df.loc[:, this_col].item())
-    header = ['TOA5', df.index[0], 'CR1000', '9999', 'cr1000.std.99.99', 
-              'CPU:noprogram.cr1', '9999', 'site_details']      
+    header = ['TOA5', df.index[0], 'CR1000', '9999', 'cr1000.std.99.99',
+              'CPU:noprogram.cr1', '9999', 'site_details']
     toa5_class = TOA5_file_constructor(data=df, header=header)
     return toa5_class
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_latest_10Hz_file(site):
-    
+
     data_path = (
         PATHS.get_local_path(resource='data', stream='flux_fast', site=site)
         )
@@ -287,7 +286,7 @@ def get_latest_10Hz_file(site):
 
 # #------------------------------------------------------------------------------
 # def get_latest_10Hz_files():
-    
+
 #     result_dict = {}
 #     for site in SITES:
 #         latest_file = get_latest_10Hz_file(site)

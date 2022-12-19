@@ -16,6 +16,7 @@ import logging
 import numpy as np
 import subprocess as spc
 import sys
+import pdb
 
 import paths_manager as pm
 sys.path.append('../site_details')
@@ -608,6 +609,8 @@ def main(site, overwrite_ccf=True):
 
     # Instantiate raw file handler
     raw_handler = raw_file_handler(site=site)
+
+    # pdb.set_trace()
 
     # Check raw files
     files_to_process = raw_handler.get_raw_file_list()
