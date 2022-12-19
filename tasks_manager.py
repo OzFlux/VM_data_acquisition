@@ -128,12 +128,7 @@ class tasks_manager():
 
         """
 
-        output_path = (
-            PATHS.get_local_path(resource='site_details') /
-            '{}_details.dat'.format(site)
-            )
-        maker = cf.make_site_info_TOA5(site=site, num_to_str=['Start year'])
-        maker.output_file(output_path)
+        cf.make_site_info_TOA5(site=site)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
