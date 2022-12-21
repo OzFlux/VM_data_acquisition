@@ -249,10 +249,10 @@ def _fmtd_string_from_list(the_list)->str:
 def get_latest_10Hz_file(site):
 
     data_path = PATHS.get_local_path(
-        resource='data', stream='flux_fast', site=site, subdirs=['TMP']
+        resource='data', stream='flux_fast', site=site, subdirs=['TOB3']
         )
     try:
-        return max(data_path.glob('TOB3*.dat'), key=os.path.getctime).name
+        return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
     except ValueError:
         return 'No files'
 #------------------------------------------------------------------------------

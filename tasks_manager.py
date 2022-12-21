@@ -137,7 +137,11 @@ class tasks_manager():
         Get the list of sites for which a given task is enabled.
         """
 
-        return self.tasks_df.loc[self.tasks_df[task_string]].index.tolist()
+        return (
+            self.tasks_df.loc[self.tasks_df[task_string]==True]
+            .index
+            .to_list()
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------

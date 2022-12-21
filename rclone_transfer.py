@@ -20,12 +20,12 @@ import pdb
 
 import paths_manager as pm
 
-
 #------------------------------------------------------------------------------
 ### INITIAL CONFIGURATION ###
 #------------------------------------------------------------------------------
 
 PATHS = pm.paths()
+REMOTE_ALIAS_DICT = {'AliceSpringsMulga': 'AliceMulga'}
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
@@ -42,11 +42,11 @@ def rclone_pull_data(site, stream):
     site : str
         Site name.
     stream : str
-        The data stream to pull (limited to flux_slow, flux_fast and 
+        The data stream to pull (limited to flux_slow, flux_fast and
                                  RTMC).
 
     """
-    
+
     logging.info(f'Begin pull of data stream "{stream}" for site "{site}"')
     from_remote = PATHS.get_remote_path(
         resource='cloudstor', stream=stream, site=site
@@ -62,7 +62,7 @@ def rclone_pull_data(site, stream):
         )
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------           
+#------------------------------------------------------------------------------
 def rclone_push_data(site, stream):
     """
     Push data from local to Cloudstor folders.
@@ -72,15 +72,16 @@ def rclone_push_data(site, stream):
     site : str
         Site name.
     stream : str
-        The data stream to push (limited to flux_slow, flux_fast and 
+        The data stream to push (limited to flux_slow, flux_fast and
                                  RTMC).
 
     """
-    
+
     logging.info(f'Begin push of data stream "{stream}" for site "{site}"')
     exclude_dict = {'flux_fast': 'TMP'}
+    use_site = site if not site in REMOTE_ALIAS_DICT else REMOTE_ALIAS_DICT[site]
     to_remote = PATHS.get_remote_path(
-        resource='cloudstor', stream=stream, site=site
+        resource='cloudstor', stream=stream, site=use_site
         )
     logging.info('Pushing to remote directory: {}'.format(str(to_remote)))
     from_local = PATHS.get_local_path(
@@ -103,7 +104,7 @@ def _rclone_push_pull_generic(source_dir, target_dir, exclude_dirs):
     app_str = PATHS.get_application_path(
         application='rclone', as_str=True, check_exists=False
         )
-    
+
     # Set remote and local directories
     if 'cloudstor' in target_dir:
         remote = target_dir
@@ -112,32 +113,33 @@ def _rclone_push_pull_generic(source_dir, target_dir, exclude_dirs):
         remote = source_dir
         local = target_dir
     else:
-        logging.error(
+        msg = (
             'One of either the source or target directory must be a valid '
             'cloudstor location'
             )
-        return
-    
+        logging.error(msg); raise RuntimeError
+
     # Check remote exists
     logging.info('Checking remote directory is valid...')
     rslt = spc.run([app_str, 'lsd', remote], capture_output=True)
     try:
         rslt.check_returncode()
     except spc.CalledProcessError:
-        logging.error(
+
+        msg = (
             'Check failed! Return code: {0};\nDetails: {1}'
             .format(str(rslt.returncode), rslt.stderr.decode())
             )
-        return
+        logging.error(msg); raise
     logging.info('Found valid remote directory!')
 
     # Check local exists
     logging.info('Checking local directory is valid...')
     if not pathlib.Path(local).exists:
-        logging.error('Check failed! Local directory not found!')
-        return
+        msg = 'Check failed! Local directory not found!'
+        logging.error(msg); raise FileNotFoundError(msg)
     logging.info('Found valid local directory!')
-    
+
     # Do copy
     logging.info('Copying now...')
     exec_list = [
