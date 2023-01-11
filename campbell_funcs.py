@@ -218,7 +218,178 @@ class TOA5_file_constructor():
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class TOA5_concatenator():
+
+    def __init__(self, path, master_file, sub_str):
+
+        self.path = pathlib.Path(path)
+        if not self.path.exists():
+            raise FileNotFoundError(f'Directory "{path}" does not exist!')
+        self.master_file = self.path / master_file
+        if not self.master_file.exists():
+            raise FileNotFoundError(f'File "{master_file}" does not exist!')
+        if not self.master_file.suffix == '.dat':
+            raise TypeError('File must be of type ".dat"')
+        self.sub_str = sub_str
+        if not isinstance(sub_str, str):
+            raise TypeError('"sub_str" arg must be a string!')
+        if not sub_str in self.master_file.name:
+            raise RuntimeError('"sub_str" arg must be found in master file name')
+
+    #--------------------------------------------------------------------------
+    def get_merge_file_list(self):
+
+        files = list(self.path.glob(f'*{self.sub_str}*.dat*'))
+        files.remove(self.master_file)
+        return files
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_info(self, with_file, raise_err=True):
+
+        illegal_list = ['format', 'logger_type', 'table_name']
+        file_list = self.get_merge_file_list()
+        merge_file = self.path / with_file
+        if not merge_file in file_list:
+            raise FileNotFoundError(f'File "{with_file}" not found!')
+        master_info = TOA5_data_handler(self.master_file).get_info(as_dict=True)
+        merge_info = TOA5_data_handler(merge_file).get_info(as_dict=True)
+        df = pd.DataFrame(
+            [master_info, merge_info], index=['master', 'merge']
+            ).T
+        df['Match'] = df.loc[:, 'master'] == df.loc[:, 'merge']
+        no_match = df[~df.Match].index.tolist()
+        any_illegal = [x for x in no_match if x in illegal_list]
+        if any_illegal:
+            illegal_str = ', '.join(any_illegal)
+            msg = f'Illegal mismatches in header info line {illegal_str}'
+            if raise_err:
+                raise RuntimeError(msg)
+            else:
+                raise RuntimeWarning(msg)
+        return df
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def parse_master_file(self):
+
+        pass
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class TOA5_data_handler():
+
+    def __init__(self, file):
+
+        self.file = pathlib.Path(file)
+
+    def get_headers(self):
+
+        headers = []
+        with open(pathlib.Path(self.file)) as f:
+            for i in range(4):
+                headers.append(f.readline())
+        return headers
+
+    def get_header_df(self):
+
+        headers = self.get_headers()[1:]
+        lines_dict = {}
+        for line, var in enumerate(['variable', 'units', 'stat']):
+            lines_dict[var] = headers[line].rstrip().replace('"', '').split(',')
+        idx = lines_dict.pop('variable')
+        return pd.DataFrame(data=lines_dict, index=idx)
+
+    def get_info(self, as_dict=False):
+
+        info = self.get_headers()[0]
+        if not as_dict:
+            return info
+        info_list = ['format', 'station_name', 'logger_type', 'serial_num',
+                     'OS_version', 'program_name', 'program_sig', 'table_name']
+        info_elements = info.replace('\n', '').replace('"', '').split(',')
+        return dict(zip(info_list, info_elements))
+
+    def get_variable_list(self):
+
+        df = self.get_header_df()
+        return df.index.tolist()
+
+    def get_variable_units(self, variable):
+
+        df = self.get_header_df()
+        return df.loc[variable, 'units']
+
+    def get_variable_stats(self, variable):
+
+        df = self.get_header_df()
+        return df.loc[variable, 'stats']
+
+    def get_dates(self):
+
+        date_format = '"%Y-%m-%d %H:%M:%S"'
+        with open(self.file, 'rb') as f:
+            while True:
+                line_list = f.readline().decode().split(',')
+                try:
+                    start_date = (
+                        dt.datetime.strptime(line_list[0], date_format)
+                        )
+                    break
+                except ValueError:
+                    pass
+            f.seek(2, os.SEEK_END)
+            while f.read(1) != b'\n':
+                f.seek(-2, os.SEEK_CUR)
+            last_line_list = f.readline().decode().split(',')
+            end_date = dt.datetime.strptime(last_line_list[0], date_format)
+        return {'start_date': start_date, 'end_date': end_date}
+
+    def get_data(self):
+
+        date_format = '"%Y-%m-%d %H:%M:%S"'
+        dates, data = [], []
+        with open(self.file) as f:
+            for i, line in enumerate(f):
+                if i < 4: continue
+                line_list = line.split(',')
+                dates.append(dt.datetime.strptime(line_list[0], date_format))
+                data.append(line)
+        return dict(zip(dates, data))
+
+        # headers = _read_headers(file_path=self.file)
+        # header_list = (
+        #     [x.replace('"', '').strip().split(',') for x in headers]
+        #     )
+        # index = ['Name', 'Units', 'Sampling']
+        # if incl_prog_info:
+        #     padded_header = (
+        #         header_list[0] +
+        #         [''] * (len(header_list[1]) - len(header_list[0]))
+        #         )
+        #     header_list = [padded_header] + header_list[1:]
+        #     index = ['Program Info'] + index
+        # headers_df = pd.DataFrame(data=header_list, index=index)
+        # return headers_df
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### PRIVATE FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+
+
+#------------------------------------------------------------------------------
+def _univ_path(path_str):
+
+    new_path = pathlib.Path(path_str)
+    if not new_path.exists():
+        raise FileNotFoundError('Directory does not exist!')
+    return new_path
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

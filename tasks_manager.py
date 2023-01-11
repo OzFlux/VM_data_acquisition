@@ -116,6 +116,12 @@ class tasks_manager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def generate_L1_excel(self, site):
+
+        l1p.main(site=site)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def generate_site_details_file(self, site):
         """
         Create the file containing the site information in dummy TOA5 format,
@@ -215,7 +221,9 @@ class tasks_manager():
         """
 
         configs_dict = {
-            'generate_L1_excel': '',
+            'generate_L1_excel': {
+                'function': self.generate_L1_excel, 'stream': None
+                },
             'generate_merged_file': {
                 'function': self.generate_merged_file, 'stream': None
                 },
