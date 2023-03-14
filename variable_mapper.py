@@ -20,8 +20,11 @@ Issues:
 ### STANDARD IMPORTS ###
 #------------------------------------------------------------------------------
 
+import datetime as dt
+import os
 import numpy as np
 import pandas as pd
+import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -228,6 +231,19 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_translation_dict(self, table_file):
+
+        return dict(zip(
+            self.get_variable_fields(
+                table_file=table_file, field='site_name'
+                ).tolist(),
+            self.get_variable_fields(
+                table_file=table_file, field='translation_name'
+                ).tolist()
+            ))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_variable_fields(self, table_file, field=None):
         """
         Return the variables associated with a particular table file (and field
@@ -243,7 +259,7 @@ class mapper():
         Raises
         ------
         KeyError
-            DESCRIPTION.
+            Raised if table file does not exist.
 
         Returns
         -------
@@ -257,9 +273,8 @@ class mapper():
         if not table_file in self.get_file_list():
             raise KeyError('Table not found!')
         if not field:
-            return self.site_df.loc[self.site_df.file_name == table_file]
-        local_df = self.site_df.reset_index()
-        return local_df.loc[local_df.file_name == table_file, field]
+            return self.site_df.loc[self.site_df.file_name==table_file]
+        return self.site_df.loc[self.site_df.file_name==table_file, field]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -316,8 +331,10 @@ class mapper():
         master_df = pd.read_excel(
             PATHS.variable_map(), sheet_name='master_variables',
             index_col='Long name',
-            converters={'Variable units': lambda x: x if len(x) > 0 else None}
+            converters={'Variable units': lambda x: x if len(x) > 0 else None,
+                        'Required': lambda x: True if x==1 else False}
         )
+
         master_df.rename(
             {'Variable name': 'standard_name',
              'Variable units': 'standard_units'},
@@ -553,4 +570,82 @@ class _RTMC_syntax_generator():
         return joiner.join(str_list)
     #--------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+### FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def get_data_tables(site):
+
+#     path = PATHS.get_local_path(resource='xl_variable_map')
+#     converter = {'Site': lambda x: x.replace(' ', '')}
+#     df = pd.read_excel(path, sheet_name='L1_table_list', converters=converter,
+#                        index_col='Site')
+#     df.rename({'Table name': 'table_name', 'Logger name': 'logger_name'},
+#               axis=1, inplace=True)
+#     df = df.loc[[site]]
+#     df['file_name'] = df.logger_name + '_' + df.table_name + '.dat'
+#     df = df.reset_index(drop=True).set_index(keys='table_name')
+#     df['has_file'], df['start_date'], df['end_date'] = False, np.nan, np.nan
+#     for rec in df.index:
+#         file_path = PATHS.get_local_path(
+#             resource='data', site=site, stream='flux_slow'
+#             ) / df.loc[rec, 'file_name']
+#         if file_path.exists():
+#             df.loc[rec, 'has_file'] = True
+#             dates = get_file_dates(file=file_path)
+#             df.loc[rec, 'start_date'] = dates['start_date']
+#             df.loc[rec, 'end_date'] = dates['end_date']
+#     return df
+# #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_data_tables(site=None):
+
+    path = PATHS.get_local_path(resource='xl_variable_map')
+    converter = {'Site': lambda x: x.replace(' ', '')}
+    df = pd.read_excel(path, sheet_name='L1_table_list', converters=converter)
+    if site:
+        df = df.loc[df.Site==site]
+    df.rename({'Table name': 'table_name', 'Logger name': 'logger_name'},
+              axis=1, inplace=True)
+    df['file_name'] = df.logger_name + '_' + df.table_name + '.dat'
+    df.index = pd.MultiIndex.from_frame(df[['logger_name', 'table_name']])
+    df.drop(['logger_name', 'table_name'], axis=1, inplace=True)
+    df['has_file'], df['start_date'], df['end_date'] = False, np.nan, np.nan
+    for rec in df.index:
+        this_site = df.loc[rec, 'Site']
+        file_path = PATHS.get_local_path(
+            resource='data', site=this_site, stream='flux_slow'
+            ) / df.loc[rec, 'file_name']
+        if file_path.exists():
+            df.loc[rec, 'has_file'] = True
+            dates = get_file_dates(file=file_path)
+            df.loc[rec, 'start_date'] = dates['start_date']
+            df.loc[rec, 'end_date'] = dates['end_date']
+    return df
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_dates(file):
+
+    date_format = '"%Y-%m-%d %H:%M:%S"'
+    with open(file, 'rb') as f:
+        while True:
+            line_list = f.readline().decode().split(',')
+            try:
+                start_date = (
+                    dt.datetime.strptime(line_list[0], date_format)
+                    )
+                break
+            except ValueError:
+                pass
+        f.seek(2, os.SEEK_END)
+        while f.read(1) != b'\n':
+            f.seek(-2, os.SEEK_CUR)
+        last_line_list = f.readline().decode().split(',')
+        end_date = dt.datetime.strptime(last_line_list[0], date_format)
+    return {'start_date': start_date, 'end_date': end_date}
 #------------------------------------------------------------------------------

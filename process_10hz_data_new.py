@@ -610,8 +610,6 @@ def main(site, overwrite_ccf=True):
     # Instantiate raw file handler
     raw_handler = raw_file_handler(site=site)
 
-    # pdb.set_trace()
-
     # Check raw files
     files_to_process = raw_handler.get_raw_file_list()
     raw_handler.check_files()

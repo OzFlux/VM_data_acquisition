@@ -139,6 +139,7 @@ class L1_constructor():
         start_row = 4 if incl_prog_info else 3
         with pd.ExcelWriter(self.output_path / write_to_file) as writer:
             for file in file_list:
+                sheet_name =file.split('.')[0]
                 logging.info(f'    Parsing file {file}...')
                 headers_df = (
                     self.get_file_headers(file_name=file, as_frame=True,
@@ -148,11 +149,13 @@ class L1_constructor():
                     file_name=file, std_dates=std_dates
                     ).reset_index()
                 headers_df.to_excel(
-                    writer, sheet_name=file, header=False, index=False,
+                    writer, sheet_name=sheet_name, header=False, index=False,
                     startrow=0
                     )
-                df.to_excel(writer, sheet_name=file, header=False, index=False,
-                            startrow=start_row, na_rep=na_values)
+                df.to_excel(
+                    writer, sheet_name=sheet_name, header=False, index=False,
+                    startrow=start_row, na_rep=na_values
+                    )
             logging.info('Collation successful!')
 
     def _check_file_name(self, file_name):
