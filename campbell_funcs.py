@@ -371,9 +371,7 @@ class table_merger():
             data=data, info_header=info_header, units=header.units.tolist(),
             samples=header.sampling.tolist()
             )
-        fname = pathlib.Path('E:/Sites/Calperum/Flux/test.dat')
-        # constructor.write_output_file(dest=self.path / f'{self.site}_merged.dat')
-        constructor.write_output_file(dest=fname)
+        constructor.write_output_file(dest=self.path / f'{self.site}_merged.dat')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -560,11 +558,14 @@ class TOA5_concatenator():
                     msg = f'Illegal mismatch in header info line {key}'
                     raise RuntimeError(msg)
                 else:
-                    print(
-                        'Warning: difference in station info header - '
+                    msg=(
+                        'difference in station info header - '
                         f'{key} was {master_info[key]} in master file, '
                         f'{merge_info[key]} in merge file'
                         )
+                    if raise_err:
+                        raise RuntimeError(f'Error: {msg}')
+                    print(f'Warning: {msg}')
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -592,7 +593,10 @@ class TOA5_concatenator():
                 'The following {0} are in master but not in merge file {1}: {2}'
                 .format(which, with_file, master_not_merge)
                 )
-            raise RuntimeError(msg)
+            if raise_err:
+                raise RuntimeError(msg)
+            else:
+                print(f'Warning: {msg}')
         merge_not_master = (
             ', '.join(list(set(merge_list) - set(master_list)))
                 )
@@ -608,20 +612,22 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
     def compare_headers(self, with_file, raise_err=True):
 
-        self.compare_header_info(with_file=with_file)
+        self.compare_header_info(with_file=with_file, raise_err=raise_err)
         for this_line in self.header_lines:
-            self.compare_header_row(with_file=with_file, which=this_line)
+            self.compare_header_row(
+                with_file=with_file, which=this_line, raise_err=raise_err
+                )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def merge_files(self, subset=[]):
+    def merge_files(self, subset=[], raise_err=True):
 
         master_data = TOA5_data_handler(file=self.master_file).get_data_df()
         file_list = self.merge_file_list if not subset else subset
         df_list = [master_data]
         for file in file_list:
             fname = file.name
-            self.compare_headers(with_file=fname)
+            self.compare_headers(with_file=fname, raise_err=raise_err)
             df_list.append(TOA5_data_handler(file=file).get_data_df())
         new_df = (
             pd.concat(df_list)
@@ -663,23 +669,13 @@ class TOA5_data_handler():
 
         self.file = pathlib.Path(file)
 
-    def get_headers(self):
-        """
-        Get a list of the four TOA5 header strings.
+    #--------------------------------------------------------------------------
+    def get_file_interval(self):
 
-        Returns
-        -------
-        headers : list
-            List of the raw header strings.
+        return get_TOA5_interval(file=self.file)
+    #--------------------------------------------------------------------------
 
-        """
-
-        headers = []
-        with open(pathlib.Path(self.file)) as f:
-            for i in range(4):
-                headers.append(f.readline())
-        return headers
-
+    #--------------------------------------------------------------------------
     def get_header_df(self):
         """
         Get a dataframe with variables as index and units and statistical
@@ -692,13 +688,15 @@ class TOA5_data_handler():
 
         """
 
-        headers = self.get_headers()[1:]
+        headers = get_file_headers(file=self.file)[1:]
         lines_dict = {}
         for line, var in enumerate(['variable', 'units', 'stat']):
             lines_dict[var] = headers[line].rstrip().replace('"', '').split(',')
         idx = lines_dict.pop('variable')
         return pd.DataFrame(data=lines_dict, index=idx)
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_info(self, as_dict=True):
         """
         Get the first line with the station info from the logger.
@@ -716,14 +714,16 @@ class TOA5_data_handler():
 
         """
 
-        info = self.get_headers()[0]
+        info = get_file_headers(file=self.file)[0]
         if not as_dict:
             return info
         info_list = ['format', 'station_name', 'logger_type', 'serial_num',
                      'OS_version', 'program_name', 'program_sig', 'table_name']
         info_elements = info.replace('\n', '').replace('"', '').split(',')
         return dict(zip(info_list, info_elements))
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_variable_list(self):
         """
         Gets the list of variables in the TOA5 header line
@@ -737,7 +737,9 @@ class TOA5_data_handler():
 
         df = self.get_header_df()
         return df.index.tolist()
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_variable_units(self, variable):
         """
         Gets the units for a given variable
@@ -756,51 +758,25 @@ class TOA5_data_handler():
 
         df = self.get_header_df()
         return df.loc[variable, 'units']
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_variable_stats(self, variable):
 
         df = self.get_header_df()
         return df.loc[variable, 'stats']
+    #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
     def get_dates(self):
 
-        date_format = '"%Y-%m-%d %H:%M:%S"'
-        with open(self.file, 'rb') as f:
-            while True:
-                line_list = f.readline().decode().split(',')
-                try:
-                    start_date = (
-                        dt.datetime.strptime(line_list[0], date_format)
-                        )
-                    break
-                except ValueError:
-                    pass
-            f.seek(2, os.SEEK_END)
-            while f.read(1) != b'\n':
-                f.seek(-2, os.SEEK_CUR)
-            last_line_list = f.readline().decode().split(',')
-            end_date = dt.datetime.strptime(last_line_list[0], date_format)
-        return {'start_date': start_date, 'end_date': end_date}
+        return get_file_dates(file=self.file)
+    #--------------------------------------------------------------------------
 
-    def get_data(self):
-
-        date_format = '"%Y-%m-%d %H:%M:%S"'
-        dates, data = [], []
-        with open(self.file) as f:
-            for i, line in enumerate(f):
-                if i < 4: continue
-                line_list = line.split(',')
-                dates.append(dt.datetime.strptime(line_list[0], date_format))
-                data.append(line)
-        return dict(zip(dates, data))
-
+    #--------------------------------------------------------------------------
     def get_data_df(self):
 
-        return pd.read_csv(
-            self.file, skiprows=[0,2,3], parse_dates=['TIMESTAMP'],
-            index_col=['TIMESTAMP'], na_values='NAN', sep=',', engine='c',
-            on_bad_lines='warn'
-            )
+        return get_TOA5_data(file=self.file)
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -927,7 +903,6 @@ def get_site_data_tables(site):
     return tables_df
 #--------------------------------------------------------------------------
 
-
 #------------------------------------------------------------------------------
 def get_TOA5_data(file, usecols=None):
 
@@ -1012,10 +987,3 @@ def make_site_L1(site):
     output_path = IO_path / f'{site}_L1.xlsx'
     constructor.write_to_excel(dest=output_path)
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def make_site_L1_excel(site):
-
-#     details = SITE_DETAILS.get_individual
-#     pass
-# #------------------------------------------------------------------------------
