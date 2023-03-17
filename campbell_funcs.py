@@ -70,14 +70,19 @@ class TOA5_file_constructor():
 
         """
 
+        def str_func(the_list):
+
+           ','.join([f'"{item}"' for item in the_list]) + '\n'
+
         amended_names = ['TIMESTAMP'] + self.data.columns.tolist()
         amended_units = ['TS'] + self.units
         amended_samples = [''] + self.samples
+
         return [
-            _fmtd_string_from_list(the_list=self.info_header),
-            _fmtd_string_from_list(the_list=amended_names),
-            _fmtd_string_from_list(the_list=amended_units),
-            _fmtd_string_from_list(the_list=amended_samples)
+            str_func(the_list=self.info_header),
+            str_func(the_list=amended_names),
+            str_func(the_list=amended_units),
+            str_func(the_list=amended_samples)
             ]
     #--------------------------------------------------------------------------
 
@@ -505,11 +510,10 @@ class TOA5_concatenator():
 
     def __init__(self, path, master_file, sub_str, freq):
 
-
         self.path = pathlib.Path(path)
         self.master_file = self.path / master_file
         self.sub_str = sub_str
-        self.freq=freq
+        self.interval = get_TOA5_interval(file=self.master_file)
         self._check_inputs()
         self.merge_file_list = self._get_merge_file_list()
         self.header_lines = ['variable', 'units', 'stat']
@@ -529,8 +533,6 @@ class TOA5_concatenator():
             raise RuntimeError(
                 'content of "sub_str" arg must be found in master file name'
                 )
-        if not self.freq in [30, 60]:
-            raise RuntimeError('"freq" arg must be either 30 or 60')
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -544,90 +546,211 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_header_info(self, with_file, raise_err=True):
+    def _check_input_file(self, file):
 
+        if file in self.merge_file_list:
+            return file
+        if not file in [x.name for x in self.merge_file_list]:
+            raise FileNotFoundError(f'File "{file}" not found!')
+        return self.path / file
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_merge_assessment(self, with_file):
+
+        with_file = self._check_input_file(file=with_file)
+        rslt_dict = {'file_name': with_file.name}
+        rslt_dict.update(self.compare_header_lines(with_file=with_file))
+        rslt_dict.update(self.compare_data_interval(with_file=with_file))
+        return rslt_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    ### Functions that check header lines ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_header_lines(self, with_file, which=None):
+
+        line_dict = {'info': self.compare_info_header,
+                     'variables': self.compare_variable_header,
+                     'units': self.compare_units_header,
+                     'stats': self.compare_stats_header}
+        if not which:
+            which = line_dict.keys()
+        else:
+            if isinstance(which, str):
+                which = [which]
+            if not isinstance(which, list):
+                raise TypeError('"which" kwarg must be str or list of str')
+        rslt_dict = {}
+        for line in which:
+            rslt_dict.update(line_dict[line](with_file=with_file))
+        return rslt_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_info_header(self, with_file):
+
+        with_file = self._check_input_file(file=with_file)
         illegal_list = ['format', 'logger_type', 'table_name']
-        merge_file = self.path / with_file
-        if not merge_file in self.merge_file_list:
-            raise FileNotFoundError(f'File "{with_file}" not found!')
         master_info = TOA5_data_handler(self.master_file).get_info(as_dict=True)
-        merge_info = TOA5_data_handler(merge_file).get_info(as_dict=True)
+        merge_info = TOA5_data_handler(with_file).get_info(as_dict=True)
+        legal = True
+        msg_list = []
         for key in master_info:
             if master_info[key] != merge_info[key]:
                 if key in illegal_list:
-                    msg = f'Illegal mismatch in header info line {key}'
-                    raise RuntimeError(msg)
-                else:
-                    msg=(
-                        'difference in station info header - '
-                        f'{key} was {master_info[key]} in master file, '
-                        f'{merge_info[key]} in merge file'
-                        )
-                    if raise_err:
-                        raise RuntimeError(f'Error: {msg}')
-                    print(f'Warning: {msg}')
+                    msg_list.append(f'Illegal mismatch in header info line {key}')
+                    legal = False
+                    continue
+                msg_list.append(
+                    'difference in station info header - '
+                    f'{key} was {master_info[key]} in master file, '
+                    f'{merge_info[key]} in merge file'
+                    )
+        return {'info_merge_legal': legal, 'msg_list': msg_list}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_header_row(self, with_file, which, raise_err=True):
+    def compare_variable_header(self, with_file):
 
-        master_list = (
-            TOA5_data_handler(self.master_file).get_header_df()
-            .reset_index()
-            .rename({'index': 'variable'}, axis=1)
-            .loc[:, which]
+        with_file = self._check_input_file(file=with_file)
+        master_df = TOA5_data_handler(self.master_file).get_header_df()
+        backup_df = TOA5_data_handler(with_file).get_header_df()
+        common_variables = [x for x in master_df.index if x in backup_df.index]
+        master_vars = list(
+            set(master_df.index.tolist()) - set(backup_df.index.tolist())
+            )
+        if not master_vars:
+            master_vars.append('None')
+        backup_vars = list(
+            set(backup_df.index.tolist()) - set(master_df.index.tolist())
+            )
+        if not backup_vars:
+            backup_vars.append('None')
+        return {
+            'common_variables': common_variables,
+            'master_only': master_vars,
+            'backup_only': backup_vars
+            }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_units_header(self, with_file):
+
+        units_dict = self._compare_units_stats_header(with_file=with_file, which='units')
+        if len(units_dict['units_mismatch']) == 0:
+            units_dict['units_merge_legal'] = False
+        else:
+            units_dict['units_merge_legal'] = True
+        return units_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_stats_header(self, with_file):
+
+        return self._compare_units_stats_header(with_file=with_file, which='stat')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _compare_units_stats_header(self, with_file, which):
+
+        with_file = self._check_input_file(file=with_file)
+        common_vars = (
+            self.compare_variable_header(with_file=with_file)
+            ['common_variables']
+            )
+        compare_df = pd.concat(
+            [(TOA5_data_handler(self.master_file).get_header_df()
+              .rename({which: f'master_{which}'}, axis=1)
+              .loc[common_vars, f'master_{which}']
+              ),
+             (TOA5_data_handler(self.path / with_file).get_header_df()
+              .rename({which: f'bkp_{which}'}, axis=1)
+              .loc[common_vars, f'bkp_{which}']
+              )], axis=1
+            )
+        mismatched_vars = (
+            compare_df[compare_df[f'master_{which}']!=compare_df[f'bkp_{which}']]
+            .index
             .tolist()
             )
-        merge_list = (
-            TOA5_data_handler(self.path / with_file).get_header_df()
-            .reset_index()
-            .rename({'index': 'variable'}, axis=1)
-            .loc[:, which]
-            .tolist()
+        if len(mismatched_vars) == 0: mismatched_vars = ['None']
+        return {f'{which}_mismatch': mismatched_vars}
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_data_interval(self, with_file):
+
+        self._check_input_file(file=with_file)
+        file_interval = get_TOA5_interval(file=self.path / with_file)
+        if not self.interval == file_interval:
+            return {'interval_merge_legal': False}
+        return {'interval_merge_legal': True}
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_merge_report(self):
+
+        write_list = []
+        write_list.append(
+            f'Merge report for master file {self.master_file.name}\n\n'
             )
-        master_not_merge = (
-            ', '.join(list(set(master_list) - set(merge_list)))
+        for file in self.merge_file_list:
+            rslt_dict = self.get_merge_assessment(with_file=file)
+            write_list.append(f'Backup file {file.name}\n\n')
+            write_list.append(
+                'Info header line merge legal? -> '
+                f'{rslt_dict["info_merge_legal"]}\n'
                 )
-        if master_not_merge:
-            msg = (
-                'The following {0} are in master but not in merge file {1}: {2}'
-                .format(which, with_file, master_not_merge)
+            write_list.append('Info header line merge warnings: \n')
+            for x in rslt_dict['msg_list']:
+                write_list.append(f'    - {x}\n')
+            master_only = ', '.join(rslt_dict['master_only'])
+            write_list.append(
+                f'Variables contained only in master file -> {master_only}\n'
                 )
-            if raise_err:
-                raise RuntimeError(msg)
-            else:
-                print(f'Warning: {msg}')
-        merge_not_master = (
-            ', '.join(list(set(merge_list) - set(master_list)))
+            backup_only = ', '.join(rslt_dict['backup_only'])
+            write_list.append(
+                f'Variables contained only in backup file -> {backup_only}\n'
                 )
-        if merge_not_master:
-            msg = (
-                'The following {0} are in merge file {1} but not '
-                'in master file: {2}'
-                .format(which, with_file, merge_not_master)
+            write_list.append(
+                'Units merge legal? -> '
+                f'{rslt_dict["units_merge_legal"]}\n'
                 )
-            raise RuntimeError(msg)
+            mismatched_unit_vars = ', '.join(rslt_dict['units_mismatch'])
+            write_list.append(
+                'Variables with mismatched units -> '
+                f'{mismatched_unit_vars}\n'
+                )
+            mismatched_sampling_vars = ', '.join(rslt_dict['stat_mismatch'])
+            write_list.append(
+                'Variables with mismatched statistical sampling -> '
+                f'{mismatched_sampling_vars}\n'
+                )
+            write_list.append(
+                'Interval merge legal? -> '
+                f'{rslt_dict["interval_merge_legal"]}\n\n'
+                )
+
+        with open(self.path / 'merge_report.txt', 'w') as f:
+            f.writelines(write_list)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_headers(self, with_file, raise_err=True):
+    def merge_data(self, subset=[], write_merge_report=True):
 
-        self.compare_header_info(with_file=with_file, raise_err=raise_err)
-        for this_line in self.header_lines:
-            self.compare_header_row(
-                with_file=with_file, which=this_line, raise_err=raise_err
-                )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def merge_files(self, subset=[], raise_err=True):
-
+        legals = [
+            'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
+            ]
         master_data = TOA5_data_handler(file=self.master_file).get_data_df()
         file_list = self.merge_file_list if not subset else subset
         df_list = [master_data]
         for file in file_list:
-            fname = file.name
-            self.compare_headers(with_file=fname, raise_err=raise_err)
+            rslt_dict = self.get_merge_assessment(with_file=file)
+            if not all([rslt_dict[x] for x in legals]):
+                continue
             df_list.append(TOA5_data_handler(file=file).get_data_df())
         new_df = (
             pd.concat(df_list)
@@ -635,6 +758,22 @@ class TOA5_concatenator():
             .sort_index()
             )
         return new_df
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_headers(self):
+
+        legals = [
+            'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
+            ]
+        header_list = [TOA5_data_handler(file=self.master_file).get_header_df()]
+        for file in self.merge_file_list:
+            rslt_dict = self.get_merge_assessment(with_file=file)
+            if not all([rslt_dict[x] for x in legals]):
+                continue
+            header_list.append(TOA5_data_handler(file=file).get_header_df())
+        header_df = pd.concat(header_list)
+        return header_df[~header_df.index.duplicated()]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -647,7 +786,8 @@ class TOA5_concatenator():
             new_name, suffix = self.master_file.name, self.master_file.suffix
             new_name = new_name.replace(suffix, '') + '_merged' + suffix
             outfile = self.path / new_name
-        headers = TOA5_data_handler(self.master_file).get_headers()
+        headers = TOA5_data_handler(self.master_file).get_header_df()
+        breakpoint()
         _write_TOA5_from_df(df=df, headers=headers, dest=outfile)
     #--------------------------------------------------------------------------
 
@@ -797,26 +937,6 @@ def _write_TOA5_from_df(df, headers, dest):
             f, header=False, index=False, na_rep='NAN',
             quoting=csv.QUOTE_NONNUMERIC
             )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _fmtd_string_from_list(the_list)->str:
-    """
-    Return a joined and quoted string from a list of strings
-
-    Parameters
-    ----------
-    the_list : list
-        List of strings to format and join.
-
-    Returns
-    -------
-    str
-        The formatted string.
-
-    """
-
-    return ','.join([f'"{item}"' for item in the_list]) + '\n'
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
