@@ -18,7 +18,6 @@ import logging
 from logging import handlers
 import pandas as pd
 import sys
-import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -26,7 +25,6 @@ import pdb
 
 import campbell_funcs as cf
 import file_merger as fm
-import L1_parser as l1p
 import paths_manager as pm
 import process_10hz_data_new as ptd
 import rclone_transfer as rt

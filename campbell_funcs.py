@@ -37,7 +37,7 @@ SITE_DETAILS = sd.site_details()
 #------------------------------------------------------------------------------
 class TOA5_file_constructor():
 
-    """Class for construction of TOA5 files"""
+    """Class for construction of generic TOA5 files"""
 
     def __init__(self, data, info_header=None, units=None, samples=None):
 
@@ -72,12 +72,11 @@ class TOA5_file_constructor():
 
         def str_func(the_list):
 
-           ','.join([f'"{item}"' for item in the_list]) + '\n'
+           return ','.join([f'"{item}"' for item in the_list]) + '\n'
 
         amended_names = ['TIMESTAMP'] + self.data.columns.tolist()
         amended_units = ['TS'] + self.units
         amended_samples = [''] + self.samples
-
         return [
             str_func(the_list=self.info_header),
             str_func(the_list=amended_names),
@@ -221,6 +220,19 @@ class TOA5_file_constructor():
 class table_merger():
 
     def __init__(self, site):
+        """
+        Class to generate a standardised dataset from the
+
+        Parameters
+        ----------
+        site : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
 
         self.site = site
         self.path = PATHS.get_local_path(
@@ -384,18 +396,15 @@ class table_merger():
 #------------------------------------------------------------------------------
 class L1_constructor():
 
-    def __init__(self, site, path_to_files, time_step):
+    def __init__(self, site):
         """
         Simple class for generating the collated L1 file from individual TOA5
+        files, including concatenation of backup files where legal.
 
         Parameters
         ----------
         site : str
             Site name.
-        path_to_files : pathlib.Path or str
-            A valid path to the directory containing the files for collation.
-        time_step : int
-            The averaging interval for the site.
 
         Returns
         -------
@@ -404,72 +413,110 @@ class L1_constructor():
         """
 
         self.site = site
-        self.time_step = time_step
-        self.tables_df = get_site_data_tables(site=site)
-        self.path = pathlib.Path(path_to_files)
+        self.time_step = int(SITE_DETAILS.get_single_site_details(
+            site=site, field='time_step'
+            ))
+        self.tables_df = (
+            get_site_data_tables(site=site)
+            .reset_index()
+            .set_index(keys='file_name')
+            )
+        self.path = PATHS.get_local_path(
+            resource='data', stream='flux_slow', site=site
+            )
 
     #--------------------------------------------------------------------------
-    def get_encapsulating_date_range(self):
+    ### PRIVATE METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_file_handler(self, file):
         """
-        Find the earliest and latest dates across ALL available files.
+        Return the concatenator class if there are files for concatenation,
+        otherwise return single file data handler
+
+        Parameters
+        ----------
+        file : pathlib.Path object
+            Full path to file.
+
+        Returns
+        -------
+        file handler
+            Concatenator or single file handler class.
+
+        """
+
+        try:
+            return TOA5_concatenator(master_file=self.path / file)
+        except RuntimeError:
+            return TOA5_data_handler(file=self.path / file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    ### END PRIVATE METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_data(self, file):
+        """
+        Get the file data, including all headers
+
+        Parameters
+        ----------
+        file : pathlib.Path object
+            Full path to file.
 
         Returns
         -------
         dict
-            Start and end dates.
+            Contains pre-header info, variable-specific header and data as
+            values with 'info', 'header' and 'data' as respective keys.
 
         """
 
-        return pd.date_range(
-            start=self.tables_df.start_date.min(),
-            end=self.tables_df.end_date.max(),
-            freq=str(int(self.time_step)) + 'T',
-            name='TIMESTAMP'
-            )
+        handler = self._get_file_handler(file=file)
+        data = handler.get_data_df()
+        return {
+            'info': handler.get_info(as_dict=False),
+            'header': handler.get_header_df(),
+            'data': data,
+            }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def convert_header(self, file):
+    def get_inclusive_date_index(self):
         """
-        Reformats the raw string header and returns it in a dataframe.
-
-        Parameters
-        ----------
-        file : str
-            The file for which to get the formatted header.
+        Get an index that spans the earliest and latest dates across all files
+        to be included in the collection.
 
         Returns
         -------
-        pd.core.frame.DataFrame
-            Dataframe containing formatted header.
+        pandas.core.indexes.datetimes.DatetimeIndex
+            Index with correct (site-specific) time step.
 
         """
 
-        header = get_file_headers(file=self.path / file)
-        header_list = [
-            x.strip().replace('"', '').split(',') for x in header
-            ]
-        return pd.DataFrame(header_list)
+        files = self.tables_df.index
+        df = pd.DataFrame(
+            [self._get_file_handler(file).get_date_span() for file in files],
+            index=files
+            )
+        return pd.date_range(
+            start=df.start_date.min(),
+            end=df.end_date.max(),
+            freq=f'{self.time_step}T')
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_to_excel(self, dest, na_values=''):
+    def write_to_excel(self, na_values=''):
         """
-        Write table data out to separate tabs in an xlsx file.
+        Write table files out to separate tabs in an xlsx file.
 
         Parameters
         ----------
-        dest : pathlib.Path or str
-            Complete file name to write to.
         na_values : str, optional
             The na values to fill nans with. The default is ''.
-
-        Raises
-        ------
-        FileNotFoundError
-            Raised if the directory part of dest does not exist.
-        TypeError
-            Raised if file extension is not xlsx.
 
         Returns
         -------
@@ -477,30 +524,46 @@ class L1_constructor():
 
         """
 
-        dest = pathlib.Path(dest)
-        if not dest.parent.exists():
-            raise FileNotFoundError('Destination directory does not exist!')
-        if not dest.name.split('.')[-1] == 'xlsx':
-            raise TypeError('File extension must be of type "xlsx"')
+        # Get data and header for all files (do concatenation where required)
+        dest = self.path / f'{self.site}_L1.xlsx'
+
+        # Get inclusive date index to reindex all files to
+        date_idx = self.get_inclusive_date_index()
+
+        # Iterate over all files and Write to separate excel workbook sheets
         with pd.ExcelWriter(path=dest) as writer:
-            for file in self.tables_df.file_name.tolist():
-                table = file.split('.')[0]
-                logging.info(f'    Parsing file {file}...')
-                headers_df = self.convert_header(file=file)
-                headers_df.to_excel(
-                    writer, sheet_name=table, header=False, index=False,
-                    startrow=0
-                    )
-                data_df = get_TOA5_data(file=self.path / file)
-                data_df = (
-                    data_df.reindex(self.get_encapsulating_date_range())
-                    .reset_index()
-                    )
-                data_df.to_excel(
-                    writer, sheet_name=table, header=False, index=False,
-                    startrow=4, na_rep=na_values
-                    )
-        logging.info('Collation successful!')
+            for file in self.tables_df.index:
+                sheet_name = file.replace('.dat', '')
+                output_dict = self.get_file_data(file=file)
+
+                # Write info
+                (pd.DataFrame(output_dict['info'])
+                 .T
+                 .to_excel(
+                     writer, sheet_name=sheet_name, header=False, index=False,
+                     startrow=0
+                     )
+                 )
+
+                # Write header
+                (output_dict['header']
+                 .reset_index()
+                 .T
+                 .to_excel(
+                     writer, sheet_name=sheet_name, header=False, index=False,
+                     startrow=1
+                     )
+                 )
+
+                # Write data
+                (output_dict['data']
+                 .reindex(date_idx)
+                 .reset_index()
+                 .to_excel(
+                     writer, sheet_name=sheet_name, header=False, index=False,
+                     startrow=4, na_rep=na_values
+                     )
+                  )
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -508,37 +571,192 @@ class L1_constructor():
 #------------------------------------------------------------------------------
 class TOA5_concatenator():
 
-    def __init__(self, path, master_file, sub_str, freq):
+    def __init__(self, master_file):
+        """
+        Class to concatenate backup files with the master file currently
+        being written to.
 
-        self.path = pathlib.Path(path)
-        self.master_file = self.path / master_file
-        self.sub_str = sub_str
-        self.interval = get_TOA5_interval(file=self.master_file)
-        self._check_inputs()
-        self.merge_file_list = self._get_merge_file_list()
-        self.header_lines = ['variable', 'units', 'stat']
+        Parameters
+        ----------
+        master_file : str or pathlib.Path
+            Absolute file path.
 
-    #--------------------------------------------------------------------------
-    def _check_inputs(self):
+        Raises
+        ------
+        FileNotFoundError
+            Raised if file does not exist.
+        TypeError
+            Raised if the file is not of type *.dat.
 
-        if not self.path.exists():
-            raise FileNotFoundError(f'Directory "{self.path}" does not exist!')
+        Returns
+        -------
+        None.
+
+        """
+
+        self.master_file = pathlib.Path(master_file)
         if not self.master_file.exists():
             raise FileNotFoundError(f'File "{self.master_file}" does not exist!')
         if not self.master_file.suffix == '.dat':
             raise TypeError('File must be of type ".dat"')
-        if not isinstance(self.sub_str, str):
-            raise TypeError('"sub_str" arg must be a string!')
-        if not self.sub_str in self.master_file.name:
-            raise RuntimeError(
-                'content of "sub_str" arg must be found in master file name'
-                )
+        self.file_path = self.master_file.parent
+        self.file_name = self.master_file.name
+        self.interval = get_TOA5_interval(file=self.master_file)
+        self.merge_file_list = self._get_merge_file_list()
+
+    #--------------------------------------------------------------------------
+    ### BEGIN PRIVATE METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _check_input_file(self, file):
+        """
+        Check whether user input is correct for file parameter.
+
+        Parameters
+        ----------
+        file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Raises
+        ------
+        FileNotFoundError
+            Raised if file does not exist or is not in the list of available
+            files.
+
+        Returns
+        -------
+        pathlib.Path object
+            Returns the full absolute path to the file, regardless of user input
+            (this provides the file input for other methods).
+
+        """
+
+        if file in self.merge_file_list:
+            return file
+        if not file in [x.name for x in self.merge_file_list]:
+            raise FileNotFoundError(f'File "{file}" not found!')
+        return self.file_path / file
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _compare_units_stats_header(self, with_file, which):
+        """
+        Compare either units (units) or statistical sampling type (stat) header
+        line to see if all elements are consistent.
+
+        Parameters
+        ----------
+        file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+        which : str
+            which of 'units' or 'stat' to compare.
+
+        Returns
+        -------
+        dict
+            return a dictionary with the mismatched header elements.
+
+        """
+
+        with_file = self._check_input_file(file=with_file)
+        common_vars = (
+            self.compare_variable_header(with_file=with_file)
+            ['common_variables']
+            )
+        compare_df = pd.concat(
+            [(TOA5_data_handler(self.master_file).get_header_df()
+              .rename({which: f'master_{which}'}, axis=1)
+              .loc[common_vars, f'master_{which}']
+              ),
+             (TOA5_data_handler(self.file_path / with_file).get_header_df()
+              .rename({which: f'bkp_{which}'}, axis=1)
+              .loc[common_vars, f'bkp_{which}']
+              )], axis=1
+            )
+        mismatched_vars = (
+            compare_df[compare_df[f'master_{which}']!=compare_df[f'bkp_{which}']]
+            .index
+            .tolist()
+            )
+        if len(mismatched_vars) == 0: mismatched_vars = ['None']
+        return {f'{which}_mismatch': mismatched_vars}
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_merge_assessment_as_text(self, merge_dict):
+        """
+        Converts the dictionary containing merge results into a list of text
+        strings to be written to file.
+
+        Parameters
+        ----------
+        merge_dict : dict
+            The output from the get_merge_assessment method.
+
+        Returns
+        -------
+        write_list : list
+            List of strings to be written to file.
+
+        """
+
+        write_list = []
+        write_list.append(f'Backup file {merge_dict["file_name"]}\n\n')
+        write_list.append(
+            'Info header line merge legal? -> '
+            f'{merge_dict["info_merge_legal"]}\n'
+            )
+        write_list.append('Info header line merge warnings: \n')
+        for x in merge_dict['msg_list']:
+            write_list.append(f'    - {x}\n')
+        master_only = ', '.join(merge_dict['master_only'])
+        write_list.append(
+            f'Variables contained only in master file -> {master_only}\n'
+            )
+        backup_only = ', '.join(merge_dict['backup_only'])
+        write_list.append(
+            f'Variables contained only in backup file -> {backup_only}\n'
+            )
+        write_list.append(
+            'Units merge legal? -> '
+            f'{merge_dict["units_merge_legal"]}\n'
+            )
+        mismatched_unit_vars = ', '.join(merge_dict['units_mismatch'])
+        write_list.append(
+            'Variables with mismatched units -> '
+            f'{mismatched_unit_vars}\n'
+            )
+        mismatched_sampling_vars = ', '.join(merge_dict['stat_mismatch'])
+        write_list.append(
+            'Variables with mismatched statistical sampling -> '
+            f'{mismatched_sampling_vars}\n'
+            )
+        write_list.append(
+            'Interval merge legal? -> '
+            f'{merge_dict["interval_merge_legal"]}\n\n'
+            )
+        return write_list
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _get_merge_file_list(self):
+        """
+        Get the list of files eligible for merge
 
-        files = list(self.path.glob(f'*{self.sub_str}*.dat*'))
+        Raises
+        ------
+        RuntimeError
+            Raised if no files.
+
+        Returns
+        -------
+        files : list
+            List of files (pathlib.Path object of absolute file path).
+
+        """
+
+        files = list(self.file_path.glob(f'{self.master_file.name}*'))
         files.remove(self.master_file)
         if not files:
             raise RuntimeError('No files to concatenate!')
@@ -546,31 +764,121 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _check_input_file(self, file):
+    def _post_merge_checks(self, df):
+        """
+        This method should check for bad things in the data as opposed the
+        header alone. At present, it has only one condition - whether there are
+        duplicate indices with non-duplicate data (should be rare). If there are,
+        keeps the first and dumps all subsequent (which is potentially dangerous).
 
-        if file in self.merge_file_list:
-            return file
-        if not file in [x.name for x in self.merge_file_list]:
-            raise FileNotFoundError(f'File "{file}" not found!')
-        return self.path / file
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            The concatenated dataframe to check.
+
+        Returns
+        -------
+        dict
+            Contains the corrected data (key='data') and a report listing all
+            duplicate indices (if any; key='duplicate indices').
+
+        """
+
+        post_merge_str = 'Duplicate indices with non-duplicate data-> '
+        if len(df) == len(df[~df.index.duplicated()]):
+            return {'data': df, 'duplicate_indices': post_merge_str + 'None'}
+        else:
+            idx = df[df.index.duplicated()].index
+            df = df[~df.index.duplicated(keep='first')]
+            return {
+                'data': df, 'duplicate_indices': (
+                    [post_merge_str + 'Multiple (keeping first instance):\n'] +
+                    [x.strftime('    - %Y-%m-%d %H:%M\n') for x in idx.to_pydatetime()]
+                        )
+                    }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_merge_assessment(self, with_file):
+    def _write_merge_report(self, write_list):
+        """
+        Does the underlying write to disk of the merge report.
 
-        with_file = self._check_input_file(file=with_file)
-        rslt_dict = {'file_name': with_file.name}
-        rslt_dict.update(self.compare_header_lines(with_file=with_file))
-        rslt_dict.update(self.compare_data_interval(with_file=with_file))
-        return rslt_dict
+        Parameters
+        ----------
+        write_list : list
+            List containing assessment of merge.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        write_list = (
+            [f'Merge report for master file {self.file_name}\n\n'] +
+            write_list
+            )
+        out_name = self.file_name.replace('.dat', '')
+        with open(self.file_path / f'merge_report_{out_name}.txt', 'w') as f:
+            f.writelines(write_list)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    ### Functions that check header lines ###
+    ### END PRIVATE METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_data_interval(self, with_file):
+        """
+        Cross-check that a file for concatenation has the same frequency as the
+        master file.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            Dictionary with indication of whether merge intervals are same
+            (legal) or otherwise (illegal).
+
+        """
+
+        self._check_input_file(file=with_file)
+        file_interval = get_TOA5_interval(file=self.file_path / with_file)
+        if not self.interval == file_interval:
+            return {'interval_merge_legal': False}
+        return {'interval_merge_legal': True}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def compare_header_lines(self, with_file, which=None):
+        """
+        Convenience method to pull all header line comparison methods together
+        and allow them to be called with keywords.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+        which : str or list, optional
+            Either the individual header line to compare, or a list thereof.
+            Valid options are 'info', 'variables', 'units' and 'stats'. The
+            default is None.
+
+        Raises
+        ------
+        TypeError
+            Raised if 'which' is not list or str.
+
+        Returns
+        -------
+        rslt_dict :
+            DESCRIPTION.
+
+        """
 
         line_dict = {'info': self.compare_info_header,
                      'variables': self.compare_variable_header,
@@ -591,11 +899,29 @@ class TOA5_concatenator():
 
     #--------------------------------------------------------------------------
     def compare_info_header(self, with_file):
+        """
+        Cross-check the elements of the first header line ('info') of a backup
+        file for concatenation with the master file. If any of file format,
+        logger type or table name are different, merge is deemed illegal. Other
+        non-matching elements are noted in the merge assessment but do not stop
+        merge.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            Assessment of legality and list of elements that differ.
+
+        """
 
         with_file = self._check_input_file(file=with_file)
         illegal_list = ['format', 'logger_type', 'table_name']
-        master_info = TOA5_data_handler(self.master_file).get_info(as_dict=True)
-        merge_info = TOA5_data_handler(with_file).get_info(as_dict=True)
+        master_info = TOA5_data_handler(self.master_file).get_info()
+        merge_info = TOA5_data_handler(with_file).get_info()
         legal = True
         msg_list = []
         for key in master_info:
@@ -609,11 +935,81 @@ class TOA5_concatenator():
                     f'{key} was {master_info[key]} in master file, '
                     f'{merge_info[key]} in merge file'
                     )
+        if not msg_list:
+            msg_list = [    - 'None']
         return {'info_merge_legal': legal, 'msg_list': msg_list}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def compare_stats_header(self, with_file):
+        """
+        Wrapper for comparison of statistical sampling header line.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            return a dictionary with the mismatched header elements.
+
+        """
+
+        return self._compare_units_stats_header(with_file=with_file, which='stat')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def compare_units_header(self, with_file):
+        """
+        Wrapper for comparison of units header line (merge is deemed illegal if
+        there are unit changes).
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            return a dictionary with the mismatched header elements
+            (key='units_mismatch') and whether the merge is legal
+            (key='units_merge_legal').
+
+        """
+
+        units_dict = (
+            self._compare_units_stats_header(with_file=with_file, which='units')
+            )
+        if len(units_dict['units_mismatch']) == 0:
+            units_dict['units_merge_legal'] = False
+        else:
+            units_dict['units_merge_legal'] = True
+        return units_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def compare_variable_header(self, with_file):
+        """
+        Cross-check the elements of the variable name header line ('info') of a
+        backup file for concatenation with the master file.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            Dictionary containing lists of variables common to both files
+            (key='common'), those contained only in the master
+            (key='master_only') and those contained only in the backup
+            (key='backup_only').
+
+        """
 
         with_file = self._check_input_file(file=with_file)
         master_df = TOA5_data_handler(self.master_file).get_header_df()
@@ -637,131 +1033,121 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_units_header(self, with_file):
+    def get_data_df(self, write_merge_report=True):
+        """
+        Get the concatenated dataframe (ensuring that the dataframe columns are
+        aligned to the concatenated header)
 
-        units_dict = self._compare_units_stats_header(with_file=with_file, which='units')
-        if len(units_dict['units_mismatch']) == 0:
-            units_dict['units_merge_legal'] = False
-        else:
-            units_dict['units_merge_legal'] = True
-        return units_dict
-    #--------------------------------------------------------------------------
+        Parameters
+        ----------
+        write_merge_report : Bool, optional
+            Whether to write merge report to the target directory for the
+            master file. The default is True.
 
-    #--------------------------------------------------------------------------
-    def compare_stats_header(self, with_file):
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            Dataframe containing the concatenated data.
 
-        return self._compare_units_stats_header(with_file=with_file, which='stat')
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _compare_units_stats_header(self, with_file, which):
-
-        with_file = self._check_input_file(file=with_file)
-        common_vars = (
-            self.compare_variable_header(with_file=with_file)
-            ['common_variables']
-            )
-        compare_df = pd.concat(
-            [(TOA5_data_handler(self.master_file).get_header_df()
-              .rename({which: f'master_{which}'}, axis=1)
-              .loc[common_vars, f'master_{which}']
-              ),
-             (TOA5_data_handler(self.path / with_file).get_header_df()
-              .rename({which: f'bkp_{which}'}, axis=1)
-              .loc[common_vars, f'bkp_{which}']
-              )], axis=1
-            )
-        mismatched_vars = (
-            compare_df[compare_df[f'master_{which}']!=compare_df[f'bkp_{which}']]
-            .index
-            .tolist()
-            )
-        if len(mismatched_vars) == 0: mismatched_vars = ['None']
-        return {f'{which}_mismatch': mismatched_vars}
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def compare_data_interval(self, with_file):
-
-        self._check_input_file(file=with_file)
-        file_interval = get_TOA5_interval(file=self.path / with_file)
-        if not self.interval == file_interval:
-            return {'interval_merge_legal': False}
-        return {'interval_merge_legal': True}
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_merge_report(self):
-
-        write_list = []
-        write_list.append(
-            f'Merge report for master file {self.master_file.name}\n\n'
-            )
-        for file in self.merge_file_list:
-            rslt_dict = self.get_merge_assessment(with_file=file)
-            write_list.append(f'Backup file {file.name}\n\n')
-            write_list.append(
-                'Info header line merge legal? -> '
-                f'{rslt_dict["info_merge_legal"]}\n'
-                )
-            write_list.append('Info header line merge warnings: \n')
-            for x in rslt_dict['msg_list']:
-                write_list.append(f'    - {x}\n')
-            master_only = ', '.join(rslt_dict['master_only'])
-            write_list.append(
-                f'Variables contained only in master file -> {master_only}\n'
-                )
-            backup_only = ', '.join(rslt_dict['backup_only'])
-            write_list.append(
-                f'Variables contained only in backup file -> {backup_only}\n'
-                )
-            write_list.append(
-                'Units merge legal? -> '
-                f'{rslt_dict["units_merge_legal"]}\n'
-                )
-            mismatched_unit_vars = ', '.join(rslt_dict['units_mismatch'])
-            write_list.append(
-                'Variables with mismatched units -> '
-                f'{mismatched_unit_vars}\n'
-                )
-            mismatched_sampling_vars = ', '.join(rslt_dict['stat_mismatch'])
-            write_list.append(
-                'Variables with mismatched statistical sampling -> '
-                f'{mismatched_sampling_vars}\n'
-                )
-            write_list.append(
-                'Interval merge legal? -> '
-                f'{rslt_dict["interval_merge_legal"]}\n\n'
-                )
-
-        with open(self.path / 'merge_report.txt', 'w') as f:
-            f.writelines(write_list)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def merge_data(self, subset=[], write_merge_report=True):
+        """
 
         legals = [
             'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
             ]
-        master_data = TOA5_data_handler(file=self.master_file).get_data_df()
-        file_list = self.merge_file_list if not subset else subset
-        df_list = [master_data]
-        for file in file_list:
+        master_handler = TOA5_data_handler(file=self.master_file)
+        data_list = [master_handler.get_data_df()]
+        header_list = [master_handler.get_header_df()]
+        report_list = []
+
+        # Iterate over files (skip concatenation if illegal, but report)
+        for file in self.merge_file_list:
             rslt_dict = self.get_merge_assessment(with_file=file)
+            report_list += self._get_merge_assessment_as_text(merge_dict=rslt_dict)
             if not all([rslt_dict[x] for x in legals]):
                 continue
-            df_list.append(TOA5_data_handler(file=file).get_data_df())
-        new_df = (
-            pd.concat(df_list)
+            handler = TOA5_data_handler(file=file)
+            data_list.append(handler.get_data_df())
+            header_list.append(handler.get_header_df())
+
+        # Concatenate data
+        checks_dict = self._post_merge_checks(df=
+            pd.concat(data_list)
             .drop_duplicates()
             .sort_index()
             )
-        return new_df
+
+        # Write merge report if requested
+        report_list += checks_dict['duplicate_indices']
+
+        if write_merge_report:
+            self._write_merge_report(write_list=report_list)
+
+        # Align headers and return
+        header_df = pd.concat(header_list)
+        cols_to_keep = header_df[~header_df.index.duplicated()].index.tolist()
+        cols_to_keep.remove('TIMESTAMP')
+        return checks_dict['data'][cols_to_keep]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def merge_headers(self):
+    def get_date_span(self):
+        """
+        Get the earliest start date and latest end date across all files (this
+        mimics the functionality of the single file handler but extends it to
+        the concatenated file case). Mainly used to provide a common
+        accessibility method with the single file handler.
+
+        Returns
+        -------
+        dict
+            Start (key='start_date') and end (key='end_date') dates.
+
+        """
+
+        df = self.get_file_dates()
+        return {
+            'start_date': df.start_date.min(), 'end_date': df.end_date.max()
+            }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_dates(self, legals_only=True):
+        """
+        Get the start and finish date for all files (including both master and
+        backups).
+
+        Parameters
+        ----------
+        legals_only : TYPE, optional
+            Whether to only include merge-legal files or all. The default is True.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            Dataframe cointaining filename as index and start and end date as
+            columns.
+
+        """
+
+        iter_list = (
+            [self.master_file] +
+            self.get_legal_files() if legals_only else self.merge_file_list
+            )
+        return pd.DataFrame([get_file_dates(x) for x in iter_list], index=iter_list)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_header_df(self):
+        """
+        Get a dataframe containing the variable, units and statistical sampling
+        method of the concatenated file.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            Dataframe containing the above.
+
+        """
 
         legals = [
             'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
@@ -777,18 +1163,124 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def merge_and_write(self, subset=[], file_name=None):
+    def get_illegal_files(self):
+        """
+        Return a list of the files which cannot be legally concatenated.
 
-        df = self.merge_files(subset=subset)
-        if file_name:
-            outfile = self.path / file_name
-        else:
-            new_name, suffix = self.master_file.name, self.master_file.suffix
-            new_name = new_name.replace(suffix, '') + '_merged' + suffix
-            outfile = self.path / new_name
-        headers = TOA5_data_handler(self.master_file).get_header_df()
-        breakpoint()
-        _write_TOA5_from_df(df=df, headers=headers, dest=outfile)
+        Returns
+        -------
+        list
+            The files that cannot be legally concatenated.
+
+        """
+
+        return [x for x in self.merge_file_list if not x in self.get_legal_files()]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_info(self, as_dict=True):
+        """
+        Return the info line for the concatenated file. Same as the method in
+        the single file handler except that elements that differed across files
+        are replaced with the string 'NA: merged file'.
+
+        Parameters
+        ----------
+        as_dict : Bool, optional
+            If True, return dictionary with descriptive keys for info line
+            elements, else a list of the elements. The default is True.
+
+        Returns
+        -------
+        dict or list
+            The modified elements of the info line.
+
+        """
+
+        master_dict = TOA5_data_handler(file=self.master_file).get_info()
+        file_list = [self.master_file] + self.merge_file_list
+        info_list = [list(master_dict.values())]
+        for f in file_list[1:]:
+            info_list.append(list(
+                TOA5_data_handler(file=f).get_info().values()
+                ))
+        name_list = [x.name for x in file_list]
+        df = pd.DataFrame(info_list, index=name_list, columns=master_dict.keys()).T
+        df['same'] = df.eq(df.iloc[:,0], axis=0).all(1)
+        out_df = (df[df.same]
+                  .reindex(df.index)
+                  .fillna('NA: merged_file')
+                  [self.master_file.name]
+                  )
+        if not as_dict:
+            return out_df.to_list()
+        return out_df.to_dict()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_legal_files(self):
+        """
+        Return a list of the files which can be legally concatenated.
+
+        Returns
+        -------
+        list
+            The files that can be legally concatenated.
+
+        """
+
+        legals = [
+            'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
+            ]
+        legal_list = []
+        for file in self.merge_file_list:
+            merge_dict = self.get_merge_assessment(with_file=file)
+            if all([merge_dict[x] for x in legals]):
+                legal_list.append(file)
+        return legal_list
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_merge_assessment(self, with_file):
+        """
+        Compares all header lines (same as 'compare_header_lines' method but
+        also compares file interval).
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        rslt_dict : dict
+            Result of all comparisons.
+
+        """
+
+        with_file = self._check_input_file(file=with_file)
+        rslt_dict = {'file_name': with_file.name}
+        rslt_dict.update(self.compare_header_lines(with_file=with_file))
+        rslt_dict.update(self.compare_data_interval(with_file=with_file))
+        return rslt_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_merge_report(self):
+        """
+        Write report to target directory master file.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        write_list = []
+        for file in self.merge_file_list:
+            merge_dict = self.get_merge_assessment(with_file=file)
+            write_list += self._get_merge_assessment_as_text(merge_dict=merge_dict)
+        self._write_merge_report(write_list)
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -831,8 +1323,8 @@ class TOA5_data_handler():
         headers = get_file_headers(file=self.file)[1:]
         lines_dict = {}
         for line, var in enumerate(['variable', 'units', 'stat']):
-            lines_dict[var] = headers[line].rstrip().replace('"', '').split(',')
-        idx = lines_dict.pop('variable')
+            lines_dict[var] = self._format_line(line=headers[line])
+        idx = pd.Index(lines_dict.pop('variable'), name='variable')
         return pd.DataFrame(data=lines_dict, index=idx)
     #--------------------------------------------------------------------------
 
@@ -856,7 +1348,7 @@ class TOA5_data_handler():
 
         info = get_file_headers(file=self.file)[0]
         if not as_dict:
-            return info
+            return self._format_line(line=info)
         info_list = ['format', 'station_name', 'logger_type', 'serial_num',
                      'OS_version', 'program_name', 'program_sig', 'table_name']
         info_elements = info.replace('\n', '').replace('"', '').split(',')
@@ -908,7 +1400,7 @@ class TOA5_data_handler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_dates(self):
+    def get_date_span(self):
 
         return get_file_dates(file=self.file)
     #--------------------------------------------------------------------------
@@ -917,6 +1409,12 @@ class TOA5_data_handler():
     def get_data_df(self):
 
         return get_TOA5_data(file=self.file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _format_line(self, line):
+
+        return line.replace('\n', '').replace('"', '').split(',')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1097,13 +1595,6 @@ def make_site_info_TOA5(site):
 #------------------------------------------------------------------------------
 def make_site_L1(site):
 
-    IO_path = PATHS.get_local_path(
-        resource='data', stream='flux_slow', site=site
-        )
-    details = SITE_DETAILS.get_single_site_details(site=site).copy()
-    constructor = L1_constructor(
-        site=site, path_to_files=IO_path, time_step=details.time_step
-        )
-    output_path = IO_path / f'{site}_L1.xlsx'
-    constructor.write_to_excel(dest=output_path)
+    constructor = L1_constructor(site=site)
+    constructor.write_to_excel()
 #------------------------------------------------------------------------------
