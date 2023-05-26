@@ -102,7 +102,7 @@ def _rclone_push_pull_generic(source_dir, target_dir, exclude_dirs):
 
     # Set path to rclone
     app_str = PATHS.get_application_path(
-        application='rclone', as_str=True, check_exists=False
+        application='rclone', check_exists=True, as_str=True
         )
 
     # Set remote and local directories

@@ -24,9 +24,8 @@ import sys
 #------------------------------------------------------------------------------
 
 import campbell_funcs as cf
-import file_merger as fm
 import paths_manager as pm
-import process_10hz_data_new as ptd
+import process_10hz_data as ptd
 import rclone_transfer as rt
 
 #------------------------------------------------------------------------------
@@ -103,14 +102,8 @@ class tasks_manager():
 
         """
 
-        merger = fm.file_merger(site=site)
-        output_path = (
-            PATHS.get_local_path(
-                resource='data', stream='flux_slow', site=site
-                )
-            / '{}_merged_std.dat'.format(site)
-            )
-        merger.make_output_file(dest=output_path)
+        merger = cf.table_merger(site=site)
+        merger.make_output_file()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------

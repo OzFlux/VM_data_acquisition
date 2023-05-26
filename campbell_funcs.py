@@ -55,7 +55,6 @@ class TOA5_file_constructor():
         self.samples = (
             samples if samples else self._get_header_defaults(line='samples')
             )
-
         self._do_header_checks()
 
     #--------------------------------------------------------------------------
@@ -221,12 +220,16 @@ class table_merger():
 
     def __init__(self, site):
         """
-        Class to generate a standardised dataset from the
+        Class to generate a standardised dataset from source tables (requires
+        a map that allows translation to standard names); note - currently
+        contains a hack to stop Tumbarumba being processed in 60-minute blocks
+        (but it should be - seems raw data from the Campbell system is only
+        running at 30)
 
         Parameters
         ----------
-        site : TYPE
-            DESCRIPTION.
+        site : str
+            Name of site for which to merge tables.
 
         Returns
         -------
@@ -238,31 +241,47 @@ class table_merger():
         self.path = PATHS.get_local_path(
             resource='data', stream='flux_slow', site=site
             )
-        self.time_step = int(SITE_DETAILS.get_single_site_details(
-            site=site, field='time_step'
-            ))
+        if not site == 'Tumbarumba':
+            self.time_step = int(SITE_DETAILS.get_single_site_details(
+                site=site, field='time_step'
+                ))
+        else:
+            self.time_step = 30
         self.table_map = get_site_data_tables(site=site)
         self.var_map = vm.mapper(site=site)
 
     #--------------------------------------------------------------------------
     def get_table_data(self, file):
+        """
 
-        full_path = self.path / file
-        time_step = get_TOA5_interval(full_path)
-        if time_step != f'{self.time_step}T':
-            raise RuntimeError(f'Unexpected data table interval for file {file}')
+
+        Parameters
+        ----------
+        file : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        df : TYPE
+            DESCRIPTION.
+
+        """
+
+        handler = _get_file_handler(file=self.path / file)
+        time_step = get_TOA5_interval(file=self.path / file)
         variable_df = self.var_map.get_variable_fields(table_file=file)
-        usecols = ['TIMESTAMP'] + variable_df.site_name.tolist()
+        usecols = variable_df.site_name.tolist()
         translation_dict = dict(zip(
             variable_df.site_name, variable_df.translation_name
             ))
-        start, end = (
-            self.table_map.loc[self.table_map.file_name==file, 'start_date'].item(),
-            self.table_map.loc[self.table_map.file_name==file, 'end_date'].item()
-            )
-        new_index = pd.date_range(start=start, end=end, freq=time_step)
+        dates = handler.get_date_span()
+        new_index = pd.date_range(
+            start=dates['start_date'], end=dates['end_date'], freq=time_step
+                        )
         new_index.name = 'TIMESTAMP'
-        df = (get_TOA5_data(file=full_path, usecols=usecols)
+        df = (handler.get_data_df(usecols=usecols)
+              .resample(f'{self.time_step}T')
+              .interpolate(limit=1)
               .rename(translation_dict, axis=1)
               .reindex(new_index)
               [variable_df.translation_name.tolist()]
@@ -355,18 +374,12 @@ class table_merger():
     #--------------------------------------------------------------------------
     def translate_header(self, file):
 
-        header_list = [
-            x.strip().replace('"', '').split(',') for x in
-            get_file_headers(self.path / file)
-            ]
-        variables_df = self.var_map.get_variable_fields(
-            table_file=file
-            )
+        headers_df = _get_file_handler(self.path / file).get_header_df()
+        variables_df = self.var_map.get_variable_fields(table_file=file)
         return (
-            pd.DataFrame(
-                data=header_list[3], index=header_list[1],
-                columns=['sampling']
-                )
+            headers_df
+            .drop(labels='units', axis=1)
+            .rename({'stat': 'sampling'}, axis=1)
             .loc[variables_df.site_name]
             .assign(translation_name=variables_df.translation_name.tolist(),
                     units=variables_df.standard_units.tolist())
@@ -388,7 +401,7 @@ class table_merger():
             data=data, info_header=info_header, units=header.units.tolist(),
             samples=header.sampling.tolist()
             )
-        constructor.write_output_file(dest=self.path / f'{self.site}_merged.dat')
+        constructor.write_output_file(dest=self.path / f'{self.site}_merged_std.dat')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -426,38 +439,6 @@ class L1_constructor():
             )
 
     #--------------------------------------------------------------------------
-    ### PRIVATE METHODS ###
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _get_file_handler(self, file):
-        """
-        Return the concatenator class if there are files for concatenation,
-        otherwise return single file data handler
-
-        Parameters
-        ----------
-        file : pathlib.Path object
-            Full path to file.
-
-        Returns
-        -------
-        file handler
-            Concatenator or single file handler class.
-
-        """
-
-        try:
-            return TOA5_concatenator(master_file=self.path / file)
-        except RuntimeError:
-            return TOA5_data_handler(file=self.path / file)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    ### END PRIVATE METHODS ###
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def get_file_data(self, file):
         """
         Get the file data, including all headers
@@ -475,12 +456,11 @@ class L1_constructor():
 
         """
 
-        handler = self._get_file_handler(file=file)
-        data = handler.get_data_df()
+        handler = _get_file_handler(file=self.path / file)
         return {
             'info': handler.get_info(as_dict=False),
             'header': handler.get_header_df(),
-            'data': data,
+            'data': handler.get_data_df()
             }
     #--------------------------------------------------------------------------
 
@@ -497,15 +477,11 @@ class L1_constructor():
 
         """
 
-        files = self.tables_df.index
-        df = pd.DataFrame(
-            [self._get_file_handler(file).get_date_span() for file in files],
-            index=files
-            )
         return pd.date_range(
-            start=df.start_date.min(),
-            end=df.end_date.max(),
-            freq=f'{self.time_step}T')
+            start=self.tables_df.start_date.min(),
+            end=self.tables_df.end_date.max(),
+            freq=f'{self.time_step}T'
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -530,7 +506,7 @@ class L1_constructor():
         # Get inclusive date index to reindex all files to
         date_idx = self.get_inclusive_date_index()
 
-        # Iterate over all files and Write to separate excel workbook sheets
+        # Iterate over all files and write to separate excel workbook sheets
         with pd.ExcelWriter(path=dest) as writer:
             for file in self.tables_df.index:
                 sheet_name = file.replace('.dat', '')
@@ -936,7 +912,7 @@ class TOA5_concatenator():
                     f'{merge_info[key]} in merge file'
                     )
         if not msg_list:
-            msg_list = [    - 'None']
+            msg_list = [    ' - None']
         return {'info_merge_legal': legal, 'msg_list': msg_list}
     #--------------------------------------------------------------------------
 
@@ -1033,7 +1009,7 @@ class TOA5_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_data_df(self, write_merge_report=True):
+    def get_data_df(self, usecols=None, write_merge_report=True, resample_intvl=None):
         """
         Get the concatenated dataframe (ensuring that the dataframe columns are
         aligned to the concatenated header)
@@ -1078,7 +1054,6 @@ class TOA5_concatenator():
 
         # Write merge report if requested
         report_list += checks_dict['duplicate_indices']
-
         if write_merge_report:
             self._write_merge_report(write_list=report_list)
 
@@ -1299,9 +1274,11 @@ class TOA5_data_handler():
 
         """
 
-        self.file = pathlib.Path(file)
+        self.file = check_file_path(file)
+        self.interval = get_TOA5_interval(file=file)
 
     #--------------------------------------------------------------------------
+    # Get rid of this?
     def get_file_interval(self):
 
         return get_TOA5_interval(file=self.file)
@@ -1337,7 +1314,7 @@ class TOA5_data_handler():
         ----------
         as_dict : Bool, optional
             Returns a dictionary with elements split and assigned descriptive
-            keys if true, else just the raw string The default is True.
+            keys if true, else just the raw string. The default is True.
 
         Returns
         -------
@@ -1347,11 +1324,13 @@ class TOA5_data_handler():
         """
 
         info = get_file_headers(file=self.file)[0]
+        info_elements = self._format_line(line=info)
         if not as_dict:
-            return self._format_line(line=info)
-        info_list = ['format', 'station_name', 'logger_type', 'serial_num',
-                     'OS_version', 'program_name', 'program_sig', 'table_name']
-        info_elements = info.replace('\n', '').replace('"', '').split(',')
+            return info_elements
+        info_list = [
+            'format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
+            'program_name', 'program_sig', 'table_name'
+            ]
         return dict(zip(info_list, info_elements))
     #--------------------------------------------------------------------------
 
@@ -1406,21 +1385,55 @@ class TOA5_data_handler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_data_df(self):
+    def get_data_df(self, usecols=None, resample_intvl=None):
 
-        return get_TOA5_data(file=self.file)
+        df = get_TOA5_data(file=self.file, usecols=usecols)
+        if not resample_intvl:
+            return df
+        return df.resample(resample_intvl).pad()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _format_line(self, line):
 
-        return line.replace('\n', '').replace('"', '').split(',')
+        return [x.replace('"', '') for x in line.strip().split('","')]
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### PRIVATE FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _format_header_line(line):
+
+    return [x.replace('"', '') for x in line.strip().split('","')]
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _get_file_handler(file):
+    """
+    Return the concatenator class if there are files for concatenation,
+    otherwise return single file data handler class
+
+    Parameters
+    ----------
+    file : str or pathlib.Path object
+        Absolute path to file (pathlib).
+
+    Returns
+    -------
+    file handler
+        Concatenator or single file handler class.
+
+    """
+
+    check_file_path(file=file)
+    try:
+        return TOA5_concatenator(master_file=file)
+    except RuntimeError:
+        return TOA5_data_handler(file=file)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1439,6 +1452,37 @@ def _write_TOA5_from_df(df, headers, dest):
 
 #------------------------------------------------------------------------------
 ### PUBLIC FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def check_file_path(file):
+    """
+    Check whether is a real file, and if string, create a pathlib.Path object.
+
+    Parameters
+    ----------
+    file : str or pathlib.Path object
+        Absolute path to file (pathlib).
+
+    Raises
+    ------
+    FileNotFoundError
+        Raised if file does not exist.
+
+    Returns
+    -------
+    pathlib.Path object
+        Returns the full absolute path to the file.
+
+    """
+
+    if isinstance(file, str):
+        file = pathlib.Path(file)
+    if not file.parent.exists():
+        raise FileNotFoundError('Invalid directory!')
+    if not file.exists():
+        raise FileNotFoundError('Directory is valid but file name is not!')
+    return file
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1524,6 +1568,9 @@ def get_site_data_tables(site):
 #------------------------------------------------------------------------------
 def get_TOA5_data(file, usecols=None):
 
+    if usecols:
+        if not 'TIMESTAMP' in usecols:
+            usecols += ['TIMESTAMP']
     df = pd.read_csv(
         file, skiprows=[0,2,3], usecols=usecols, parse_dates=['TIMESTAMP'],
         index_col=['TIMESTAMP'], na_values='NAN', sep=',', engine='c',
@@ -1533,7 +1580,10 @@ def get_TOA5_data(file, usecols=None):
     for col in non_nums.columns:
         df[col]=pd.to_numeric(non_nums[col], errors='coerce')
     df.drop_duplicates(inplace=True)
-    return df
+    df.sort_index(inplace=True)
+    if not len(df[df.index.duplicated()]) == 0:
+        print('Warning: duplicate indices with non-duplicate data (keeping first)!')
+    return df[~df.index.duplicated(keep='first')]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1597,4 +1647,10 @@ def make_site_L1(site):
 
     constructor = L1_constructor(site=site)
     constructor.write_to_excel()
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def resample_dataframe(df, resample_to):
+
+    return df.resample(resample_to).interpolate()
 #------------------------------------------------------------------------------

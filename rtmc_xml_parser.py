@@ -53,14 +53,14 @@ class BasicSettings_editor():
     def __init__(self, elem):
 
         self.elem = elem
-        
+
     def get_set_snapshot_destination(self, text=None):
 
         snapshot_element = self.elem.find('snapshot_directory')
         if not text:
             return snapshot_element.text
         snapshot_element.text = text
-        
+
     def get_set_snapshot_screen_state(self, screen, state=None):
 
         enabled_element = self.elem.find(
@@ -101,7 +101,7 @@ class FileSource_editor():
     def __init__(self, elem):
 
         self.elem = elem
-   
+
     #--------------------------------------------------------------------------
     def get_set_source_file(self, path=None):
 
@@ -215,7 +215,7 @@ class TimeSeriesChart_editor():
         if label_text:
             elem.attrib['label'] = label_text
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def set_trace_attributes_by_label(
             self, label, **kwargs):
@@ -231,12 +231,12 @@ class TimeSeriesChart_editor():
             colours_elem.attrib['colour'] = kwargs['rgb']
         if 'title' in kwargs:
             title_elem = elem.find('trace')
-            title_elem.attrib['title'] = kwargs['title']    
+            title_elem.attrib['title'] = kwargs['title']
     #--------------------------------------------------------------------------
-    
+
     #--------------------------------------------------------------------------
     def drop_trace_element_by_label(self, label):
-        
+
         parent_elem = self.elem.find('Traces')
         child_elem = self.get_trace_element_by_label(label=label)
         parent_elem.remove(child_elem)
@@ -246,7 +246,7 @@ class TimeSeriesChart_editor():
 
     #--------------------------------------------------------------------------
     def duplicate_trace_element_by_label(self, old_label, new_label):
-        
+
         parent_elem = self.elem.find('Traces')
         child_elem = deepcopy(self.get_trace_element_by_label(label=old_label))
         child_elem.attrib['label'] = new_label
@@ -427,7 +427,7 @@ class rtmc_parser():
         component_type : str, optional
             The component type. The default is None.
         look_in_groups : bool, optional
-            Whether to open and look in groups. This is untested, and groups 
+            Whether to open and look in groups. This is untested, and groups
             have been eliminated from the project. Possibly delete.
             The default is True.
 
@@ -440,7 +440,7 @@ class rtmc_parser():
 
         if component_type:
             component_dict = {
-                self._COMP_DICT[x]['type_name']: x 
+                self._COMP_DICT[x]['type_name']: x
                 for x in self._COMP_DICT.keys()
                 }
             component_idx = component_dict[component_type]
@@ -539,13 +539,13 @@ class rtmc_parser():
         Parameters
         ----------
         source_type : str
-            The file source type ('data' or 'details') for which to get the 
+            The file source type ('data' or 'details') for which to get the
             editor.
 
         Raises
         ------
         KeyError
-            Raise if anything other than 'data' or 'details' is passed to 
+            Raise if anything other than 'data' or 'details' is passed to
             source_type.
 
         Returns
@@ -576,18 +576,18 @@ class rtmc_parser():
         Returns
         -------
         Class
-            Settings editor. This class can be expanded arbitrarily as need 
+            Settings editor. This class can be expanded arbitrarily as need
             arises.
 
         """
-        
+
         return BasicSettings_editor(elem=self.root)
-    #-------------------------------------------------------------------------- 
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def write_to_file(self, file_name):
         """
-        Write changes back to a new file (no overwrite of template file 
+        Write changes back to a new file (no overwrite of template file
                                           allowed).
 
         Parameters
@@ -600,10 +600,10 @@ class rtmc_parser():
         FileNotFoundError
             Raised if the path passed to 'file_name' is not valid.
         TypeError
-            Raised if the file extension of the string passed to 'file_name' is 
+            Raised if the file extension of the string passed to 'file_name' is
             not rtmc2.
         FileExistsError
-            Raised if the user passes the same path as the path to the 
+            Raised if the user passes the same path as the path to the
             template.
 
         Returns

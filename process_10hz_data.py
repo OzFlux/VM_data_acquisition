@@ -14,424 +14,634 @@ To do:
 import datetime as dt
 import logging
 import numpy as np
-import pathlib
-import pdb
 import subprocess as spc
 import sys
+import pdb
 
 import paths_manager as pm
+sys.path.append('../site_details')
+import sparql_site_details as sd
 
 #------------------------------------------------------------------------------
-### CONSTANTS ###
+### INITIALISATIONS ###
 #------------------------------------------------------------------------------
-base_logger_path = r'E:/Sites/{}/Logs'
-INIT_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0', 'RecNums': '0',
-             'Timestamps': '1', 'CreateNew': '0', 'DateTimeNames': '1',
-             'Midnight24': '0', 'ColWidth': '263', 'ListHeight': '288',
-             'ListWidth': '190', 'BaleCheck': '1', 'CSVOptions': '6619599',
-             'BaleStart': '38718', 'BaleInterval': '32875',
-             'DOY': '0', 'Append': '0', 'ConvertNew': '0'}
-FILENAME_FORMAT = {
-    'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4, 'Day': 5
-    }
 PATHS = pm.paths()
+DETAILS = sd.site_details()
+CCF_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0',
+            'RecNums': '0', 'Timestamps': '1', 'CreateNew': '0',
+            'DateTimeNames': '1', 'Midnight24': '0', 'ColWidth': '263',
+            'ListHeight': '288', 'ListWidth': '190', 'BaleCheck': '1',
+            'CSVOptions': '6619599', 'BaleStart': '38718',
+            'BaleInterval': '32875', 'DOY': '0', 'Append': '0',
+            'ConvertNew': '0'}
+FILENAME_FORMAT = {'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4,
+                   'Day': 5}
+ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-### Classes ###
+### CLASSES ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class CardConvert_parser():
-
-    """Creates, writes and runs CardConvert format (CCF) files"""
-
-    def __init__(self, sitename, in_fmt, out_fmt, data_intvl_mins,
-                 overwrite_ccf=True, understorey=False, timestamp_is_end=True):
-
-        _enforce_format_naming(from_format=in_fmt, to_format=out_fmt)
-        self.understorey_flag = understorey
-        self.in_format = in_fmt
-        self.out_format = out_fmt
-        self.SiteName = (sitename  if not 'Under' in sitename 
-                         else sitename.replace('Under', ''))
-        self.overwrite_ccf = overwrite_ccf
-        self.CardConvert_process_flag = False
-        self.rename_process_flag = False
-        self.time_step = int(data_intvl_mins)
-        self.timestamp_is_end = timestamp_is_end
-        self._cross_check_for_proc_files()
+class generic_handler():
+    """Base class that sets attributes and file format checking methods"""
 
     #--------------------------------------------------------------------------
-    ### Class methods pre-CardConvert ###
+    def __init__(self, site):
+
+        self.file_site_name = site
+        self.stream = 'flux_fast' if not 'Under' in site else 'flux_fast_aux'
+        self.site = site.replace('Under', '')
+        site_details = DETAILS.get_single_site_details(site=self.site)
+        intvl = str(int(
+            1000 / int(site_details.freq_hz)
+            )) + 'ms'
+        self.time_step = site_details.time_step
+        self.interval = intvl
+        self.raw_data_path = PATHS.get_local_path(
+            resource='data', stream=self.stream, subdirs=['TMP'],
+            site=self.site
+            )
+        self.checks_flag = False
     #--------------------------------------------------------------------------
 
-    def _cross_check_for_proc_files(self):
-        
-        archive_path = (
-            PATHS.get_local_path(
-                resource='data', stream='flux_fast', site=self.SiteName,
-                subdirs=['TOB3']
-                )
-            )   
-        archived_files = [x.name for x in archive_path.rglob('TOB3*.dat')]
-        raw_files = self.get_raw_files()
-        dupes_list = [x for x in raw_files if x in archived_files]
-        if dupes_list:
-            raise FileExistsError(
-                'The following files have already been parsed: {}'
-                .format(', '.join(dupes_list))
-                )
+    #--------------------------------------------------------------------------
+    def _check_file_name_format(self, file, expected_format):
+        """
+        Check the file format conforms to expected convention.
 
-    def get_bale_interval(self):
+        Parameters
+        ----------
+        file : str
+            The file name to check.
+        expected_format : str
+            Sets whether the format to check for is TOB3 (raw) or TOA5.
 
-        """Return the formatted interval for file baling"""
+        Raises
+        ------
+        RuntimeError
+            Raised if number of elements following split (based on '_') is wrong.
+        TypeError
+            Raised if time or other critical elements are not what is expected.
 
-        bale_interval = 1 / (1440 / self.time_step)
-        if bale_interval == 1: return INIT_DICT['BaleInterval']
-        if bale_interval > 1:
-            raise RuntimeError('Error! Minutes must sum to less than 1 day!')
-        return str(int(INIT_DICT['BaleInterval']) - 1 + round(bale_interval, 10))
+        Returns
+        -------
+        None.
 
-    def get_raw_data_filename_format(self):
-        
-        fmt = self.in_format        
-        site_name = self.SiteName
-        if self.understorey_flag: site_name += 'Under'
-        interval = '100ms' if self.time_step == 30 else '50ms'
-        return (
-            '{0}_{1}_{2}_YYYY_MM_DD.dat'.format(fmt, site_name, interval)
+        """
+
+        # initialisations
+        gen_err_str = (
+            'Integrity check for file {file} failed with the following error: {}'
             )
 
-    def get_ccf_dict(self) -> dict:
+        # Initialise formatters
+        format_dict = FILENAME_FORMAT.copy()
+        time_elem_list = ['Year', 'Month', 'Day']
+        time_fmt = '%Y_%m_%d'
+        if expected_format == 'TOA5':
+            format_dict.update({'HrMin': 6})
+            time_fmt += '_%H%M'
+            time_elem_list.append('HrMin')
 
-        """Return the dictionary with output-ready values"""
+        # Split file format to dict for comparison of elements
+        name, ext = file.split('.')
+        elem_list = name.split('_')
+        if not len(elem_list) == len(format_dict):
+            msg = gen_err_str.format('Wrong number of elements in file name!')
+            logging.error(msg) ; raise RuntimeError(msg)
+        elem_dict = {x: elem_list[format_dict[x]] for x in format_dict.keys()}
+        elem_dict.update({'Ext': ext})
 
-        if self.out_format == 'TOA5': format_str = '0'
-        if self.out_format == 'TOB1': format_str = '1'
-        write_dict = {'SourceDir': str(self.get_raw_data_path()) + '\\',
-                      'TargetDir': str(self.get_raw_data_path()) + '\\'}
-        write_dict.update(INIT_DICT)
-        write_dict['BaleInterval'] = self.get_bale_interval()
-        write_dict['Format'] = format_str
-        return write_dict
+        # Make comparison dictionary for expected format
+        ex_dict = {
+            'Format': expected_format, 'Site': self.file_site_name,
+            'Freq': self.interval, 'Ext': 'dat'
+            }
 
-    def get_ccf_filename(self):
-
-        """Return the site-specific ccf file path"""
-
-        path = PATHS.get_local_path(resource='ccf_config', site=self.SiteName)
-        file_name = '{0}_{1}.ccf'.format(self.out_format, self.SiteName)
-        return path / file_name    
-
-    def get_raw_data_path(self):
-
-        """Return the site-specific raw data path"""
-
-        data_path = PATHS.get_local_path(
-            resource='data', stream='flux_fast', site=self.SiteName, 
-            subdirs=['TMP']
-            )
-        if self.understorey_flag:
-            return _replace_dir_for_understorey(inpath=data_path)
-        return data_path
-
-    def get_n_expected_converted_files(self) -> int:
-
-        """Return the expected number of output files based on n_input +
-           bale interval"""
-
-        return len(self.get_raw_files()) * int(1440 / self.time_step)
-
-    def get_raw_files(self):
-
-        """Check for unparsed TOB3 files in TMP directory"""
-
-        path = self.get_raw_data_path()
-        all_files = [x.name for x in path.glob('*')]
-        raw_files = [x.name for x in path.glob('TOB3*.dat') 
-                     if self.in_format in x.name]
-        if not raw_files:
-            raise FileNotFoundError('No raw files to parse!')
-        if not all_files == raw_files:
-            raise RuntimeError('Non-{} files present in TMP directory! '
-                               'Please remove these files and try again!'
-                                .format(self.in_format))   
-        expected_name = self.get_raw_data_filename_format()
-        for this_name in raw_files:
-            _check_raw_file_name_formatting(file_name=this_name, 
-                                            expected_name=expected_name)
-        return raw_files               
-
-    def run_CardConvert(self):
-
-        """Run CardConvert and move raw files"""
-
-        if self.CardConvert_process_flag:
-            raise RuntimeError('Process has already run!')
-        files_to_convert = self.get_raw_files()
-        self.write_ccf_file()
-        cc_path = str(PATHS.get_application_path(application='CardConvert'))
-        spc_args = [cc_path, 'runfile={}'.format(self.get_ccf_filename())]
-        rslt = spc.run(spc_args)
-        if not rslt.returncode == 0:
-            raise RuntimeError('Command line execution of CardConvert failed!')
-        from_dir = self.get_raw_data_path()
-        for f in files_to_convert:
-            to_dir = _make_dir(f)
-            try:
-                (from_dir / f).rename(to_dir / f)    
-            except TypeError:
-                pdb.set_trace()
-                _make_dir(f)
-        self.CardConvert_process_flag = True
-
-    def write_ccf_file(self):
-
-        """Output constructed ccf file to disk"""
-
-        if self.CardConvert_process_flag:
-            raise RuntimeError('Process has already run!'
-                               'Illegal to change ccf file!')
-        write_dict = self.get_ccf_dict()
-        output_file = self.get_ccf_filename()
-        if not self.overwrite_ccf:
-            if output_file.exists(): return
-        with open(output_file, mode='w') as f:
-            f.write('[main]\n')
-            for this_item in write_dict:
-                f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
-
-    #--------------------------------------------------------------------------
-    ### Class methods post-CardConvert ###
-    #--------------------------------------------------------------------------
-
-    def get_converted_files(self) -> list:
-
-        """Return a list of the files that have been converted using
-           CardConvert parser above (execution order enforced - will not run
-                                     unless CardConvert has run)"""
-
-        if not self.CardConvert_process_flag:
-            raise RuntimeError('CardConvert Process has not run yet!')
-        path = self.get_raw_data_path()
-        raw_files = [x.name for x in path.glob('{}*.dat'.format(self.out_format)) 
-                     if self.in_format in x.name]
-        return raw_files       
-
-    def parse_converted_files(self, overwrite_files=False):
-
-        """Do the time-based rename and move of the files generated by
-           CardConvert"""
-
-        if not self.CardConvert_process_flag: self.run_CardConvert()
-        path = self.get_raw_data_path()
-        for filename in self.get_converted_files():
-            new_filename = _demangle_filename(filename)
-            new_path = _make_dir(new_filename)
-            if self.timestamp_is_end:
-                new_filename = (
-                    _roll_filename_datetime(
-                        file_name=new_filename, data_interval=self.time_step
+        # Check critical non-time elements
+        for i, this_elem in enumerate(ex_dict.keys()):
+            if not elem_dict[this_elem] == ex_dict[this_elem]:
+                msg = gen_err_str.formay(
+                    'Element "{0}" in file name is not of required format; '
+                    'expected "{1}", got "{2}"'
+                    .format(
+                        this_elem, ex_dict[this_elem], elem_dict[this_elem]
                         )
                     )
-            old_file = path / filename
-            new_file = new_path / new_filename
-            try:
-                old_file.rename(new_file)
-            except FileExistsError:
-                if not overwrite_files: raise
-                old_file.replace(new_file)
-        self.rename_process_flag = True
-#------------------------------------------------------------------------------
+                logging.error(msg) ; raise TypeError(msg)
 
-#------------------------------------------------------------------------------
-### File handling functions ###
-#------------------------------------------------------------------------------
+        # Check critical time elements
+        time_string = '_'.join([elem_dict[x] for x in time_elem_list])
+        try:
+            dt.datetime.strptime(time_string, time_fmt)
+        except TypeError as e:
+            msg = gen_err_str.format(str(e))
+            logging.error(msg) ; raise
+        logging.info(f'    - {file} passed integrity check!')
+    #--------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _check_raw_file_name_formatting(file_name, expected_name):
-
-    """Check that file conforms to expected naming - no action if true,
-        raise if false"""        
-
-    # Split to lists for comparison of elements
-    file, ext = file_name.split('.')
-    elements = file.split('_')
-    expected_elements = expected_name.split('.')[0].split('_')
-    
-    # Error checks
-    if not ext == 'dat':
-        raise TypeError('File type unknown for file {}'.format(file))
-    if not len(elements) == 6:
-        raise TypeError('File {} does not conform to expected convention '
-                        '({})'.format(file, expected_name))
-    for i in range(3):
-        if not elements[i] == expected_elements[i]:
-            raise TypeError('Element {0} in file name is not of required '
-                            'format for file {1}; expected {2}'
-                            .format(str(i), file, expected_elements[i]))
-    dt.datetime(int(elements[3]), int(elements[4]), int(elements[5]))   
-
-def _demangle_filename(file_name):
-
-    """Get the new filename (CardConvert prepends the new format and appends
-       year, month, day, hour and minute; we drop old format and redundant
-       date parts)"""
-
-    local_dict = {'Format': FILENAME_FORMAT.get('Format')}
-    local_dict.update(
-        {x: FILENAME_FORMAT[x] + 1 for x in list(FILENAME_FORMAT.keys())[1:]}
-        )
-    split_list = file_name.split('_')
-    rebuild_list = [split_list[local_dict[x]] for x in local_dict.keys()]
-    rebuild_list += [split_list[-1]]
-    return '_'.join(rebuild_list)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _enforce_format_naming(from_format, to_format):
+class raw_file_handler(generic_handler):
 
-    """Check the file formats passed"""
+    """Inherits from base class generic_handler and adds methods for raw files"""
+    #--------------------------------------------------------------------------
+    def __init__(self, site):
 
-    if not from_format in ['TOB3', 'TOB1']:
-        raise TypeError('Input format must be either TOB3 or TOB1')
-    if not to_format in ['TOB1', 'TOA5']:
-        raise TypeError('Input format must be either TOB1 or TOA5')
-    if from_format == to_format:
-        raise TypeError('Input format must be different to output format')
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _get_rounded_mins(mins, interval):
-
-    """Roll forward minutes to end of relevant interval"""
-
-    return (mins - np.mod(mins, interval) + interval).item()
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _make_dir(file_name, understorey=False):
-
-    """Get the required child directory name(s) for the file"""
-
-    split_list = file_name.split('.')[0].split('_')
-    split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
-    year_month = '_'.join([split_dict['Year'], split_dict['Month']])
-    sub_dirs_list = [split_dict['Format'], year_month]
-    if not split_dict['Format'] == 'TOB3':
-        sub_dirs_list += [split_dict['Day']]
-    target_path = PATHS.get_local_path(
-        resource='data', stream='flux_fast', site='Calperum', 
-        subdirs=sub_dirs_list
-        )
-    if understorey:
-        target_path = _replace_dir_for_understorey(inpath=target_path)
-    try: 
-        target_path.mkdir(parents=True)
-    except (FileExistsError, AttributeError): 
-        pass
-    return target_path
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _replace_dir_for_understorey(inpath):
-    
-    return pathlib.Path(str(inpath).replace('Flux', 'Flux_aux'))
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _roll_filename_datetime(file_name, data_interval):
-
-    """Correct filename timestamp to represent end rather than beginning
-       of period"""
-
-    split_list = file_name.split('_')
-    split_dict = {x: split_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT}
-    HrMin = split_list[-1].split('.')[0]
-    split_dict.update({'Hour': HrMin[:2], 'Min': HrMin[2:]})
-    prefix = '_'.join([split_dict['Format'], split_dict['Site'], split_dict['Freq']])
-    delta_mins = _get_rounded_mins(int(split_dict['Min']), data_interval)
-    py_datetime = (
-        dt.datetime(int(split_dict['Year']), int(split_dict['Month']),
-                    int(split_dict['Day']), int(split_dict['Hour']), 0) +
-        dt.timedelta(minutes=delta_mins)
-        )
-    suffix = dt.datetime.strftime(py_datetime, '%Y_%m_%d_%H%M')
-    return '_'.join([prefix, suffix]) + '.dat'
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _set_logger(site, name=None):
-
-    """Create logger and send output to file"""
-
-    understorey_flag = True if 'Under' in site else False 
-    site = site.replace('Under', '')
-    logger_dir_path_str = base_logger_path.format(site)
-    if understorey_flag:
-        logger_dir_path_str = logger_dir_path_str.replace('Flux', 'Flux_aux')
-    logger_dir_path = pathlib.Path(logger_dir_path_str)
-    if not logger_dir_path.exists():
-        raise FileNotFoundError(
-            'Specified file path ({}) does not exist! '
-            'Check site name or specified subdirectories!'
+        super().__init__(site)
+        self.destination_base_path = PATHS.get_local_path(
+            resource='data', stream=self.stream, subdirs=['TOB3'],
+            site=self.site
             )
-    logger_file_path = (logger_dir_path /
-                        '{}_fast_data_processing.log'.format(site))
-    if not name: this_logger = logging.getLogger(name=__name__)
-    else: this_logger = logging.getLogger(name=name)
-    this_logger.setLevel(logging.DEBUG)
-    if not this_logger.hasHandlers():
-        handler = logging.FileHandler(logger_file_path)
-        handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-        handler.setFormatter(formatter)
-        this_logger.addHandler(handler)
-    return this_logger
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def check_files(self):
+        """
+        Parses the available raw files (if any) to check whether they have been
+        previously parsed or format is bad.
+
+        Raises
+        ------
+        FileExistsError
+            Raised if file has already been moved to final storage.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        logging.info('Checking raw file integrity...')
+        existing_list = [
+            file.name for file in self.destination_base_path.rglob('TOB3*.dat')
+            ]
+        for file in self.get_raw_file_list():
+            self._check_file_name_format(file=file.name, expected_format='TOB3')
+            if file.name in existing_list:
+                msg = f'File {file.name} already exists in archive area! Aborting...'
+                logging.error(msg) ; raise FileExistsError(msg)
+        self.checks_flag = True
+        logging.info('Done!')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_raw_file_list(self):
+        """
+        Check for new raw files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if no new files.
+
+        Returns
+        -------
+        list
+            List of files.
+
+        """
+
+        l = list(self.raw_data_path.glob('TOB3*.dat'))
+        if not l:
+            msg = 'No new raw files to parse in target directory'
+            logging.error(msg); raise RuntimeError(msg)
+        return list(self.raw_data_path.glob('TOB3*.dat'))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def move_data_to_final_storage(self):
+        """
+        Move raw files to final storage
+
+        Returns
+        -------
+        None.
+
+        """
+
+        if not self.checks_flag:
+            return
+        logging.info('Moving raw files')
+        for file in self.get_raw_file_list():
+            dest_subdir = self._dir_from_file(file.name)
+            target_path = self.destination_base_path / dest_subdir
+            if not target_path.exists():
+                target_path.mkdir(parents=True)
+            logging.info(f'    - {str(file)} -> {target_path / file.name}')
+            file.rename(target_path / file.name)
+        logging.info('Move of raw files complete')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _dir_from_file(self, file):
+        """
+        Generate requisite directory from file name.
+
+        Parameters
+        ----------
+        file : str
+            File name.
+
+        Returns
+        -------
+        str
+            Dir name.
+
+        """
+
+        elem_list = file.split('.')[0].split('_')
+        elem_dict = {
+            x: elem_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT
+            }
+        return '_'.join([elem_dict['Year'], elem_dict['Month']])
+    #--------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-### Main ###
+class processed_file_handler(generic_handler):
+    """Inherits from base class generic_handler and adds methods for converted
+    files"""
+
+    #--------------------------------------------------------------------------
+    def __init__(self, site):
+
+        super().__init__(site)
+        self.rename_flag = False
+        self.destination_base_path = PATHS.get_local_path(
+            resource='data', stream=self.stream, subdirs=['TOA5'],
+            site=self.site
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def check_files(self):
+        """
+        Parses the available processed files to check whether they have been
+        previously parsed or format is bad.
+
+        Raises
+        ------
+        FileExistsError
+            Raised if file has already been moved to final storage.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        logging.info('Checking formatted file integrity...')
+        existing_list = [
+            file.name for file in self.destination_base_path.rglob('TOA5*.dat')
+            ]
+        for file in self.get_renamed_file_list():
+            self._check_file_name_format(file=file.name, expected_format='TOA5')
+            if file.name in existing_list:
+                msg = 'This file already exists in archive area! Aborting...'
+                logging.error(msg) ; raise FileExistsError(msg)
+        self.checks_flag = True
+        logging.info('Done')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_converted_file_list(self):
+        """
+        Check for new processed files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if files have already been renamed.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+
+        if self.rename_flag:
+            msg = 'Files already renamed'
+            logging.error(msg) ; raise RuntimeError(msg)
+        return self.raw_data_path.glob('TOA5_TOB3*.dat')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_renamed_file_list(self):
+        """
+        Check for new renamed files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if files haven't already been renamed.
+
+        Returns
+        -------
+        generator
+            Contains the relevant contents of the directory (all TOA5 files).
+
+        """
+
+        if not self.rename_flag:
+            msg = 'Files not renamed yet!'
+            logging.error(msg) ; raise RuntimeError(msg)
+        return self.raw_data_path.glob('TOA5*.dat')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def move_data_to_final_storage(self):
+        """
+        Move the processed data to final storage.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if check and rename flags are not high.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        if not self.checks_flag:
+            msg = 'Files not checked yet!'
+            logging.error(msg) ; raise RuntimeError(msg)
+        logging.info('Moving converted files:')
+        for file in self.get_renamed_file_list():
+            dest_subdir_list = self._dir_from_file(file.name)
+            target_path = self.destination_base_path
+            for subdir in dest_subdir_list:
+                target_path = target_path / subdir
+            if not target_path.exists():
+                target_path.mkdir(parents=True)
+            logging.info(f'    - {str(file)} -> {target_path / file.name}')
+            file.rename(target_path / file.name)
+        logging.info('Move of processed files complete')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _dir_from_file(self, file):
+        """
+        Generates the requisite directory name based on the file name.
+
+        Parameters
+        ----------
+        file : str
+            File name for which to generate the directory name.
+
+        Returns
+        -------
+        list
+            DESCRIPTION.
+
+        """
+
+        format_dict = FILENAME_FORMAT.copy()
+        format_dict.update({'HrMin': 6})
+        elem_list = file.split('.')[0].split('_')
+        elem_dict = {x: elem_list[format_dict[x]] for x in format_dict}
+        if not elem_dict['HrMin'] == '0000':
+            time_elems = [
+                elem_dict['Year'], elem_dict['Month'], elem_dict['Day']
+                ]
+        else:
+            new_date = (
+                dt.datetime(int(elem_dict['Year']), int(elem_dict['Month']),
+                            int(elem_dict['Day'])) -
+                dt.timedelta(minutes=self.time_step)
+                )
+            time_elems = [
+                str(new_date.year), str(new_date.month).zfill(2),
+                str(new_date.day).zfill(2)
+                ]
+        return ['_'.join(time_elems[:-1]), time_elems[-1]]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def rename_files(self):
+        """
+        Rename the coverted files.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        logging.info('Renaming converted files:')
+        for file in self.get_converted_file_list():
+            new_filename = self._rebuild_filename(file.name)
+            file.rename(self.raw_data_path / new_filename)
+            logging.info(f'   {file.name} -> {new_filename}')
+        logging.info('Done')
+        self.rename_flag = True
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _rebuild_filename(self, file):
+        """
+        Get the new filename (CardConvert prepends the new format and appends
+        year, month, day, hour and minute; we drop old format and redundant
+        date parts)
+
+        Parameters
+        ----------
+        file : str
+            The existing filename to be demangled.
+
+        Returns
+        -------
+        str
+            Demangled filename.
+
+        """
+
+        filename, ext = file.split('.')
+        mangled_list = filename.split('_')
+        mangled_list.remove('TOB3')
+        mangled_list.append(ext)
+        format_dict = FILENAME_FORMAT.copy()
+        format_dict.update({'HrMin': 9})
+        elem_dict = {x: mangled_list[format_dict[x]] for x in format_dict}
+        hr, mins = elem_dict['HrMin'][:2], elem_dict['HrMin'][2:]
+        delta_mins = (
+            (int(mins) - np.mod(int(mins), self.time_step) +
+             self.time_step).item()
+            )
+        py_datetime = (
+            dt.datetime(int(elem_dict['Year']), int(elem_dict['Month']),
+                        int(elem_dict['Day']), int(hr), 0) +
+            dt.timedelta(minutes=delta_mins)
+            )
+        info_str = (
+            '_'.join([elem_dict['Format'], elem_dict['Site'], elem_dict['Freq']])
+            )
+        time_str = py_datetime.strftime('%Y_%m_%d_%H%M.dat')
+        return '_'.join([info_str, time_str])
+    #--------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-if __name__ == "__main__":
+### FUNCTIONS ###
+#------------------------------------------------------------------------------
 
-    site, interval = sys.argv[1], sys.argv[2]
-    if 'Under' in site:
-        under = True
-        site.replace('Under', '')
+#------------------------------------------------------------------------------
+def run_CardConvert(site):
+    """
+    Spawn subprocess -> CampbellSci Loggernet CardConvert utility to convert
+    proprietary binary format to ASCII
+
+    Parameters
+    ----------
+    site : str
+        The site for which to run CardConvert.
+
+    Raises
+    ------
+    spc.CalledProcessError
+        Raise if spc returns non-zero exit code.
+
+    Returns
+    -------
+    None.
+
+    """
+
+    logging.info('Running TOA5 format conversion with CardConvert_parser...')
+    cc_path = str(PATHS.get_application_path(application='CardConvert'))
+    path_to_file = (
+        PATHS.get_local_path(resource='ccf_config') / f'TOA5_{site}.ccf'
+        )
+    spc_args = [cc_path, f'runfile={path_to_file}']
+    rslt = spc.Popen(spc_args, stdout=spc.PIPE, stderr=spc.STDOUT)
+    (out, err) = rslt.communicate()
+    if out:
+        logging.info(out.decode())
+        logging.info('CardConvert conversion complete')
+    if err:
+        logging.error('CardConvert processing failed with the following message:')
+        logging.error(err.decode())
+        raise spc.CalledProcessError()
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def write_ccf_file(site, time_step, overwrite=True):
+    """
+
+
+    Parameters
+    ----------
+    site : str
+        The site for which to write the ccf file.
+    time_step : int
+        Averaging interval in minutes of the data.
+    overwrite : Bool, optional
+        Whether to overwrite existing file or use it. The default is True.
+
+    Raises
+    ------
+    RuntimeError
+        Raise if the bale interval fraction is > 1.
+
+    Returns
+    -------
+    None.
+
+    """
+
+    logging.info('Writing CardConvert configuration file...')
+    site_file_name = site
+    site = site.replace('Under', '')
+    stream = 'flux_fast' if not 'Under' in site_file_name else 'flux_fast_aux'
+    path_to_file = (
+        PATHS.get_local_path(resource='ccf_config') /
+        f'TOA5_{site_file_name}.ccf'
+        )
+    path_to_data = PATHS.get_local_path(
+        resource='data', stream=stream, subdirs=['TMP'], site=site
+        )
+
+    # Skip it if overwrite is not enabled
+    if not overwrite:
+        if path_to_file.exists():
+            logging.info(
+                'File exists, overwrite flag is False, skipping write...'
+                )
+            return
+
+    # Construct the dictionary
+    src_dir = str(path_to_data) + '\\'
+    write_dict = {'SourceDir': src_dir, 'TargetDir': src_dir}
+    write_dict.update(CCF_DICT)
+
+    # Get and set the bale interval
+    bale_intvl_frac = 1 / (1440 / time_step)
+    if bale_intvl_frac > 1:
+        msg = 'Error! Minutes must sum to less than 1 day!'
+        logging.error(msg); raise RuntimeError(msg)
+    bale_intvl = (
+        str(int(CCF_DICT['BaleInterval']) - 1 + round(bale_intvl_frac, 10))
+        )
+    write_dict['BaleInterval'] = bale_intvl
+
+    # Write it
+    with open(path_to_file, mode='w') as f:
+        f.write('[main]\n')
+        for this_item in write_dict:
+            f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
+    logging.info('Done!')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+### MAIN FUNCTION ###
+#------------------------------------------------------------------------------
+
+def main(site, overwrite_ccf=True):
+
+    # Instantiate raw file handler
+    raw_handler = raw_file_handler(site=site)
+
+    # Check raw files
+    files_to_process = raw_handler.get_raw_file_list()
+    raw_handler.check_files()
+
+    # Make the ccf file
+    write_ccf_file(
+        site=site, time_step=raw_handler.time_step, overwrite=overwrite_ccf
+        )
+
+    # Run CardConvert
+    run_CardConvert(site=site)
+
+    # Count the number of files yielded and write all to log
+    processed_handler = processed_file_handler(site=site)
+    n_expected_files = (
+        int(len(list(files_to_process)) * 1440 / raw_handler.time_step)
+        )
+    yielded_files = processed_handler.get_converted_file_list()
+    n_yielded_files = int(len(list(yielded_files)))
+    msg = f'Expected {n_expected_files}, got {n_yielded_files}!'
+    if n_yielded_files == n_expected_files:
+        logging.info(msg)
     else:
-        under = False
-    logger = _set_logger(site=site)
-    logger.info('Raw file received - begin processing for site {}'.format(site))
-    logger.info('Running TOA5 format conversion with CardConvert_parser')
-    try:
-        cc_parser = CardConvert_parser(sitename=site, in_fmt='TOB3',
-                                       out_fmt='TOA5',
-                                       data_intvl_mins=interval,
-                                       understorey=under)
-        files_to_parse = cc_parser.get_raw_files()
-        logger.info('The following files will be parsed: {}'
-                    .format(', '.join(files_to_parse)))
-        n_expected = cc_parser.get_n_expected_converted_files()
-        cc_parser.run_CardConvert()
-        n_produced = len(cc_parser.get_converted_files())
-        msg = ('TOA5 format conversion complete: expected {0} converted '
-               'files, got {1}!'.format(n_expected, n_produced))
-        if n_expected == n_produced: logger.info(msg)
-        else: logger.warning(msg)
-    except Exception as e:
-        logger.error('CardConvert processing failed! Message: {}'
-                     .format(e))
-        sys.exit()
-    logger.info('Renaming and moving parsed files...')
-    try:
-        cc_parser.parse_converted_files()
-        logger.info('Files renamed and moved successfully!')
-        logger.info('Enjoy your cornflakes!')
-    except Exception as e:
-        logger.error('Converted file move failed! Message: {}'.format(e))
-        sys.exit()
-    logging.shutdown()
+        logging.warning(msg)
+
+    # Rename the CardConvert files
+    processed_handler.rename_files()
+
+    # Check the integrity of the renamed files
+    processed_handler.check_files()
+
+    # Move the raw data to final storage
+    raw_handler.move_data_to_final_storage()
+
+    # Move the renamed and checked files to final storage
+    processed_handler.move_data_to_final_storage()

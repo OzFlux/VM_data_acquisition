@@ -2,8 +2,8 @@
 """
 Created on Fri Jul 29 14:13:29 2022
 
-This script uses a bunch of custom modules to edit a template rtmc file and 
-write back the changes to a new file. It only works for sites that have had 
+This script uses a bunch of custom modules to edit a template rtmc file and
+write back the changes to a new file. It only works for sites that have had
 standard output files written.
 
 @author: jcutern-imchugh
@@ -33,10 +33,10 @@ import sparql_site_details as sd
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------   
+#------------------------------------------------------------------------------
 def colour_getter(long_name):
     """
-    Generator to create a set of formatted strings to specify successive 
+    Generator to create a set of formatted strings to specify successive
     colours for a line plot
 
     Parameters
@@ -51,7 +51,7 @@ def colour_getter(long_name):
         alpha (transparency) parameter (just set to 1).
 
     """
-    
+
     RGB_DICT = {
         'Soil heat flux at depth z': cm.get_cmap(name='Set1'),
         'Soil temperature': cm.get_cmap(name='Set1_r'),
@@ -70,7 +70,7 @@ def colour_getter(long_name):
 
 #------------------------------------------------------------------------------
 def get_comm_status_string(logger_name):
-    
+
     return (
         '"Server:__statistics__.{}_std.Collection State" > 2 '
         .format(logger_name)
@@ -79,13 +79,13 @@ def get_comm_status_string(logger_name):
 
 #------------------------------------------------------------------------------
 def get_no_data_status_string(logger_name, table_name):
-    
+
     return '"Server:{0}.{1}"'.format(logger_name, table_name)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def line_plot_parser(long_name, screen_name, component_name):
-    
+
     try:
         df = mapper.site_df.loc[long_name]
         if isinstance(df, pd.core.series.Series):
@@ -94,13 +94,13 @@ def line_plot_parser(long_name, screen_name, component_name):
         'No data for this variable!'
         return
     plot_editor = parser.get_editor_by_component_name(
-        screen=screen_name, component_name=component_name, 
+        screen=screen_name, component_name=component_name,
         )
     old_labels = [
-        x for x in plot_editor.get_trace_labels() 
+        x for x in plot_editor.get_trace_labels()
         if plot_editor.get_axis_by_label(x)=='left'
         ]
-    new_labels = df.translation_name.tolist()      
+    new_labels = df.translation_name.tolist()
     if len(old_labels) > len(new_labels):
         drop_labels = old_labels[len(new_labels):]
         for this_label in drop_labels:
@@ -134,27 +134,34 @@ PATHS = pm.paths()
 deets = sd.site_details()
 site = sys.argv[1]
 mapper = vm.mapper(site=site)
-parser = rxp.rtmc_parser(PATHS.RTMC_template(check_exists=True))
+template_path = PATHS.get_local_path(
+    resource='RTMC_project_template', check_exists=True
+    )
+parser = rxp.rtmc_parser(template_path)
 
 #------------------------------------------------------------------------------
 # Background configs
 #------------------------------------------------------------------------------
 
 # Change the data path for the logger data
-logger_data_source = str(PATHS.RTMC_data_file(site=site, check_exists=True))
+logger_data_source = str(
+    PATHS.get_local_path(resource='data', stream='flux_slow', site=site,
+                         check_exists=True) /
+    f'{site}_merged_std.dat'
+    )
 data_source_editor = parser.get_file_source_editor(source_type='data')
 data_source_editor.get_set_source_file(path=logger_data_source)
 
 # Change the data path for the details data
 details_data_source = str(
-    PATHS.get_local_path(resource='site_details')
+    PATHS.get_local_path(resource='site_details', site=site)
     )
 details_source_editor = parser.get_file_source_editor(source_type='details')
 details_source_editor.get_set_source_file(path=details_data_source)
 
 # Change the data path for the snapshot output
-snapshot_destination = str(
-    PATHS.get_local_path(resource='data', stream='rtmc', site=site)
+snapshot_destination = (
+    PATHS.get_local_path(resource='data', stream='rtmc', site=site, as_str=True)
     )
 settings_editor = parser.get_basic_settings_editor()
 settings_editor.get_set_snapshot_destination(text=snapshot_destination)
@@ -179,7 +186,7 @@ if not isinstance(logger_name, float):
         )
     comm_status_editor.get_set_element_calculation_text(
         text=calculation_str)
-    
+
 # Change the no data alarm component calculation string
 logger_name = mapper.get_logger_list(long_name='CO2 flux')
 table_name = mapper.get_table_list(long_name='CO2 flux')
@@ -194,14 +201,14 @@ if not isinstance(logger_name, float):
         text=calculation_str)
 
 # Reconfigure the figure sources (contour and site photo)
-contour_path = str(PATHS.RTMC_site_images(img_type='contour', site=site))
+contour_path = str(PATHS.get_site_image(site=site, img_type='contour'))
 img_editor = parser.get_editor_by_component_name(
     screen='System', component_name='Image1'
     )
 img_editor.get_set_element_ImgName(text=contour_path)
 try:
-    tower_path = str(PATHS.RTMC_site_images(
-        img_type='tower', site=site, check_exists=True
+    tower_path = str(PATHS.get_site_image(
+        site=site, img_type='tower', check_exists=True
         ))
     img_editor = parser.get_editor_by_component_name(
         screen='System', component_name='Image2'
@@ -256,7 +263,7 @@ soil_T_digital_editor = parser.get_editor_by_component_name(
 soil_T_digital_editor.get_set_element_calculation_text(text=digital_temp_str)
 StatusBar_temp_str = (
     mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil temperature', scaled_to_range=True, 
+        long_name='Soil temperature', scaled_to_range=True,
         start_cond='start_absolute'
         )
     )
@@ -279,7 +286,7 @@ soil_moist_StatusBar_editor = parser.get_editor_by_component_name(
     )
 StatusBar_moist_str = (
     mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil water content', scaled_to_range=True, 
+        long_name='Soil water content', scaled_to_range=True,
         start_cond='start_absolute'
         )
     )
@@ -292,16 +299,16 @@ soil_moist_StatusBar_editor.get_set_pointer_calculation_text(
 #------------------------------------------------------------------------------
 
 # Reconfigure the soil heat flux plot
-line_plot_parser(long_name='Soil heat flux at depth z', screen_name='Soil', 
-                 component_name='Time Series Chart')
+line_plot_parser(long_name='Soil heat flux at depth z', screen_name='Soil',
+                  component_name='Time Series Chart')
 
 # Reconfigure the soil temperature plot
-line_plot_parser(long_name='Soil temperature', screen_name='Soil', 
-                 component_name='Time Series Chart1')
+line_plot_parser(long_name='Soil temperature', screen_name='Soil',
+                  component_name='Time Series Chart1')
 
 # Reconfigure the soil moisture plot
-line_plot_parser(long_name='Soil water content', screen_name='Soil', 
-                 component_name='Time Series Chart2')
+line_plot_parser(long_name='Soil water content', screen_name='Soil',
+                  component_name='Time Series Chart2')
 
 # Reconfigure the soil heat flux and storage average plot
 # First heat storage
@@ -334,6 +341,7 @@ soil_plot_editor.set_trace_attributes_by_label(
 
 # Write to a new file
 new_file_name = str(
-    PATHS.RTMC_template().parent / '{}_std.rtmc2'.format(site)
+    PATHS.get_local_path(resource='RTMC_project_template').parent /
+    '{}_std.rtmc2'.format(site)
     )
 parser.write_to_file(file_name=new_file_name)

@@ -7,7 +7,6 @@ Created on Mon Aug  1 16:43:45 2022
 
 from configparser import ConfigParser
 import pathlib
-import pdb
 
 #------------------------------------------------------------------------------
 class paths():
@@ -17,204 +16,118 @@ class paths():
         self._config = ConfigParser()
         self._config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
         self._placeholder = '<site>'
+        self._base_locs = ['LOCAL_PATH', 'REMOTE_PATH', 'APPLICATION_PATH']
+        self._stream_dict = {
+            'LOCAL_PATH': 'LOCAL_DATA_STREAM',
+            'REMOTE_PATH': 'REMOTE_DATA_STREAM'
+            }
 
-    def variable_map(self, check_exists=False):
+    #--------------------------------------------------------------------------
+    ### PUBLIC METHODS ###
+    #--------------------------------------------------------------------------
 
-        path = get_path(base_path='xl_variable_map')
-        if check_exists:
-            self._check_exists(path=path)
-        return path
+    #--------------------------------------------------------------------------
+    def get_application_path(self, application, **kwargs):
 
-    def get_application_path(self, application, check_exists=True, as_str=False):
+        return self._get_path(
+            base_location='APPLICATIONS', resource=application, **kwargs
+            )
+    #--------------------------------------------------------------------------
 
-        path = pathlib.Path(self._config['APPLICATIONS'][application])
-        if check_exists:
-            self._check_exists(path=path)
-        if as_str:
-            return str(path)
-        return path
+    #--------------------------------------------------------------------------
+    def get_local_path(self, **kwargs):
 
-    def get_remote_path(self, resource, stream=None, site=None):
+        return self._get_path(base_location='LOCAL_PATH', **kwargs)
+    #--------------------------------------------------------------------------
 
-        path = self._config['REMOTE_PATH'][resource]
-        if site:
-            path = self._insert_site_str(path, site=site)
-        if stream:
-            stream_path = self._config['REMOTE_PATH'][stream]
-            return pathlib.Path(path) / stream_path
-        return pathlib.Path(path)
-
+    #--------------------------------------------------------------------------
     def get_local_resource_list(self):
 
-        return [x for x in self._config['BASE_PATH']]
+        return [x for x in self._config['LOCAL_PATH']]
+    #--------------------------------------------------------------------------
 
-    def get_stream_list(self, loc='local'):
+    #--------------------------------------------------------------------------
+    def get_remote_path(self, **kwargs):
+
+        return self._get_path(base_location='REMOTE_PATH', **kwargs)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_remote_resource_list(self):
+
+        return [x for x in self._config['REMOTE_PATH']]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_site_image(self, img_type, **kwargs):
+
+        img_dict = {'tower': '<site>_tower.jpg', 'contour': '<site>_contour.png'}
+        return self._get_path(
+                base_location='LOCAL_PATH', resource='site_images',
+                file_name=img_dict[img_type],
+                **kwargs
+                )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_stream_list(self, location='local'):
 
         location_dict = {'local': 'DATA_STREAM', 'remote': 'REMOTE_DATA_STREAM'}
-        stream = location_dict[loc]
+        stream = location_dict[location]
         return [x for x in self._config[stream]]
+    #--------------------------------------------------------------------------
 
-    def slow_fluxes(self, site=None, check_exists=False):
+    #--------------------------------------------------------------------------
+    ### PRIVATE METHODS ###
+    #--------------------------------------------------------------------------
 
-        path = get_path(
-            base_path='data', data_stream='flux_slow', site=site
-            )
-        if check_exists:
-            self._check_exists(path=path)
+    #--------------------------------------------------------------------------
+    def _add_subdirs(self, path, subdirs_list):
+
+        for subdir in subdirs_list:
+            path = path / subdir
         return path
+    #--------------------------------------------------------------------------
 
-    def get_local_path(self, resource, stream=None, site=None, subdirs=[],
-                       check_exists=False, as_str=False):
-
-        path = self._config['BASE_PATH'][resource]
-        if site:
-            path = pathlib.Path(self._insert_site_str(path, site=site))
-        path = pathlib.Path(path)
-        if stream:
-            path = path / self._config['DATA_STREAM'][stream]
-        if subdirs:
-            path = _add_subdirs(path=path, subdirs_list=subdirs)
-        if as_str:
-            return str(path)
-        return path
-
-    def RTMC_site_images(self, img_type=None, site=None, check_exists=False):
-
-        img_dict = {'tower': '{}_tower.jpg', 'contour': '{}_contour.png'}
-        base_image = get_path(base_path='site_images')
-        if not img_type:
-            return base_image
-        if not site:
-            return base_image / img_dict[img_type]
-        else:
-            path = base_image / img_dict[img_type].format(site)
-            if check_exists:
-                self._check_exists(path=path)
-            return path
-
-    def RTMC_snapshot_directory(self, site=None, check_exists=False):
-
-        path = get_path(
-            base_path='data', data_stream='flux_RTMC', site=site
-            )
-        if check_exists:
-            self._check_exists(path=path)
-        return path
-
-
-    def RTMC_template(self, check_exists=False):
-
-        return get_path(base_path='RTMC_project_template')
-
-    def RTMC_data_file(self, site=None, check_exists=False):
-
-        path = get_path(
-            base_path='data', data_stream='flux_slow', site=site
-            )
-        file = '{}_merged_std.dat'
-        if site:
-            file = file.format(site)
-            path = path / file
-            if check_exists:
-                self._check_exists(path=path)
-            return path
-        return path / file
-
-    def RTMC_site_details_file(self, site=None, check_exists=False):
-
-        path = get_path(base_path='site_details')
-        file = '{}_details.dat'
-        if site:
-            file = file.format(site)
-            path = path / file
-            if check_exists:
-                self._check_exists(path=path)
-            return path
-        return path
-
+    #--------------------------------------------------------------------------
     def _check_exists(self, path):
 
         if not path.exists():
             raise FileNotFoundError('No such path!')
+    #--------------------------------------------------------------------------
 
-    def _insert_site_str(self, target_str, site):
+    #--------------------------------------------------------------------------
+    def _get_path(self, base_location, resource, stream=None, site=None,
+                  subdirs=[], file_name=None, check_exists=False, as_str=False):
 
-        return target_str.replace(self._placeholder, site)
+        if not isinstance(subdirs, list):
+            if not isinstance(subdirs, str):
+                raise TypeError('kwarg "subdirs" must be of type list or str!')
+            subdirs = [subdirs]
+        path = pathlib.Path(self._config[base_location][resource])
+        elements = [] + subdirs
+        if file_name:
+            elements.append(file_name)
+        if stream:
+            stream_header = self._stream_dict[base_location]
+            path = path / self._config[stream_header][stream]
+        if elements:
+            path = self._add_subdirs(path=path, subdirs_list=elements)
+        if site:
+            path = pathlib.Path(self._insert_site_str(target_obj=path, site=site))
+        if check_exists:
+            self._check_exists(path=path)
+        if as_str:
+            return str(path)
+        return path
+    #--------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _add_subdirs(path, subdirs_list):
+    #--------------------------------------------------------------------------
+    def _insert_site_str(self, target_obj, site):
 
-    for subdir in subdirs_list:
-        path = path / subdir
-    return path
+        if isinstance(target_obj, pathlib.Path):
+            return pathlib.Path(str(target_obj).replace(self._placeholder, site))
+        return target_obj.replace(self._placeholder, site)
+    #--------------------------------------------------------------------------
 
-
-def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
-             check_exists=False):
-
-    """Use initialisation file to extract data path for site and data type"""
-
-    replacer = '<site>'
-    config = ConfigParser()
-    config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
-    if not base_path in config['BASE_PATH']:
-        raise KeyError(
-            'base_path arg must be one of: {}'
-            .format(', '.join(config['BASE_PATH']))
-            )
-    out_path = pathlib.Path(config['BASE_PATH'][base_path])
-    if base_path == 'data':
-        if data_stream:
-            if not data_stream in config['DATA_STREAM']:
-                raise KeyError('data_stream arg must be one of: {}'
-                               .format(', '.join(config['DATA_STREAM'])))
-            out_path = out_path / config['DATA_STREAM'][data_stream]
-    if sub_dirs:
-        out_path = out_path / sub_dirs
-    if site:
-        if replacer in str(out_path):
-            out_path = (
-                pathlib.Path(str(out_path).replace(replacer, site))
-                )
-    if check_exists:
-        if not out_path.exists():
-            raise FileNotFoundError('path does not exist')
-    return out_path
-#------------------------------------------------------------------------------
-
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_path(base_path, data_stream=None, sub_dirs=None, site=None,
-             check_exists=False):
-
-    """Use initialisation file to extract data path for site and data type"""
-
-    replacer = '<site>'
-    config = ConfigParser()
-    config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
-    if not base_path in config['BASE_PATH']:
-        raise KeyError(
-            'base_path arg must be one of: {}'
-            .format(', '.join(config['BASE_PATH']))
-            )
-    out_path = pathlib.Path(config['BASE_PATH'][base_path])
-    if base_path == 'data':
-        if data_stream:
-            if not data_stream in config['DATA_STREAM']:
-                raise KeyError('data_stream arg must be one of: {}'
-                               .format(', '.join(config['DATA_STREAM'])))
-            out_path = out_path / config['DATA_STREAM'][data_stream]
-    if sub_dirs:
-        out_path = out_path / sub_dirs
-    if site:
-        if replacer in str(out_path):
-            out_path = (
-                pathlib.Path(str(out_path).replace(replacer, site))
-                )
-    if check_exists:
-        if not out_path.exists():
-            raise FileNotFoundError('path does not exist')
-    return out_path
 #------------------------------------------------------------------------------
