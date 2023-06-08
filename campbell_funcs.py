@@ -220,11 +220,10 @@ class table_merger():
 
     def __init__(self, site):
         """
-        Class to generate a standardised dataset from source tables (requires
-        a map that allows translation to standard names); note - currently
-        contains a hack to stop Tumbarumba being processed in 60-minute blocks
-        (but it should be - seems raw data from the Campbell system is only
-        running at 30)
+        Class to generate a standardised dataset from source tables; note -
+        currently contains a hack to stop Tumbarumba being processed in
+        60-minute blocks (but it should be - seems raw data from the Campbell
+                          system is only running at 30)
 
         Parameters
         ----------
@@ -247,7 +246,7 @@ class table_merger():
                 ))
         else:
             self.time_step = 30
-        self.table_map = get_site_data_tables(site=site)
+        self.table_map = vm.make_table_df(site=site)
         self.var_map = vm.mapper(site=site)
 
     #--------------------------------------------------------------------------
@@ -268,24 +267,25 @@ class table_merger():
         """
 
         handler = _get_file_handler(file=self.path / file)
-        time_step = get_TOA5_interval(file=self.path / file)
         variable_df = self.var_map.get_variable_fields(table_file=file)
-        usecols = variable_df.site_name.tolist()
         translation_dict = dict(zip(
             variable_df.site_name, variable_df.translation_name
             ))
-        dates = handler.get_date_span()
+        interval = f'{self.time_step}T'
+        df = (
+            handler.get_data_df(
+                usecols=variable_df.site_name.tolist(),
+                resample_intvl=interval
+                )
+            .interpolate(limit=1)
+            .rename(translation_dict, axis=1)
+            [variable_df.translation_name.tolist()]
+            )
         new_index = pd.date_range(
-            start=dates['start_date'], end=dates['end_date'], freq=time_step
-                        )
-        new_index.name = 'TIMESTAMP'
-        df = (handler.get_data_df(usecols=usecols)
-              .resample(f'{self.time_step}T')
-              .interpolate(limit=1)
-              .rename(translation_dict, axis=1)
-              .reindex(new_index)
-              [variable_df.translation_name.tolist()]
-              )
+            start=df.index[0], end=df.index[-1], freq=interval
+            )
+        new_index.name = df.index.name
+        df = df.reindex(new_index)
         self._do_unit_conversions(df=df)
         self._apply_limits(df=df)
         return df
@@ -322,24 +322,20 @@ class table_merger():
     #--------------------------------------------------------------------------
     def merge_tables(self):
 
-        df_list = []
         file_list = self.var_map.get_file_list()
-        trunc_table_map = (
-            self.table_map.reset_index().set_index(keys='file_name')
-            .loc[file_list]
-            )
+        table_map = self.table_map.loc[file_list]
         date_idx = pd.date_range(
-            start=trunc_table_map.start_date.min(),
-            end=trunc_table_map.end_date.max(),
+            start=table_map.start_date.min(),
+            end=table_map.end_date.max(),
             freq=f'{self.time_step}T'
             )
         date_idx.name = 'TIMESTAMP'
-        for file in file_list:
-            df_list.append(
-                self.get_table_data(file=file)
-                .reindex(date_idx)
-                )
-        df = pd.concat(df_list, axis=1)
+        df =  pd.concat(
+            [self.get_table_data(file=file)
+             .reindex(date_idx) for file in file_list
+             ],
+            axis=1
+            )
         self._make_missing_variables(df=df)
         return df
     #--------------------------------------------------------------------------
@@ -347,8 +343,8 @@ class table_merger():
     #--------------------------------------------------------------------------
     def _make_missing_variables(self, df):
 
-        missing_vars = self.var_map.get_missing_variables()
-        for variable in missing_vars.translation_name:
+        missing_df = self.var_map.get_missing_variables()
+        for variable in missing_df.translation_name:
             df[variable] = (
                 mf.calculate_variable_from_std_frame(variable=variable, df=df)
                 )
@@ -357,9 +353,10 @@ class table_merger():
     #--------------------------------------------------------------------------
     def merge_headers(self):
 
-        df_list = []
-        for file in self.var_map.get_file_list():
-            df_list.append(self.translate_header(file))
+        df_list = [
+            self.translate_header(file)
+            for file in self.var_map.get_file_list()
+            ]
         missing_df = self.var_map.get_missing_variables()
         df_list.append(
             missing_df[['translation_name', 'standard_units']]
@@ -429,11 +426,7 @@ class L1_constructor():
         self.time_step = int(SITE_DETAILS.get_single_site_details(
             site=site, field='time_step'
             ))
-        self.tables_df = (
-            get_site_data_tables(site=site)
-            .reset_index()
-            .set_index(keys='file_name')
-            )
+        self.tables_df = vm.make_table_df(site=site)
         self.path = PATHS.get_local_path(
             resource='data', stream='flux_slow', site=site
             )
@@ -1390,7 +1383,9 @@ class TOA5_data_handler():
         df = get_TOA5_data(file=self.file, usecols=usecols)
         if not resample_intvl:
             return df
-        return df.resample(resample_intvl).pad()
+        if resample_intvl == self.interval:
+            return df
+        return df.resample(resample_intvl).interpolate(limit=1)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -1539,57 +1534,53 @@ def get_latest_10Hz_file(site):
         return 'No files'
 #------------------------------------------------------------------------------
 
-#--------------------------------------------------------------------------
-def get_site_data_tables(site):
-    """
-    Get a dataframe containing information about the logger tables.
-
-    Raises
-    ------
-    FileNotFoundError
-        Raised if any file does not exist.
-
-    Returns
-    -------
-    tables_df : pd.core.frame.DataFrame
-        The dataframe.
-
-    """
-
-    tables_df = vm.get_data_tables(site=site)
-    if not all(tables_df.has_file):
-        files = ', '.join(tables_df.loc[~tables_df.has_file, 'file_name'].tolist())
-        raise FileNotFoundError(
-            f'The following files do not exist: {files}'
-            )
-    return tables_df
-#--------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
 def get_TOA5_data(file, usecols=None):
 
+    # Make sure usecols contains more than just the timestamp
+    if usecols == ['TIMESTAMP']:
+        raise RuntimeError(
+            'TIMESTAMP is the index column - it cannot be the only '
+            'requested variable!'
+            )
+
+    # Keep track of whether RECORD variable was explicitly requested
+    # (return unless absent from usecols)
+    keep_record = True
     if usecols:
-        if not 'TIMESTAMP' in usecols:
-            usecols += ['TIMESTAMP']
+        if not 'RECORD' in usecols: keep_record = False
+        usecols += ['TIMESTAMP', 'RECORD']
+        usecols = list(dict.fromkeys(usecols))
+
+    # Import data
     df = pd.read_csv(
         file, skiprows=[0,2,3], usecols=usecols, parse_dates=['TIMESTAMP'],
         index_col=['TIMESTAMP'], na_values='NAN', sep=',', engine='c',
         on_bad_lines='warn', low_memory=False
         )
+
+    # Convert any non-numeric data, drop duplicates (use record variable to
+    # ensure values are unique) and drop any data with duplicate indices and
+    # non-duplicate data (warn! - this is bad)
     non_nums = df.select_dtypes(include='object')
     for col in non_nums.columns:
-        df[col]=pd.to_numeric(non_nums[col], errors='coerce')
+        df[col] = pd.to_numeric(non_nums[col], errors='coerce')
     df.drop_duplicates(inplace=True)
     df.sort_index(inplace=True)
     if not len(df[df.index.duplicated()]) == 0:
         print('Warning: duplicate indices with non-duplicate data (keeping first)!')
-    return df[~df.index.duplicated(keep='first')]
+    df = df[~df.index.duplicated(keep='first')]
+
+    # Return with or without record
+    if keep_record:
+        return df
+    return df.drop('RECORD', axis=1)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_TOA5_interval(file):
 
-    df = get_TOA5_data(file=file, usecols=['TIMESTAMP', 'RECORD']).reset_index()
+    df = get_TOA5_data(file=file, usecols=['RECORD']).reset_index()
     df = df - df.shift()
     df['minutes'] = df.TIMESTAMP.dt.components.minutes
     df = df.loc[(df.RECORD==1) & (df.minutes!=0)]

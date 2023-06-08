@@ -22,6 +22,7 @@ Issues:
 
 import datetime as dt
 import os
+import pathlib
 import numpy as np
 import pandas as pd
 import pdb
@@ -65,7 +66,8 @@ class mapper():
         """
 
         self.site = site
-        self.site_df = self._make_site_df()
+        self.table_df = make_table_df(site=site)
+        self.site_df = make_site_df(site=site)
         self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
 
     #--------------------------------------------------------------------------
@@ -89,6 +91,27 @@ class mapper():
         """
 
         return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_info(self, file):
+        """
+        Returns a list of all files documented in the mapping spreadsheet.
+
+        Returns
+        -------
+        list
+            List of the files.
+
+        """
+
+        files = self.get_file_list()
+        if not file in files:
+            raise KeyError(
+                'File not in file list: {}'
+                .format(', '.join(files.tolist()))
+                )
+        return self.table_df.loc[file]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -231,16 +254,13 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_translation_dict(self, table_file):
+    def get_translation_dict(self, table_file=None):
 
-        return dict(zip(
-            self.get_variable_fields(
-                table_file=table_file, field='site_name'
-                ).tolist(),
-            self.get_variable_fields(
-                table_file=table_file, field='translation_name'
-                ).tolist()
-            ))
+        if table_file:
+            df = self.get_variable_fields(table_file=table_file)
+        else:
+            df = self.site_df
+        return dict(zip(df.site_name, df.translation_name))
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -276,185 +296,6 @@ class mapper():
             return self.site_df.loc[self.site_df.file_name==table_file]
         return self.site_df.loc[self.site_df.file_name==table_file, field]
     #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    ### PRIVATE METHODS ###
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _make_site_df(self, logger_name_in_file=True):
-        """
-        Create the dataframe that contains the data to allow mapping from
-        site variable names to standard variable names
-
-        Parameters
-        ----------
-        logger_name_in_file : bool, optional
-            If true, combines logger name with table name to create file name.
-            The default is True.
-
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            Dataframe.
-
-        """
-
-        IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-                       'Logger name', 'Disable', 'Long name', 'File name']
-        RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name',
-                       'Variable units': 'site_units', 'Table name': 'table_name',
-                       'Logger name': 'logger_name', 'File name': 'file_name'}
-
-        # Concatenate the logger_name and the table_name to make the file source
-        # name (only applied if 'logger_name_in_source' arg is True)
-        def func(s):
-            if len(s.dropna()) == 0:
-                return np.nan
-            return '{}.dat'.format('_'.join(s.tolist()))
-
-        # Create the site dataframe, drop disabled variables and rename
-        map_path =  PATHS.get_local_path(resource='xl_variable_map')
-        site_df = pd.read_excel(
-            io=map_path, sheet_name=self.site, usecols=IMPORT_LIST,
-            converters={'Variable units': lambda x: x if len(x) > 0 else None},
-            index_col='Long name'
-            )
-        site_df = site_df.loc[np.isnan(site_df.Disable)]
-        site_df.rename(RENAME_DICT, axis=1, inplace=True)
-
-        # Check for file name - if not supplied, use the logger and table names
-        if any(pd.isnull(site_df.file_name)):
-            if logger_name_in_file:
-                file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
-            else:
-                file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
-            site_df = site_df.assign(file_name=file_name)
-
-        # Make the master dataframe
-        master_df = pd.read_excel(
-            io=map_path, sheet_name='master_variables',
-            index_col='Long name',
-            converters={'Variable units': lambda x: x if len(x) > 0 else None,
-                        'Required': lambda x: True if x==1 else False}
-        )
-
-        master_df.rename(
-            {'Variable name': 'standard_name',
-             'Variable units': 'standard_units'},
-            axis=1, inplace=True
-            )
-
-        # Join and generate variables that require input from both sources
-        site_df = site_df.join(master_df)
-        site_df = site_df.assign(
-            conversion=site_df.site_units!=site_df.standard_units,
-            translation_name=np.where(~pd.isnull(site_df.site_label),
-                                      site_df.site_label, site_df.standard_name)
-            )
-
-        # Add critical variables that are missing from the primary datasets
-        required_list = (
-            master_df.loc[master_df.Required==True].index.tolist()
-            )
-        missing_list = [x for x in required_list if not x in site_df.index]
-        site_df = pd.concat([site_df, master_df.loc[missing_list]])
-        site_df['Missing'] = pd.isnull(site_df.site_name)
-        site_df.loc[site_df.Missing, 'translation_name'] = (
-            site_df.loc[site_df.Missing, 'standard_name']
-            )
-        site_df.index.name = 'long_name'
-        return site_df
-    #--------------------------------------------------------------------------
-
-#--------------------------------------------------------------------------
-def _make_site_df_new(site):
-    """
-    Create the dataframe that contains the data to allow mapping from
-    site variable names to standard variable names
-
-    Parameters
-    ----------
-    logger_name_in_file : bool, optional
-        If true, combines logger name with table name to create file name.
-        The default is True.
-
-    Returns
-    -------
-    pd.core.frame.DataFrame
-        Dataframe.
-
-    """
-
-    IMPORT_LIST = ['Label', 'Variable name', 'Variable units', 'Table name',
-                   'Logger name', 'Disable', 'Long name', 'File name']
-    RENAME_DICT = {'Label': 'site_label', 'Variable name': 'site_name',
-                   'Variable units': 'site_units', 'Table name': 'table_name',
-                   'Logger name': 'logger_name', 'File name': 'file_name'}
-
-    # Concatenate the logger_name and the table_name to make the file source
-    # name (only applied if 'logger_name_in_source' arg is True)
-    def func(s):
-        if len(s.dropna()) == 0:
-            return np.nan
-        return '{}.dat'.format('_'.join(s.tolist()))
-
-    # Create the site dataframe, drop disabled variables and rename
-    map_path =  PATHS.get_local_path(resource='xl_variable_map')
-    tables_df = pd.read_excel(
-        io=map_path, sheet_name=site,)
-
-
-    site_df = pd.read_excel(
-        io=map_path, sheet_name=site, usecols=IMPORT_LIST,
-        converters={'Variable units': lambda x: x if len(x) > 0 else None},
-        index_col='Long name'
-        )
-    site_df = site_df.loc[np.isnan(site_df.Disable)]
-    site_df.rename(RENAME_DICT, axis=1, inplace=True)
-
-    # Check for file name - if not supplied, use the logger and table names
-    if any(pd.isnull(site_df.file_name)):
-        file_name=site_df[['logger_name', 'table_name']].apply(func, axis=1)
-        # else:
-        #     file_name=site_df['table_name'].apply('{}.dat'.format, axis=1)
-        site_df = site_df.assign(file_name=file_name)
-
-    # Make the master dataframe
-    master_df = pd.read_excel(
-        io=map_path, sheet_name='master_variables',
-        index_col='Long name',
-        converters={'Variable units': lambda x: x if len(x) > 0 else None,
-                    'Required': lambda x: True if x==1 else False}
-    )
-
-    master_df.rename(
-        {'Variable name': 'standard_name',
-         'Variable units': 'standard_units'},
-        axis=1, inplace=True
-        )
-
-    # Join and generate variables that require input from both sources
-    site_df = site_df.join(master_df)
-    site_df = site_df.assign(
-        conversion=site_df.site_units!=site_df.standard_units,
-        translation_name=np.where(~pd.isnull(site_df.site_label),
-                                  site_df.site_label, site_df.standard_name)
-        )
-
-    # Add critical variables that are missing from the primary datasets
-    required_list = (
-        master_df.loc[master_df.Required==True].index.tolist()
-        )
-    missing_list = [x for x in required_list if not x in site_df.index]
-    site_df = pd.concat([site_df, master_df.loc[missing_list]])
-    site_df['Missing'] = pd.isnull(site_df.site_name)
-    site_df.loc[site_df.Missing, 'translation_name'] = (
-        site_df.loc[site_df.Missing, 'standard_name']
-        )
-    site_df.index.name = 'long_name'
-    return site_df
-#--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
@@ -666,174 +507,175 @@ class _RTMC_syntax_generator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class table_map():
-
-    def __init__(self, site):
-
-        self.site = site
-        self.path = PATHS.get_local_path(
-            resource='data', stream='flux_slow', site=self.site
-            )
-        self.df = self._make_table_df()
-
-    def get_file_list(self, full_path=False):
-
-        file_list = self.df.file_name.to_list()
-        if not full_path:
-            return file_list
-        return [self.get_path_to_file(file) for file in file_list]
-
-    def get_table_list(self):
-
-        return self.df.index.get_level_values('table_name').tolist()
-
-    def get_path_to_file(self, file):
-
-        if not file in self.get_file_list():
-            raise RuntimeError('Undocumented file!')
-        path = self.path / file
-        if not path.exists():
-            raise FileNotFoundError('Documented file does not exist!')
-        return path
-
-    def get_file_start_date(self, file):
-
-        path = self.get_path_to_file(file=file)
-        return get_file_dates(path)['start_date']
-
-    def get_file_end_date(self, file):
-
-        path = self.get_path_to_file(file=file)
-        return get_file_dates(path)['end_date']
-
-    def get_table_from_file(self, file):
-
-        return self.df.loc[self.df.table_name==file, 'file_name']
-
-    def get_file_from_table(self, table):
-
-        output = (
-            self.df.loc[
-                self.df.index.get_level_values('table_name')==table, 'file_name'
-                ]
-            )
-        try:
-            return output.item()
-        except ValueError:
-            return output.tolist()
-
-    def _make_table_df(self):
-
-        renamer = {
-            'Table name': 'table_name', 'Logger name': 'logger_name',
-            'File name': 'file_name'
-            }
-        df = (
-            pd.read_excel(
-                io=PATHS.get_local_path(resource='xl_variable_map'),
-                sheet_name='table_list',
-                index_col='Site',
-                converters={'Site': lambda x: x.replace(' ', '')}
-                )
-            .rename(renamer, axis=1)
-            .loc[self.site]
-            .reset_index(drop=True)
-            )
-        df.file_name.where(
-            cond=~pd.isnull(df.file_name),
-            other=list(df.logger_name + '_' + df.table_name + '.dat'),
-            inplace=True
-            )
-        df.index = df.file_name
-        full_path = self.path / df.file_name
-        df = (df
-            .assign(full_path=full_path)
-            .assign(exists=full_path.apply(lambda x: x.exists()))
-            .drop(['file_name', 'table_name', 'logger_name'], axis=1)
-            .join(pd.DataFrame(
-                data=[get_file_info(file) for file in full_path],
-                index=df.index
-                ))
-            .join(pd.DataFrame(
-                data=[get_file_dates(file) for file in full_path],
-                index=df.index
-                ))
-            )
-        return df
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_data_tables_b(site=None):
+def make_table_df(site=None):
+    """
+    Generate a dataframe that ties file names to data tables and logger info
 
-    xl_path = PATHS.get_local_path(resource='xl_variable_map')
-    converter = {'Site': lambda x: x.replace(' ', '')}
-    df = pd.read_excel(xl_path, sheet_name='table_list', converters=converter)
-    if site:
-        df = df.loc[df.Site==site]
-    df.rename(
-        {'Table name': 'table_name', 'Logger name': 'logger_name',
-         'File name': 'file_name'},
-        axis=1, inplace=True
+    Parameters
+    ----------
+    site : str, optional
+        Site for which to return the table information. The default is None.
+
+    Returns
+    -------
+    pd.core.frame.DataFrame
+        Dataframe.
+
+    """
+
+    # Get the table list from excel file
+    renamer = {'Site': 'site', 'File name': 'file_name'}
+    df = (
+        pd.read_excel(
+            io=PATHS.get_local_path(resource='xl_variable_map'),
+            sheet_name='file_list',
+            usecols=list(renamer.keys()),
+            converters={'Site': lambda x: x.replace(' ', '')},
+            )
+        .rename(renamer, axis=1)
         )
-    file_names = df.logger_name + '_' + df.table_name + '.dat'
-    df['file_name'] = file_names
-    df.index = pd.MultiIndex.from_frame(df[['logger_name', 'table_name']])
-    df.drop(['logger_name', 'table_name'], axis=1, inplace=True)
-    df['full_path'], df['has_file'] = np.nan, False
-    df['start_date'], df['end_date'] = np.nan, np.nan
-    for rec in df.index:
-        this_site = df.loc[rec, 'Site']
-        file_path = PATHS.get_local_path(
-            resource='data', site=this_site, stream='flux_slow'
-            ) / df.loc[rec, 'file_name']
-        if file_path.exists():
-            df.loc[rec, 'full_path'] = file_path
-            df.loc[rec, 'has_file'] = True
-            dates = get_file_dates(file=file_path)
-            df.loc[rec, 'start_date'] = dates['start_date']
-            df.loc[rec, 'end_date'] = dates['end_date']
-    return df
+
+    # If user-supplied sitename, drop all except that
+    if site: df = df.loc[df.site==site.replace(' ','')]
+
+    # Create and write full file paths
+    parent_path = PATHS.get_local_path(
+        resource='data', stream='flux_slow', as_str=True
+        )
+    df = (
+        df
+        .assign(full_path=df.site.apply(
+            lambda x: pathlib.Path(parent_path.replace('<site>', x))
+            ) / df.file_name
+            )
+        )
+
+    # Assign additional variables and return
+    return (
+        df
+        # .assign(exists=df.full_path.apply(lambda x: x.exists()))
+        .join(pd.DataFrame(
+            data=[get_file_info(file) for file in df.full_path],
+            index=df.index
+            ))
+        .join(pd.DataFrame(
+            data=[get_file_dates(file) for file in df.full_path],
+            index=df.index
+            ))
+        .set_index(keys='file_name')
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_data_tables(site=None):
+def make_site_df(site):
+    """
+    Create the dataframe that contains the data to allow mapping from
+    site variable names to standard variable names
 
-    xl_path = PATHS.get_local_path(resource='xl_variable_map')
-    converter = {'Site': lambda x: x.replace(' ', '')}
-    df = pd.read_excel(xl_path, sheet_name='table_list', converters=converter)
-    if site:
-        df = df.loc[df.Site==site]
-    df.rename(
-        {'Table name': 'table_name', 'Logger name': 'logger_name',
-         'File name': 'file_name'},
-        axis=1, inplace=True
+    Returns
+    -------
+    pd.core.frame.DataFrame
+        Dataframe.
+
+    """
+
+    # Get stuff
+    map_path = PATHS.get_local_path(resource='xl_variable_map')
+    table_df = make_table_df(site=site)
+
+    # Create the site dataframe and rename, then drop disabled variables
+    site_renamer = {
+        'Long name': 'long_name', 'Label': 'site_label',
+        'Variable name': 'site_name', 'Variable units': 'site_units',
+        'File name': 'file_name'
+        }
+    site_list = ['Disable']
+    site_df = (
+        pd.read_excel(
+            io=map_path,
+            sheet_name=site,
+            usecols=site_list + list(site_renamer.keys()),
+            converters={'Variable units': lambda x: x if len(x) > 0 else None},
+            )
+        .rename(site_renamer, axis=1)
+        .set_index(keys='long_name')
         )
-    file_names = df.logger_name + '_' + df.table_name + '.dat'
-    df.loc[pd.isnull(df.file_name), 'file_name'] = file_names
-    df.index = pd.MultiIndex.from_frame(df[['logger_name', 'table_name']])
-    df.drop(['logger_name', 'table_name'], axis=1, inplace=True)
-    df['full_path'], df['has_file'] = np.nan, False
-    df['start_date'], df['end_date'] = np.nan, np.nan
-    for rec in df.index:
-        this_site = df.loc[rec, 'Site']
-        file_path = PATHS.get_local_path(
-            resource='data', site=this_site, stream='flux_slow'
-            ) / df.loc[rec, 'file_name']
-        if file_path.exists():
-            df.loc[rec, 'full_path'] = file_path
-            df.loc[rec, 'has_file'] = True
-            dates = get_file_dates(file=file_path)
-            df.loc[rec, 'start_date'] = dates['start_date']
-            df.loc[rec, 'end_date'] = dates['end_date']
-    return df
+    site_df = site_df.loc[np.isnan(site_df.Disable)]
+    site_df.drop('Disable', axis=1, inplace=True)
+
+    # Add the names of the data tables and loggers extracted directly from the
+    # first line of the data file header (and written into the table_df)
+    site_df = site_df.assign(
+        table_name=table_df.loc[site_df.file_name, 'table_name'].tolist(),
+        logger_name=table_df.loc[site_df.file_name, 'station_name'].tolist()
+        )
+
+    # Make the master dataframe and rename variables
+    master_renamer = {
+        'Long name': 'long_name', 'Variable name': 'standard_name',
+        'Variable units': 'standard_units',
+        }
+    master_list = ['Required', 'Max', 'Min']
+    master_df = (
+        pd.read_excel(
+            io=map_path,
+            sheet_name='master_variables',
+            usecols=master_list + list(master_renamer.keys()),
+            converters={'Variable units': lambda x: x if len(x) > 0 else None,
+                        'Required': lambda x: True if x==1 else False}
+            )
+        .rename(master_renamer, axis=1)
+        .set_index(keys='long_name')
+        )
+
+    # Join frames and generate variables that require input from both sources
+    site_df = site_df.join(master_df)
+    site_df = site_df.assign(
+        conversion=site_df.site_units!=site_df.standard_units,
+        translation_name=np.where(
+            ~pd.isnull(site_df.site_label),
+            site_df.site_label, site_df.standard_name
+            )
+        )
+
+    # Add critical variables that are missing from the primary datasets
+    missing_list = list(
+        set(master_df[master_df.Required].index) - set(site_df.index)
+        )
+    site_df = pd.concat([site_df, master_df.loc[missing_list]])
+    site_df = site_df.assign(Missing=pd.isnull(site_df.site_name))
+
+    # Give standard names to missing variables
+    site_df.translation_name.where(
+        cond=~pd.isnull(site_df.translation_name),
+        other=site_df.standard_name,
+        inplace=True
+        )
+
+    # Aaaaaaand we're done...
+    return site_df
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_file_info(file):
+    """
+    Get the first header line that contains the data table information
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        The absolute path to the file.
+
+    Returns
+    -------
+    dict
+        Dictionary containing data table information with descriptive keys.
+
+    """
 
     with open(file=file) as f:
         line = f.readline()
@@ -843,11 +685,24 @@ def get_file_info(file):
          ],
         [x.replace('"', '') for x in line.strip().split('","')]
         ))
-
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_file_dates(file):
+    """
+    Get the start and end dates of the passed csv file
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        The absolute path to the file.
+
+    Returns
+    -------
+    dict
+        Dictionary containing start and end dates with desxcriptive keys.
+
+    """
 
     date_format = '"%Y-%m-%d %H:%M:%S"'
     with open(file, 'rb') as f:
