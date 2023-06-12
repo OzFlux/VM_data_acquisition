@@ -4,6 +4,10 @@
 Created on Thu Oct 21 20:13:00 2021
 
 @author: imchugh
+
+Note - the merge function needs to be checked to ensure that the mergin of data
+and headers is being done safely! It probably needs refactoring, since is is
+not clear how this is happening!
 """
 
 ### Standard modules ###
@@ -252,40 +256,45 @@ class table_merger():
     #--------------------------------------------------------------------------
     def get_table_data(self, file):
         """
-
+        Get the data for a particular table
 
         Parameters
         ----------
-        file : TYPE
-            DESCRIPTION.
+        file : str
+            Name of file for which to get data..
 
         Returns
         -------
-        df : TYPE
-            DESCRIPTION.
+        df : pd.core.frame.DataFrame
+            Dataframe contaning data with names converted to standard names,
+            units converted to standard units and broad range limits applied
+            (NOT a substitute for QC, just an aid for plotting).
 
         """
 
+        # Get the handler and the name conversion scheme (as dict), and create
+        # required str rep of averaging interval
         handler = _get_file_handler(file=self.path / file)
-        variable_df = self.var_map.get_variable_fields(table_file=file)
-        translation_dict = dict(zip(
-            variable_df.site_name, variable_df.translation_name
-            ))
+        translation_dict = self.var_map.get_translation_dict(table_file=file)
         interval = f'{self.time_step}T'
+
+        # Pull in the data and rename it
         df = (
             handler.get_data_df(
-                usecols=variable_df.site_name.tolist(),
+                usecols=list(translation_dict.keys()),
                 resample_intvl=interval
                 )
-            .interpolate(limit=1)
             .rename(translation_dict, axis=1)
-            [variable_df.translation_name.tolist()]
             )
+
+        # Reindex to create a monotonic time index (missing data will be NaN)
         new_index = pd.date_range(
             start=df.index[0], end=df.index[-1], freq=interval
             )
         new_index.name = df.index.name
         df = df.reindex(new_index)
+
+        # Apply unit conversion and range limits, and return
         self._do_unit_conversions(df=df)
         self._apply_limits(df=df)
         return df
@@ -293,8 +302,24 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def _do_unit_conversions(self, df):
+        """
+        Convert from site-specific measurement units to network standard.
 
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            Dataframe to which to apply conversions.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Get the list of variables requiring conversion for iteration
         converts_df = self.var_map.get_conversion_variables()
+
+        # Do the conversions if any (get conversion functions from met_functions.py)
         for variable in converts_df.translation_name:
             if not variable in df.columns:
                 continue
@@ -308,6 +333,19 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def _apply_limits(self, df):
+        """
+        Apply range limits based on those specified in the mapping spreadsheet.
+
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            Dataframe to which to apply limits.
+
+        Returns
+        -------
+        None.
+
+        """
 
         for var in df.columns:
             limits = self.var_map.get_variable_limits(variable=var)
@@ -321,6 +359,17 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def merge_tables(self):
+        """
+        Pull together variables from different tables, align to encapsulating
+        datetimeindex (empty data is NaN) and add requisite variables that are
+        missing.
+
+        Returns
+        -------
+        df : pd.core.frame.DataFrame
+            Dataframe containing merged files.
+
+        """
 
         file_list = self.var_map.get_file_list()
         table_map = self.table_map.loc[file_list]
@@ -342,6 +391,20 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def _make_missing_variables(self, df):
+        """
+        Use externally-called meteorological functions to create missing
+        variables.
+
+        Parameters
+        ----------
+        df : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
 
         missing_df = self.var_map.get_missing_variables()
         for variable in missing_df.translation_name:
@@ -352,6 +415,15 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def merge_headers(self):
+        """
+        Merge the headers of the separate data tables.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            A dataframe of headers, units and sampling.
+
+        """
 
         df_list = [
             self.translate_header(file)
@@ -370,6 +442,21 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def translate_header(self, file):
+        """
+        Translate the header variable names from what is in the raw files to
+        converted names and units.
+
+        Parameters
+        ----------
+        file : str
+            Name of file for which to retrieve translated header.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            DESCRIPTION.
+
+        """
 
         headers_df = _get_file_handler(self.path / file).get_header_df()
         variables_df = self.var_map.get_variable_fields(table_file=file)
@@ -388,6 +475,14 @@ class table_merger():
 
     #--------------------------------------------------------------------------
     def make_output_file(self):
+        """
+        Create an output file that looks like a TOA5 file.
+
+        Returns
+        -------
+        None.
+
+        """
 
         info_header = [
             'TOA5', self.site, 'CR1000', '9999', 'cr1000.std.99.99',
@@ -1024,8 +1119,8 @@ class TOA5_concatenator():
             'info_merge_legal', 'units_merge_legal', 'interval_merge_legal'
             ]
         master_handler = TOA5_data_handler(file=self.master_file)
-        data_list = [master_handler.get_data_df()]
-        header_list = [master_handler.get_header_df()]
+        data_list = [master_handler.get_data_df(usecols=usecols)]
+        header_list = [master_handler.get_header_df(usecols=usecols)]
         report_list = []
 
         # Iterate over files (skip concatenation if illegal, but report)
@@ -1035,8 +1130,8 @@ class TOA5_concatenator():
             if not all([rslt_dict[x] for x in legals]):
                 continue
             handler = TOA5_data_handler(file=file)
-            data_list.append(handler.get_data_df())
-            header_list.append(handler.get_header_df())
+            data_list.append(handler.get_data_df(usecols=usecols))
+            header_list.append(handler.get_header_df(usecols=usecols))
 
         # Concatenate data
         checks_dict = self._post_merge_checks(df=
@@ -1053,7 +1148,8 @@ class TOA5_concatenator():
         # Align headers and return
         header_df = pd.concat(header_list)
         cols_to_keep = header_df[~header_df.index.duplicated()].index.tolist()
-        cols_to_keep.remove('TIMESTAMP')
+        try: cols_to_keep.remove('TIMESTAMP')
+        except ValueError: pass
         return checks_dict['data'][cols_to_keep]
     #--------------------------------------------------------------------------
 
@@ -1278,7 +1374,7 @@ class TOA5_data_handler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_header_df(self):
+    def get_header_df(self, usecols=None):
         """
         Get a dataframe with variables as index and units and statistical
         sampling type as columns.
@@ -1295,7 +1391,9 @@ class TOA5_data_handler():
         for line, var in enumerate(['variable', 'units', 'stat']):
             lines_dict[var] = self._format_line(line=headers[line])
         idx = pd.Index(lines_dict.pop('variable'), name='variable')
-        return pd.DataFrame(data=lines_dict, index=idx)
+        df = pd.DataFrame(data=lines_dict, index=idx)
+        if usecols: return df.loc[usecols]
+        return df
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -1544,17 +1642,18 @@ def get_TOA5_data(file, usecols=None):
             'requested variable!'
             )
 
-    # Keep track of whether RECORD variable was explicitly requested
-    # (return unless absent from usecols)
+    # Here we want TIMESTAMP and RECORD variables even if not requested in
+    # usecols arg - they are used internally, and TIMESTAMP becomes the index
     keep_record = True
     if usecols:
         if not 'RECORD' in usecols: keep_record = False
-        usecols += ['TIMESTAMP', 'RECORD']
-        usecols = list(dict.fromkeys(usecols))
+        thecols = list(dict.fromkeys((['TIMESTAMP', 'RECORD'] + usecols)))
+    else:
+        thecols=None
 
     # Import data
     df = pd.read_csv(
-        file, skiprows=[0,2,3], usecols=usecols, parse_dates=['TIMESTAMP'],
+        file, skiprows=[0,2,3], usecols=thecols, parse_dates=['TIMESTAMP'],
         index_col=['TIMESTAMP'], na_values='NAN', sep=',', engine='c',
         on_bad_lines='warn', low_memory=False
         )
@@ -1641,7 +1740,28 @@ def make_site_L1(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def resample_dataframe(df, resample_to):
+def make_site_logger_TOA5(site):
 
-    return df.resample(resample_to).interpolate()
+
+    table_df=(
+        vm.make_table_df(site=site)
+        [['station_name', 'logger_type', 'serial_num', 'OS_version',
+          'program_name', 'program_sig']]
+        .reset_index()
+        .set_index(keys='station_name')
+        )
+    table_df = (
+        table_df[~table_df.index.duplicated()]
+        .reset_index()
+        )
+    new_idx = pd.date_range(
+        start=dt.datetime.now().date() - dt.timedelta((len(table_df) - 1)),
+        periods=len(table_df),
+        freq='D'
+        )
+    new_idx.name = 'TIMESTAMP'
+    table_df.index = new_idx
+    TOA5_maker = TOA5_file_constructor(data=table_df)
+    output_path = PATHS.get_local_path(resource='site_details')
+    TOA5_maker.write_output_file(dest=output_path / f'{site}_logger_details.dat')
 #------------------------------------------------------------------------------

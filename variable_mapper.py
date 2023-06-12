@@ -25,7 +25,6 @@ import os
 import pathlib
 import numpy as np
 import pandas as pd
-import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -94,7 +93,7 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_file_info(self, file):
+    def get_header_info(self, file):
         """
         Returns a list of all files documented in the mapping spreadsheet.
 
@@ -511,63 +510,149 @@ class _RTMC_syntax_generator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def make_table_df(site=None):
+def check_file_exists(file, return_as_path=True):
     """
-    Generate a dataframe that ties file names to data tables and logger info
+    Check that the passed file path is absolute and valid
 
     Parameters
     ----------
-    site : str, optional
-        Site for which to return the table information. The default is None.
+    file : str or pathlib.Path
+        Absolute path to file.
+    return_as_path : pathlib.Path, optional
+        Returns the pathlib.Path representation if requested.
+        The default is True.
+
+    Raises
+    ------
+    FileNotFoundError
+        DESCRIPTION.
 
     Returns
     -------
-    pd.core.frame.DataFrame
-        Dataframe.
+    None.
 
     """
 
-    # Get the table list from excel file
-    renamer = {'Site': 'site', 'File name': 'file_name'}
-    df = (
-        pd.read_excel(
-            io=PATHS.get_local_path(resource='xl_variable_map'),
-            sheet_name='file_list',
-            usecols=list(renamer.keys()),
-            converters={'Site': lambda x: x.replace(' ', '')},
-            )
-        .rename(renamer, axis=1)
-        )
+    path = pathlib.Path(file)
+    if str(path.parent) == '.':
+        raise FileNotFoundError('File not found - absolute path required!')
+    if not pathlib.Path(file).exists():
+        raise FileNotFoundError('File does not exist!')
+    if return_as_path: return path
+#------------------------------------------------------------------------------
 
-    # If user-supplied sitename, drop all except that
-    if site: df = df.loc[df.site==site.replace(' ','')]
+#------------------------------------------------------------------------------
+def get_backup_files(file):
+    """
+    Check in the master file's directory for the presence of backup files
 
-    # Create and write full file paths
-    parent_path = PATHS.get_local_path(
-        resource='data', stream='flux_slow', as_str=True
-        )
-    df = (
-        df
-        .assign(full_path=df.site.apply(
-            lambda x: pathlib.Path(parent_path.replace('<site>', x))
-            ) / df.file_name
-            )
-        )
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        The absolute path to the file.
 
-    # Assign additional variables and return
+    Returns
+    -------
+    file_list : list
+        List of backup files present (empty list if none).
+
+    """
+
+    file = check_file_exists(file=file)
+    file_list = [x.name for x in file.parent.glob(f'{file.stem}*')]
+    try:
+        file_list.remove(file.name)
+    except ValueError:
+        breakpoint()
+    return file_list
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_info(file):
+    """
+    Convenience function to pull together header info, file start and finish
+    and presence of backup files
+
+    Parameters
+    ----------
+    file : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
     return (
-        df
-        # .assign(exists=df.full_path.apply(lambda x: x.exists()))
-        .join(pd.DataFrame(
-            data=[get_file_info(file) for file in df.full_path],
-            index=df.index
-            ))
-        .join(pd.DataFrame(
-            data=[get_file_dates(file) for file in df.full_path],
-            index=df.index
-            ))
-        .set_index(keys='file_name')
+        get_header_info(file=file) |
+        get_file_dates(file=file) |
+        {'backups': ','.join(get_backup_files(file=file))}
         )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_dates(file):
+    """
+    Get the start and end dates of the passed csv file
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        The absolute path to the file.
+
+    Returns
+    -------
+    dict
+        Dictionary containing start and end dates with desxcriptive keys.
+
+    """
+
+    date_format = '"%Y-%m-%d %H:%M:%S"'
+    with open(file, 'rb') as f:
+        while True:
+            line_list = f.readline().decode().split(',')
+            try:
+                start_date = (
+                    dt.datetime.strptime(line_list[0], date_format)
+                    )
+                break
+            except ValueError:
+                pass
+        f.seek(2, os.SEEK_END)
+        while f.read(1) != b'\n':
+            f.seek(-2, os.SEEK_CUR)
+        last_line_list = f.readline().decode().split(',')
+        end_date = dt.datetime.strptime(last_line_list[0], date_format)
+    return {'start_date': start_date, 'end_date': end_date}
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_header_info(file):
+    """
+    Get the first header line that contains the data table information
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        The absolute path to the file.
+
+    Returns
+    -------
+    dict
+        Dictionary containing data table information with descriptive keys.
+
+    """
+
+    with open(file=file) as f:
+        line = f.readline()
+    return dict(zip(
+        ['format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
+         'program_name', 'program_sig', 'table_name'
+         ],
+        [x.replace('"', '') for x in line.strip().split('","')]
+        ))
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -661,64 +746,56 @@ def make_site_df(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_file_info(file):
+def make_table_df(site=None):
     """
-    Get the first header line that contains the data table information
+    Generate a dataframe that ties file names to data tables and logger info
 
     Parameters
     ----------
-    file : str or pathlib.Path
-        The absolute path to the file.
+    site : str, optional
+        Site for which to return the table information. The default is None.
 
     Returns
     -------
-    dict
-        Dictionary containing data table information with descriptive keys.
+    pd.core.frame.DataFrame
+        Dataframe.
 
     """
 
-    with open(file=file) as f:
-        line = f.readline()
-    return dict(zip(
-        ['format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
-         'program_name', 'program_sig', 'table_name'
-         ],
-        [x.replace('"', '') for x in line.strip().split('","')]
-        ))
-#------------------------------------------------------------------------------
+    # Get the table list from excel file
+    renamer = {'Site': 'site', 'File name': 'file_name'}
+    df = (
+        pd.read_excel(
+            io=PATHS.get_local_path(resource='xl_variable_map'),
+            sheet_name='file_list',
+            usecols=list(renamer.keys()),
+            converters={'Site': lambda x: x.replace(' ', '')},
+            )
+        .rename(renamer, axis=1)
+        )
 
-#------------------------------------------------------------------------------
-def get_file_dates(file):
-    """
-    Get the start and end dates of the passed csv file
+    # If user-supplied sitename, drop all except that
+    if site: df = df.loc[df.site==site.replace(' ','')]
 
-    Parameters
-    ----------
-    file : str or pathlib.Path
-        The absolute path to the file.
+    # Create and write full file paths
+    parent_path = PATHS.get_local_path(
+        resource='data', stream='flux_slow', as_str=True
+        )
+    df = (
+        df
+        .assign(full_path=df.site.apply(
+            lambda x: pathlib.Path(parent_path.replace('<site>', x))
+            ) / df.file_name
+            )
+        )
 
-    Returns
-    -------
-    dict
-        Dictionary containing start and end dates with desxcriptive keys.
-
-    """
-
-    date_format = '"%Y-%m-%d %H:%M:%S"'
-    with open(file, 'rb') as f:
-        while True:
-            line_list = f.readline().decode().split(',')
-            try:
-                start_date = (
-                    dt.datetime.strptime(line_list[0], date_format)
-                    )
-                break
-            except ValueError:
-                pass
-        f.seek(2, os.SEEK_END)
-        while f.read(1) != b'\n':
-            f.seek(-2, os.SEEK_CUR)
-        last_line_list = f.readline().decode().split(',')
-        end_date = dt.datetime.strptime(last_line_list[0], date_format)
-    return {'start_date': start_date, 'end_date': end_date}
+    # Assign additional variables (table info, start and end dates) and return
+    return (
+        df
+        .join(pd.DataFrame(
+            data=[get_file_info(file) for file in df.full_path],
+            index=df.index
+            ))
+        .set_index(keys='file_name')
+        )
 #------------------------------------------------------------------------------
