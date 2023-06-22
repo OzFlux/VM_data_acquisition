@@ -1487,6 +1487,44 @@ class TOA5_data_handler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_gap_distribution(self):
+
+        df = self.get_data_df()
+        gap_series = (
+            (
+                df.reset_index()['TIMESTAMP'] -
+                df.reset_index()['TIMESTAMP'].shift()
+                )
+            .astype('timedelta64[m]') / self.interval
+            )
+
+        pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_missing_records(self):
+
+        df = self.get_data_df()
+        complete_index = pd.date_range(
+            start=df.index[0],
+            end=df.index[-1],
+            freq=self.interval
+            )
+        n_missing = len(complete_index) - len(df)
+        gap_series = (
+            (
+                df.reset_index()['TIMESTAMP'] -
+                df.reset_index()['TIMESTAMP'].shift()
+                )
+            .astype('timedelta64[m]') / 30
+            )
+        return {
+            'n_missing': n_missing,
+            '%_missing': round(n_missing / len(complete_index) * 100, 2)
+            }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def _format_line(self, line):
 
         return [x.replace('"', '') for x in line.strip().split('","')]
