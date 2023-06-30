@@ -12,6 +12,15 @@ import pandas as pd
 import pathlib
 
 #------------------------------------------------------------------------------
+### CONSTANTS ###
+#------------------------------------------------------------------------------
+
+INFO_LIST = [
+    'format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
+    'program_name', 'program_sig', 'table_name'
+    ]
+
+#------------------------------------------------------------------------------
 ### CLASSES ###
 #------------------------------------------------------------------------------
 
@@ -20,7 +29,7 @@ class single_file_data_handler():
 
     def __init__(self, file):
         """
-        Class to get headers and data from a TOA5 file WITHOUT merging backups.
+        Class to get headers and data from a TOA5 file WITH merge of backups.
 
         Parameters
         ----------
@@ -35,7 +44,7 @@ class single_file_data_handler():
         self.info = get_station_info(file=file)
         self.headers = get_header_df(file=file)
         self.data = get_TOA5_data(file=file)
-        self.merged = False
+        self.merged_files = None
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
@@ -141,7 +150,10 @@ class single_file_data_handler():
 
         """
 
-        return get_file_dates(file=self.file)
+        return {
+            'start_date': self.data.index[0].to_pydatetime(),
+            'end_date': self.data.index[-1].to_pydatetime()
+            }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -308,30 +320,77 @@ class single_file_data_handler():
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 class merged_file_data_handler(single_file_data_handler):
 
-    def __init__(self, file):
+    def __init__(self, file, write_merge_report=True):
+        """
+        Class to get headers and data from a TOA5 file WITH merge of backups.
+
+        Parameters
+        ----------
+        file : str or pathlib.Path
+            Absolute path to file.
+        write_merge_report : bool, optional
+            Whether to write the merge report during init. The default is True.
+
+        Returns
+        -------
+        None.
+
+        """
 
         super().__init__(file)
-        self.merged = True
-        self.merge_file_list = get_backup_files(self.file)
+        concatenator = file_concatenator(file=file)
+        self.info = concatenator.make_station_info()
+        self.headers = concatenator.merge_all_headers()
+        self.data = concatenator.merge_all_data()
+        self.merged_files = (
+            [concatenator.master_file.name] + concatenator.merge_file_list
+            )
+        if write_merge_report:
+            concatenator.write_merge_report()
+
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class file_concatenator():
 
     def __init__(self, file, enforce_consistent_sampling=True):
+        """
+        Class to concatenate backups.
+
+        Parameters
+        ----------
+        file : str or pathlib.Path
+            Absolute path to file.
+        enforce_consistent_sampling : TYPE, optional
+            DESCRIPTION. The default is True.
+
+        Raises
+        ------
+        FileNotFoundError
+            Raised if no backup files or none that can be legally merged.
+
+        Returns
+        -------
+        None.
+
+        """
 
         self.master_file = check_file_path(file)
         self.path = self.master_file.parent
         self.merge_file_list = get_backup_files(self.master_file)
         if not self.merge_file_list:
             raise FileNotFoundError('No files to concatenate! Exiting...')
+        self.get_legal_files()
 
     #--------------------------------------------------------------------------
     def compare_data_interval(self, with_file):
         """
-        Cross-check concatenation dile has same frequency as master.
+        Cross-check concatenation file has same frequency as master.
 
         Parameters
         ----------
@@ -352,29 +411,6 @@ class file_concatenator():
             return {'interval_merge_legal': False}
         return {'interval_merge_legal': True,
                 'master_interval': f'{master_interval}'}
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def compare_station_info(self, with_file):
-
-        illegal_list = ['format', 'logger_type', 'table_name']
-        master_info = get_station_info(self.master_file)
-        backup_info = get_station_info(self.path / with_file)
-        legal = True
-        msg_list = []
-        for key in master_info.keys():
-            if backup_info[key] == master_info[key]:
-                continue
-            if key in illegal_list:
-                legal = False
-            msg_list.append(
-                'Mismatch in station info header: '
-                f'{key} was {master_info[key]} in master file, '
-                f'{backup_info[key]} in merge file (legal -> {legal})'
-                )
-        if not msg_list:
-            msg_list.append('No differences found in station info!')
-        return {'info_merge_legal': legal, 'msg_list': msg_list}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -400,51 +436,47 @@ class file_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_variable_header(self, with_file):
+    def compare_station_info(self, with_file):
         """
-        Cross-check the elements of the variable name header line ('info') of a
-        backup file for concatenation with the master file.
+        Compare station info header lines.
 
         Parameters
         ----------
-        with_file : str or pathlib.Path object
-            Either filename alone (str) or absolute path to file (pathlib).
+        with_file : str
+            Name of file to compare to the master file.
 
         Returns
         -------
         dict
-            Dictionary containing lists of variables common to both files
-            (key='common'), those contained only in the master
-            (key='master_only') and those contained only in the backup
-            (key='backup_only').
+            results of comparison including legality assessment.
 
         """
 
-        master_df = single_file_data_handler(self.master_file).headers
-        backup_df = single_file_data_handler(self.path / with_file).headers
-        common_variables = [x for x in master_df.index if x in backup_df.index]
-        master_vars = list(
-            set(master_df.index.tolist()) - set(backup_df.index.tolist())
-            )
-        if not master_vars:
-            master_vars.append('None')
-        backup_vars = list(
-            set(backup_df.index.tolist()) - set(master_df.index.tolist())
-            )
-        if not backup_vars:
-            backup_vars.append('None')
-        return {
-            'common_variables': common_variables,
-            'master_only': master_vars,
-            'backup_only': backup_vars
-            }
+        illegal_list = ['format', 'logger_type', 'table_name']
+        master_info = get_station_info(self.master_file)
+        backup_info = get_station_info(self.path / with_file)
+        legal = True
+        msg_list = []
+        for key in master_info.keys():
+            if backup_info[key] == master_info[key]:
+                continue
+            if key in illegal_list:
+                legal = False
+            msg_list.append(
+                'Mismatch in station info header: '
+                f'{key} was {master_info[key]} in master file, '
+                f'{backup_info[key]} in merge file (legal -> {legal})'
+                )
+        if not msg_list:
+            msg_list.append('No differences found in station info!')
+        return {'info_merge_legal': legal, 'msg_list': msg_list}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def compare_units_header(self, with_file):
         """
-        Wrapper for comparison of units header line (merge is deemed illegal if
-        there are unit changes).
+        Compare units header line (merge is deemed illegal if there are unit
+                                   changes).
 
         Parameters
         ----------
@@ -515,10 +547,70 @@ class file_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def compare_variable_header(self, with_file):
+        """
+        Cross-check the elements of the variable name header line ('info') of a
+        backup file for concatenation with the master file.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            Dictionary containing lists of variables common to both files
+            (key='common'), those contained only in the master
+            (key='master_only') and those contained only in the backup
+            (key='backup_only').
+
+        """
+
+        master_df = single_file_data_handler(self.master_file).headers
+        backup_df = single_file_data_handler(self.path / with_file).headers
+        common_variables = [x for x in master_df.index if x in backup_df.index]
+        master_vars = list(
+            set(master_df.index.tolist()) - set(backup_df.index.tolist())
+            )
+        if not master_vars:
+            master_vars.append('None')
+        backup_vars = list(
+            set(backup_df.index.tolist()) - set(master_df.index.tolist())
+            )
+        if not backup_vars:
+            backup_vars.append('None')
+        return {
+            'common_variables': common_variables,
+            'master_only': master_vars,
+            'backup_only': backup_vars
+            }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def do_merge_assessment(self, with_file, as_text=False):
+        """
+        Do full assessment of merge
+
+        Parameters
+        ----------
+        with_file : str
+            Name of file to compare to the master file (filename only,
+                                                        omit directory).
+        as_text : bool, optional
+            If true, returns a formatted text output. The default is False.
+
+        Returns
+        -------
+        dict or list
+            Dictionary containing results of merge assessment, or list of
+            formatted strings if requested.
+
+        """
 
         merge_dict = (
             {'file_name': with_file} |
+            get_file_dates(file=self.path / with_file) |
             self.compare_station_info(with_file=with_file) |
             self.compare_variable_header(with_file=with_file) |
             self.compare_units_header(with_file=with_file) |
@@ -550,6 +642,8 @@ class file_concatenator():
             merge_dict = self.do_merge_assessment(with_file=file)
             if all([merge_dict[x] for x in legals]):
                 legal_list.append(file)
+        if not legal_list:
+            raise FileNotFoundError('No files can be legally merged!')
         return legal_list
     #--------------------------------------------------------------------------
 
@@ -574,6 +668,10 @@ class file_concatenator():
         write_list = []
         write_list.append(f'Backup file {merge_dict["file_name"]}\n\n')
         write_list.append(
+            f'Start_date: {merge_dict["start_date"]}, '
+            f'End_date: {merge_dict["end_date"]}\n'
+            )
+        write_list.append(
             'Info header line merge legal? -> '
             f'{merge_dict["info_merge_legal"]}\n'
             )
@@ -594,8 +692,7 @@ class file_concatenator():
             )
         mismatched_unit_vars = ', '.join(merge_dict['units_mismatch'])
         write_list.append(
-            'Variables with mismatched units -> '
-            f'{mismatched_unit_vars}\n'
+            f'Variables with mismatched units -> {mismatched_unit_vars}\n'
             )
         mismatched_sampling_vars = ', '.join(merge_dict['sampling_mismatch'])
         write_list.append(
@@ -610,12 +707,131 @@ class file_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _do_passed_file_checks(self, file):
+    def make_station_info(self):
+        """
+        Make a synthetic station info header line for the merged file.
 
-        checked_file = check_file_path(file=file)
-        if checked_file == self.master_file:
-            raise RuntimeError('Comparison file is same as master file')
-        return checked_file
+        Returns
+        -------
+        dict
+            Dictionary with station info key-value pairs (see INFO_LIST).
+
+        """
+
+        df = self.merge_all_station_info()
+        all_same = df.eq(df[self.master_file.name], axis=0).all(1)
+        return dict(zip(
+            INFO_LIST,
+            df[self.master_file.name].where(all_same, 'N/A - merged')
+            ))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_all_station_info(self, legals_only=True):
+        """
+        Collate the station information for all files (including master).
+
+        Parameters
+        ----------
+        legals_only : bool, optional
+            If true, parses ONLY the files for which merge is legal.
+            The default is True.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            Dataframe containing the station information (index) for each
+            file (columns).
+
+        """
+
+        file_list = (
+            [self.master_file.name] +
+            self.get_legal_files() if legals_only else self.merge_file_list
+            )
+        return pd.DataFrame(
+            [get_station_info(file=self.path / file) for file in file_list],
+            index=file_list
+            ).T
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_all_data(self):
+        """
+        Merge the master and backup file data (basic data conditioning - no
+                                               checks for duplicates e.g.)
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe containing the data!
+
+        """
+
+        # Concatenate all of the legal files
+        file_list = [self.master_file.name] + self.get_legal_files()
+        df = (
+            pd.concat([get_TOA5_data(self.path / file) for file in file_list])
+            .sort_index()
+            )
+
+        # In case there are some ordering subtleties under the hood, force the
+        # dataframe to share the same ordering as the headers
+        variables = self.merge_all_headers().index.tolist()
+        variables.remove('TIMESTAMP')
+        return df[variables]
+
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_all_headers(self, legals_only=True):
+        """
+        Merge the header lines from the master and backup files.
+
+        Parameters
+        ----------
+        legals_only : bool, optional
+            If true, parses ONLY the files for which merge is legal.
+            The default is True.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe containing the header info!
+
+        """
+
+        file_list = (
+            [self.master_file.name] +
+            self.get_legal_files() if legals_only else self.merge_file_list
+            )
+        return (
+            pd.concat(
+                [get_header_df(file=self.path / file) for file in file_list]
+                )
+            .reset_index()
+            .drop_duplicates()
+            .set_index(keys='variable')
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_merge_report(self):
+        """
+        Write report to target directory master file.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        write_list = [f'Merge report for master file {self.master_file}\n\n']
+        for file in self.merge_file_list:
+            write_list += self.do_merge_assessment(with_file=file, as_text=True)
+        out_name = self.master_file.name.replace('.dat', '')
+        with open(self.path / f'merge_report_{out_name}.txt', 'w') as f:
+            f.writelines(write_list)
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -680,11 +896,12 @@ def get_file_dates(file):
 #------------------------------------------------------------------------------
 def get_file_handler(file, merge_backups=False):
 
-    backups = get_backup_files(file=file)
-    if not backups or merge_backups == False:
-        return single_file_data_handler(file=file)
-    else:
-        return merged_file_data_handler(file=file)
+    if merge_backups:
+        try:
+            return merged_file_data_handler(file=file)
+        except FileNotFoundError:
+            pass
+    return single_file_data_handler(file=file)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -752,11 +969,7 @@ def get_station_info(file, as_dict=True):
     info_elements = _format_line(line=info)
     if not as_dict:
         return info_elements
-    info_list = [
-        'format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
-        'program_name', 'program_sig', 'table_name'
-        ]
-    return dict(zip(info_list, info_elements))
+    return dict(zip(INFO_LIST, info_elements))
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -830,6 +1043,12 @@ def get_backup_files(file):
 
     file_list = [x.name for x in file.parent.glob(f'{file.stem}*')]
     file_list.remove(file.name)
+    first_backup = file.name + '.backup'
+    try:
+        temp = file_list.pop(file_list.index(first_backup))
+        file_list = [temp] + file_list
+    except ValueError:
+        pass
     return file_list
 #------------------------------------------------------------------------------
 
