@@ -611,10 +611,8 @@ class L1_constructor():
                 # Get the TOA5 data handler (concatenate backups by default)
                 output_dict = self.get_file_data(file=file)
 
-                breakpoint()
-
                 # Write info
-                (pd.DataFrame(output_dict['info'])
+                (pd.DataFrame(output_dict['info'].keys())
                  .T
                  .to_excel(
                      writer, sheet_name=sheet_name, header=False, index=False,
@@ -623,7 +621,7 @@ class L1_constructor():
                  )
 
                 # Write header
-                (output_dict['header']
+                (output_dict['headers']
                  .reset_index()
                  .T
                  .to_excel(
