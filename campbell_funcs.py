@@ -612,7 +612,7 @@ class L1_constructor():
                 output_dict = self.get_file_data(file=file)
 
                 # Write info
-                (pd.DataFrame(output_dict['info'].keys())
+                (pd.DataFrame(output_dict['info'].values())
                  .T
                  .to_excel(
                      writer, sheet_name=sheet_name, header=False, index=False,
