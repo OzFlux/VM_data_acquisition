@@ -23,6 +23,7 @@ import sys
 ### Custom modules ###
 import met_functions as mf
 import paths_manager as pm
+import toa5_handler as toa5
 import variable_mapper as vm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
 import sparql_site_details as sd
@@ -544,11 +545,13 @@ class L1_constructor():
 
         """
 
-        handler = _get_file_handler(file=self.path / file)
+        handler = toa5.get_file_handler(
+            file=self.path / file, concat_backups=True
+            )
         return {
-            'info': handler.get_info(as_dict=False),
-            'header': handler.get_header_df(),
-            'data': handler.get_data_df()
+            'info': handler.info,
+            'headers': handler.headers,
+            'data': handler.get_conditioned_data(monotonic_index=True)
             }
     #--------------------------------------------------------------------------
 
@@ -573,7 +576,7 @@ class L1_constructor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_to_excel(self, na_values=''):
+    def write_to_excel(self, concat_backups=True, na_values=''):
         """
         Write table files out to separate tabs in an xlsx file.
 
@@ -597,8 +600,18 @@ class L1_constructor():
         # Iterate over all files and write to separate excel workbook sheets
         with pd.ExcelWriter(path=dest) as writer:
             for file in self.tables_df.index:
+
+                # Name the tab after the file (drop the dat) - it is necessary
+                # to use file name and not just the table name, because for
+                # some sites data is drawn from different loggers with same
+                # table name
                 sheet_name = file.replace('.dat', '')
+                # output_dict = self.get_file_data(file=file)
+
+                # Get the TOA5 data handler (concatenate backups by default)
                 output_dict = self.get_file_data(file=file)
+
+                breakpoint()
 
                 # Write info
                 (pd.DataFrame(output_dict['info'])

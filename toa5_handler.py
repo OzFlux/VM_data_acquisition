@@ -895,9 +895,9 @@ def get_file_dates(file):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_file_handler(file, merge_backups=False):
+def get_file_handler(file, concat_backups=False):
 
-    if merge_backups:
+    if concat_backups:
         try:
             return merged_file_data_handler(file=file)
         except FileNotFoundError:
