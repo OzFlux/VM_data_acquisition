@@ -841,7 +841,7 @@ class file_concatenator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def check_file_path(file):
+def check_file_path(file, as_str=False):
     """
     Check whether is a real file, and if string, create a pathlib.Path object.
 
@@ -862,13 +862,14 @@ def check_file_path(file):
 
     """
 
-    if isinstance(file, str):
-        file = pathlib.Path(file)
-    if not file.parent.exists():
+    file_to_check = pathlib.Path(file)
+    if not file_to_check.parent.exists():
         raise FileNotFoundError('Invalid directory!')
-    if not file.exists():
+    if not file_to_check.exists():
         raise FileNotFoundError('No file of that name in directory!')
-    return file
+    if as_str:
+        return str(file_to_check)
+    return file_to_check
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -922,6 +923,31 @@ def get_file_headers(file):
         for i in range(4):
             headers.append(f.readline())
     return headers
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_info(file):
+    """
+    Convenience function to pull together header info, file start and finish
+    and presence of backup files
+
+    Parameters
+    ----------
+    file : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
+    return (
+        get_station_info(file=file) |
+        get_file_dates(file=file) |
+        {'backups': ','.join(get_backup_files(file=file))}
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1041,9 +1067,12 @@ def get_backup_files(file):
 
     """
 
-    file_list = [x.name for x in file.parent.glob(f'{file.stem}*')]
-    file_list.remove(file.name)
-    first_backup = file.name + '.backup'
+    file_to_parse = check_file_path(file=file)
+    file_list = [
+        x.name for x in file_to_parse.parent.glob(f'{file_to_parse.stem}*')
+        ]
+    file_list.remove(file_to_parse.name)
+    first_backup = file_to_parse.name + '.backup'
     try:
         temp = file_list.pop(file_list.index(first_backup))
         file_list = [temp] + file_list
