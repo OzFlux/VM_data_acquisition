@@ -23,6 +23,7 @@ import sys
 ### Custom modules ###
 import met_functions as mf
 import paths_manager as pm
+import toa5_handler as toa5
 import variable_mapper as vm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
 import sparql_site_details as sd
@@ -75,7 +76,7 @@ class TOA5_file_constructor():
 
         def str_func(the_list):
 
-           return ','.join([f'"{item}"' for item in the_list]) + '\n'
+            return ','.join([f'"{item}"' for item in the_list]) + '\n'
 
         amended_names = ['TIMESTAMP'] + self.data.columns.tolist()
         amended_units = ['TS'] + self.units
@@ -261,7 +262,7 @@ class table_merger():
         Parameters
         ----------
         file : str
-            Name of file for which to get data..
+            Name of file for which to get data.
 
         Returns
         -------
@@ -518,39 +519,13 @@ class L1_constructor():
         """
 
         self.site = site
+        self.path = PATHS.get_local_path(
+            resource='data', stream='flux_slow', site=site
+            )
         self.time_step = int(SITE_DETAILS.get_single_site_details(
             site=site, field='time_step'
             ))
         self.tables_df = vm.make_table_df(site=site)
-        self.path = PATHS.get_local_path(
-            resource='data', stream='flux_slow', site=site
-            )
-
-    #--------------------------------------------------------------------------
-    def get_file_data(self, file):
-        """
-        Get the file data, including all headers
-
-        Parameters
-        ----------
-        file : pathlib.Path object
-            Full path to file.
-
-        Returns
-        -------
-        dict
-            Contains pre-header info, variable-specific header and data as
-            values with 'info', 'header' and 'data' as respective keys.
-
-        """
-
-        handler = _get_file_handler(file=self.path / file)
-        return {
-            'info': handler.get_info(as_dict=False),
-            'header': handler.get_header_df(),
-            'data': handler.get_data_df()
-            }
-    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_inclusive_date_index(self):
@@ -573,12 +548,15 @@ class L1_constructor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_to_excel(self, na_values=''):
+    def write_to_excel(self, concat_backups=True, na_values=''):
         """
         Write table files out to separate tabs in an xlsx file.
 
         Parameters
         ----------
+        concat_backups : bool, optional
+            Whether to concatenate backup files residing in same directory.
+            The default is True.
         na_values : str, optional
             The na values to fill nans with. The default is ''.
 
@@ -588,7 +566,7 @@ class L1_constructor():
 
         """
 
-        # Get data and header for all files (do concatenation where required)
+        # Set the destination
         dest = self.path / f'{self.site}_L1.xlsx'
 
         # Get inclusive date index to reindex all files to
@@ -597,11 +575,20 @@ class L1_constructor():
         # Iterate over all files and write to separate excel workbook sheets
         with pd.ExcelWriter(path=dest) as writer:
             for file in self.tables_df.index:
+
+                # Name the tab after the file (drop the dat) - it is necessary
+                # to use file name and not just the table name, because for
+                # some sites data is drawn from different loggers with same
+                # table name
                 sheet_name = file.replace('.dat', '')
-                output_dict = self.get_file_data(file=file)
+
+                # Get the TOA5 data handler (concatenate backups by default)
+                handler = toa5.get_file_handler(
+                    file=self.path / file, concat_backups=True
+                    )
 
                 # Write info
-                (pd.DataFrame(output_dict['info'])
+                (pd.DataFrame(handler.info.values())
                  .T
                  .to_excel(
                      writer, sheet_name=sheet_name, header=False, index=False,
@@ -610,7 +597,7 @@ class L1_constructor():
                  )
 
                 # Write header
-                (output_dict['header']
+                (handler.headers
                  .reset_index()
                  .T
                  .to_excel(
@@ -620,7 +607,7 @@ class L1_constructor():
                  )
 
                 # Write data
-                (output_dict['data']
+                (handler.get_conditioned_data(monotonic_index=True)
                  .reindex(date_idx)
                  .reset_index()
                  .to_excel(

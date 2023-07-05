@@ -20,8 +20,6 @@ Issues:
 ### STANDARD IMPORTS ###
 #------------------------------------------------------------------------------
 
-import datetime as dt
-import os
 import pathlib
 import numpy as np
 import pandas as pd
@@ -31,6 +29,7 @@ import pandas as pd
 #------------------------------------------------------------------------------
 
 import paths_manager as pm
+import toa5_handler as toa5
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -510,152 +509,6 @@ class _RTMC_syntax_generator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def check_file_exists(file, return_as_path=True):
-    """
-    Check that the passed file path is absolute and valid
-
-    Parameters
-    ----------
-    file : str or pathlib.Path
-        Absolute path to file.
-    return_as_path : pathlib.Path, optional
-        Returns the pathlib.Path representation if requested.
-        The default is True.
-
-    Raises
-    ------
-    FileNotFoundError
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
-    """
-
-    path = pathlib.Path(file)
-    if str(path.parent) == '.':
-        raise FileNotFoundError('File not found - absolute path required!')
-    if not pathlib.Path(file).exists():
-        raise FileNotFoundError('File does not exist!')
-    if return_as_path: return path
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_backup_files(file):
-    """
-    Check in the master file's directory for the presence of backup files
-
-    Parameters
-    ----------
-    file : str or pathlib.Path
-        The absolute path to the file.
-
-    Returns
-    -------
-    file_list : list
-        List of backup files present (empty list if none).
-
-    """
-
-    file = check_file_exists(file=file)
-    file_list = [x.name for x in file.parent.glob(f'{file.stem}*')]
-    try:
-        file_list.remove(file.name)
-    except ValueError:
-        breakpoint()
-    return file_list
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_file_info(file):
-    """
-    Convenience function to pull together header info, file start and finish
-    and presence of backup files
-
-    Parameters
-    ----------
-    file : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
-
-    """
-
-    return (
-        get_header_info(file=file) |
-        get_file_dates(file=file) |
-        {'backups': ','.join(get_backup_files(file=file))}
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_file_dates(file):
-    """
-    Get the start and end dates of the passed csv file
-
-    Parameters
-    ----------
-    file : str or pathlib.Path
-        The absolute path to the file.
-
-    Returns
-    -------
-    dict
-        Dictionary containing start and end dates with desxcriptive keys.
-
-    """
-
-    date_format = '"%Y-%m-%d %H:%M:%S"'
-    with open(file, 'rb') as f:
-        while True:
-            line_list = f.readline().decode().split(',')
-            try:
-                start_date = (
-                    dt.datetime.strptime(line_list[0], date_format)
-                    )
-                break
-            except ValueError:
-                pass
-        f.seek(2, os.SEEK_END)
-        while f.read(1) != b'\n':
-            f.seek(-2, os.SEEK_CUR)
-        last_line_list = f.readline().decode().split(',')
-        end_date = dt.datetime.strptime(last_line_list[0], date_format)
-    return {'start_date': start_date, 'end_date': end_date}
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_header_info(file):
-    """
-    Get the first header line that contains the data table information
-
-    Parameters
-    ----------
-    file : str or pathlib.Path
-        The absolute path to the file.
-
-    Returns
-    -------
-    dict
-        Dictionary containing data table information with descriptive keys.
-
-    """
-
-    with open(file=file) as f:
-        line = f.readline()
-    return dict(zip(
-        ['format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
-         'program_name', 'program_sig', 'table_name'
-         ],
-        [x.replace('"', '') for x in line.strip().split('","')]
-        ))
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 def make_site_df(site):
     """
     Create the dataframe that contains the data to allow mapping from
@@ -793,7 +646,7 @@ def make_table_df(site=None):
     return (
         df
         .join(pd.DataFrame(
-            data=[get_file_info(file) for file in df.full_path],
+            data=[toa5.get_file_info(file=file) for file in df.full_path],
             index=df.index
             ))
         .set_index(keys='file_name')
