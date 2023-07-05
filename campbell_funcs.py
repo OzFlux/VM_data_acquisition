@@ -223,7 +223,7 @@ class TOA5_file_constructor():
 #------------------------------------------------------------------------------
 class table_merger():
 
-    def __init__(self, site):
+    def __init__(self, site, concat_backups=True):
         """
         Class to generate a standardised dataset from source tables; note -
         currently contains a hack to stop Tumbarumba being processed in
@@ -251,6 +251,7 @@ class table_merger():
                 ))
         else:
             self.time_step = 30
+        self.concat_backups = concat_backups
         self.table_map = vm.make_table_df(site=site)
         self.var_map = vm.mapper(site=site)
 
@@ -267,33 +268,26 @@ class table_merger():
         Returns
         -------
         df : pd.core.frame.DataFrame
-            Dataframe contaning data with names converted to standard names,
+            Dataframe containing data with names converted to standard names,
             units converted to standard units and broad range limits applied
             (NOT a substitute for QC, just an aid for plotting).
 
         """
 
-        # Get the handler and the name conversion scheme (as dict), and create
-        # required str rep of averaging interval
-        handler = _get_file_handler(file=self.path / file)
-        translation_dict = self.var_map.get_translation_dict(table_file=file)
-        interval = f'{self.time_step}T'
+        # Get the handler and the name conversion scheme (as dict)
+        handler = toa5.get_file_handler(
+            file=self.path / file, concat_backups=self.concat_backups
+            )
 
-        # Pull in the data and rename it
+        # Pull in the data and rename it (passing the dictionary containing the
+        # name mapping will automatically rename it - see toa5_handler)
         df = (
-            handler.get_data_df(
-                usecols=list(translation_dict.keys()),
-                resample_intvl=interval
+            handler.get_conditioned_data(
+                usecols=self.var_map.get_translation_dict(table_file=file),
+                monotonic_index=True,
+                resample_intvl=handler.interval_as_offset
                 )
-            .rename(translation_dict, axis=1)
             )
-
-        # Reindex to create a monotonic time index (missing data will be NaN)
-        new_index = pd.date_range(
-            start=df.index[0], end=df.index[-1], freq=interval
-            )
-        new_index.name = df.index.name
-        df = df.reindex(new_index)
 
         # Apply unit conversion and range limits, and return
         self._do_unit_conversions(df=df)
@@ -372,18 +366,18 @@ class table_merger():
 
         """
 
-        file_list = self.var_map.get_file_list()
-        table_map = self.table_map.loc[file_list]
+        df_list = []
+        for file in self.var_map.get_file_list():
+            df_list.append(self.get_table_data(file=file))
+        [(x.index[0], x.index[-1]) for x in df_list]
         date_idx = pd.date_range(
-            start=table_map.start_date.min(),
-            end=table_map.end_date.max(),
+            start = np.array([x.index[0].to_pydatetime() for x in df_list]).min(),
+            end = np.array([x.index[-1].to_pydatetime() for x in df_list]).max(),
             freq=f'{self.time_step}T'
             )
         date_idx.name = 'TIMESTAMP'
         df =  pd.concat(
-            [self.get_table_data(file=file)
-             .reindex(date_idx) for file in file_list
-             ],
+            [this_df.reindex(date_idx) for this_df in df_list],
             axis=1
             )
         self._make_missing_variables(df=df)

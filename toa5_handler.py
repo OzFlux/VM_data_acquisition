@@ -100,6 +100,7 @@ class single_file_data_handler():
         # reindexing is required if resampling is requested, so user choice to
         # NOT have a monotonic index must be overriden in this case.
         must_reindex = monotonic_index or resample_intvl
+        new_index = self.data.index
         if must_reindex:
             dates = self.get_date_span()
             new_index = pd.date_range(
@@ -107,6 +108,7 @@ class single_file_data_handler():
                 end=dates['end_date'],
                 freq=self.interval_as_offset
                 )
+            new_index.name = self.data.index.name
 
         # Check for duplicate indices (ie. where records aren't duplicated)
         dupe_indices = self.get_duplicate_indices()
@@ -1030,7 +1032,7 @@ def get_TOA5_data(file, usecols=None):
     # Sort the index
     df.sort_index(inplace=True)
 
-    # Return with or without record
+    # Return
     return df
 #------------------------------------------------------------------------------
 
@@ -1086,3 +1088,27 @@ def _format_line(line):
 
     return [x.replace('"', '') for x in line.strip().split('","')]
 #------------------------------------------------------------------------------
+
+def get_interval_test(file):
+
+    df = get_TOA5_data(file=file, usecols=['RECORD']).drop_duplicates()
+    diffs = (df.index[1:] - df.index[:-1])
+    min_delta = diffs.min()
+    breakpoint()
+    pass
+
+    # date_format = '"%Y-%m-%d %H:%M:%S"'
+
+    # with open(file, 'rb') as f:
+    #     read = False
+    #     for line in f:
+    #         # try:
+    #         dt_str = line.decode().strip().split(',')[0]
+    #         try:
+    #             dt.datetime.strptime(dt_str, date_format)
+    #         except ValueError:
+    #             continue
+    #         # breakpoint()
+    #         # except
+    #         # line.decode
+    #         # line.split(',')
