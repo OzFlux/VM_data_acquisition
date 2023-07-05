@@ -640,7 +640,7 @@ class file_concatenator():
         legal_list = []
         for file in self.merge_file_list:
             merge_dict = self.do_merge_assessment(with_file=file)
-            if all([merge_dict[x] for x in legals]):
+            if all(merge_dict[x] for x in legals):
                 legal_list.append(file)
         if not legal_list:
             raise FileNotFoundError('No files can be legally merged!')
