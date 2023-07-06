@@ -1039,17 +1039,10 @@ def get_TOA5_data(file, usecols=None):
 #------------------------------------------------------------------------------
 def get_TOA5_interval(file, as_offset=True):
 
-    df = get_TOA5_data(file=file, usecols=['RECORD']).reset_index()
-    df = df - df.shift()
-    df['minutes'] = df.TIMESTAMP.dt.components.minutes
-    df = df.loc[(df.RECORD==1) & (df.minutes!=0)]
-    interval_list = df.minutes.unique().tolist()
-    if not len(interval_list) == 1:
-        raise RuntimeError('Inconsistent interval between records!')
-    num = round(interval_list[0])
-    if not as_offset:
-        return num
-    return f'{num}T'
+    df = get_TOA5_data(file=file, usecols=['RECORD'])
+    num = get_index_interval(idx=df.index.drop_duplicates())
+    if as_offset: return f'{num}T'
+    return num
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -1089,26 +1082,13 @@ def _format_line(line):
     return [x.replace('"', '') for x in line.strip().split('","')]
 #------------------------------------------------------------------------------
 
-def get_interval_test(file):
+def get_index_interval(idx):
 
-    df = get_TOA5_data(file=file, usecols=['RECORD']).drop_duplicates()
-    diffs = (df.index[1:] - df.index[:-1])
-    min_delta = diffs.min()
-    breakpoint()
-    pass
-
-    # date_format = '"%Y-%m-%d %H:%M:%S"'
-
-    # with open(file, 'rb') as f:
-    #     read = False
-    #     for line in f:
-    #         # try:
-    #         dt_str = line.decode().strip().split(',')[0]
-    #         try:
-    #             dt.datetime.strptime(dt_str, date_format)
-    #         except ValueError:
-    #             continue
-    #         # breakpoint()
-    #         # except
-    #         # line.decode
-    #         # line.split(',')
+    diffs = (idx[1:] - idx[:-1]).unique()
+    return (
+        pd.TimedeltaIndex(
+            filter(lambda x: np.mod(x.components.minutes, 30) == 0, diffs)
+            )
+        .min()
+        .components.minutes
+        )
