@@ -530,11 +530,11 @@ class file_concatenator():
             ['common_variables']
             )
         compare_df = pd.concat(
-            [(single_file_data_handler(self.master_file).headers
+            [(get_header_df(file=self.master_file)
               .rename({which: f'master_{which}'}, axis=1)
               .loc[common_vars, f'master_{which}']
               ),
-              (single_file_data_handler(self.path / with_file).headers
+              (get_header_df(file=self.path / with_file)
               .rename({which: f'bkp_{which}'}, axis=1)
               .loc[common_vars, f'bkp_{which}']
               )], axis=1
@@ -569,9 +569,9 @@ class file_concatenator():
 
         """
 
-        master_df = single_file_data_handler(self.master_file).headers
-        backup_df = single_file_data_handler(self.path / with_file).headers
-        common_variables = [x for x in master_df.index if x in backup_df.index]
+        master_df = get_header_df(file=self.master_file)
+        backup_df = get_header_df(self.path / with_file)
+        common_variables = list(set(master_df.index).intersection(backup_df.index))
         master_vars = list(
             set(master_df.index.tolist()) - set(backup_df.index.tolist())
             )
