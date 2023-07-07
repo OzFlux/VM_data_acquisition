@@ -64,7 +64,7 @@ def _set_logger(site, task):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class tasks_manager():
+class TasksManager():
 
     def __init__(self):
 
@@ -90,6 +90,13 @@ class tasks_manager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def generate_L1_excel(self, site):
+
+        constructor = cf.L1Constructor(site=site)
+        constructor.write_to_excel()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def generate_merged_file(self, site):
         """
         Pull data from downloaded tables and merge into single table with
@@ -102,14 +109,8 @@ class tasks_manager():
 
         """
 
-        merger = cf.table_merger(site=site)
+        merger = cf.TableMerger(site=site)
         merger.make_output_file()
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def generate_L1_excel(self, site):
-
-        cf.make_site_L1(site=site)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -255,7 +256,7 @@ class tasks_manager():
 # Parse single task for single site and log it
 def parse_task(task, site):
 
-    tasks = tasks_manager()
+    tasks = TasksManager()
     logger = _set_logger(site=site, task=task)
     logger.info(f'Running task "{task}" for site {site}')
     try:
@@ -270,7 +271,7 @@ def parse_task(task, site):
 # if passed, check that task is enabled for that site and run if so (otherwise do nothing).
 if __name__=='__main__':
 
-    tasks = tasks_manager()
+    tasks = TasksManager()
     task = sys.argv[1]
     site_list = tasks.get_site_list_for_task(task_string=task)
     try:

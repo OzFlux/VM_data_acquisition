@@ -5,7 +5,9 @@ Created on Wed Jun 14 10:58:42 2023
 @author: jcutern-imchugh
 """
 
+import csv
 import datetime as dt
+import logging
 import numpy as np
 import os
 import pandas as pd
@@ -839,6 +841,187 @@ class file_concatenator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class TOA5_file_constructor():
+
+    """Class for construction of generic TOA5 files"""
+
+    def __init__(self, data, info_header=None, units=None, samples=None):
+
+
+        self.data = data
+        self.n_cols = len(self.data.columns)
+        self._do_data_checks()
+        self.info_header = (
+            info_header if info_header else
+            self._get_header_defaults(line='info')
+            )
+        self.units = (
+            units if units else self._get_header_defaults(line='units')
+            )
+        self.samples = (
+            samples if samples else self._get_header_defaults(line='samples')
+            )
+        self._do_header_checks()
+
+    #--------------------------------------------------------------------------
+    def assemble_full_header(self):
+        """
+        Put together the headers from inputs or defaults
+
+        Returns
+        -------
+        str_list : list
+            List of strings, each one corresponding to a header row.
+
+        """
+
+        def str_func(the_list):
+
+            return ','.join([f'"{item}"' for item in the_list]) + '\n'
+
+        amended_names = ['TIMESTAMP'] + self.data.columns.tolist()
+        amended_units = ['TS'] + self.units
+        amended_samples = [''] + self.samples
+        return [
+            str_func(the_list=self.info_header),
+            str_func(the_list=amended_names),
+            str_func(the_list=amended_units),
+            str_func(the_list=amended_samples)
+            ]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _do_data_checks(self):
+        """
+        Basic checks of data integrity - really just that there is a timestamp
+        based index
+
+        Raises
+        ------
+        RuntimeError
+            Raised if not a timestamp-based index.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        try:
+            self.data.index.to_pydatetime()
+        except AttributeError:
+            msg = 'Dataframe passed to "data" arg must have a datetime index!'
+            logging.error(msg)
+            raise RuntimeError(msg)
+        if not self.data.index.name == 'TIMESTAMP':
+            raise IndexError('Dataframe index must be named TIMESTAMP!')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _do_header_checks(self):
+        """
+        Does integrity checks on passed header lines.
+
+        Raises
+        ------
+        TypeError
+            Raised if passed items were not lists.
+        IndexError
+            Raised if wrong number of elements in list.
+        AssertionError
+            Raised if not all list elements are strings.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        item_list = ['info_header', 'units', 'samples']
+        len_list = [8, self.n_cols, self.n_cols]
+        for i, item in enumerate([self.info_header, self.units, self.samples]):
+            if item:
+                item_name, item_len = item_list[i], len_list[i]
+                try:
+                    if not isinstance(item, list):
+                        raise TypeError(
+                            f'"{item_name}" kwarg must be of type list!'
+                            )
+                    if not len(item) == item_len:
+                        raise IndexError(
+                            'Number of elements in list passed to '
+                            f'"{item_name}" must match number of elements '
+                            'in passed dataframe!'
+                            )
+                    for x in item:
+                        assert isinstance(x, str)
+                except (TypeError, IndexError, AssertionError) as e:
+                    msg = (
+                        'Integrity check failed with the following message: '
+                        f'{e}'
+                        )
+                    logging.error(msg); raise
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_header_defaults(self, line):
+        """
+        Get default header output for the given line
+
+        Parameters
+        ----------
+        line : str
+            The line for which to return the defaults (info, units and samples).
+
+        Raises
+        ------
+        KeyError
+            Raised if the "line" argument isn't one of the above.
+
+        Returns
+        -------
+        list
+            The list of default elements for the given line.
+
+        """
+
+        ok_list = ['info', 'units', 'samples']
+        if not line in ok_list:
+            msg = '"line" arg must be one of {}'.format(', '.join(ok_list))
+            logging.error(msg); raise KeyError
+        if line == 'info':
+            return ['TOA5', 'NoStation', 'CR1000', '9999', 'cr1000.std.99.99',
+                    'CPU:noprogram.cr1', '9999', 'default_table']
+        elif line == 'units':
+            return ['unitless'] * self.n_cols
+        elif line == 'samples':
+            return ['Smp'] * self.n_cols
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_output_file(self, dest):
+        """
+        Write the output file to it's destination'
+
+        Parameters
+        ----------
+        dest : pathlib.Path
+            The destination path for the output file.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        _write_TOA5_from_df(
+            df=self.data, headers=self.assemble_full_header(), dest=dest
+            )
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
@@ -1082,6 +1265,21 @@ def _format_line(line):
     return [x.replace('"', '') for x in line.strip().split('","')]
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def _write_TOA5_from_df(df, headers, dest):
+
+    df = df.reset_index()
+    df.fillna('NAN', inplace=True)
+    with open(dest, 'w', newline='\n') as f:
+        for line in headers:
+            f.write(line)
+        df.to_csv(
+            f, header=False, index=False, na_rep='NAN',
+            quoting=csv.QUOTE_NONNUMERIC
+            )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def get_index_interval(idx):
 
     diffs = (idx[1:] - idx[:-1]).unique()
@@ -1092,3 +1290,4 @@ def get_index_interval(idx):
         .min()
         .components.minutes
         )
+#------------------------------------------------------------------------------
