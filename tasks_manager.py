@@ -170,6 +170,25 @@ class TasksManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def rclone_push_data_rdm(self, site, stream):
+        """
+        Push data from local to UQRDM folders.
+
+        Parameters
+        ----------
+        site : str
+            Site name.
+        stream : str
+            The data stream to push (limited to flux_slow, flux_fast and
+                                     RTMC).
+
+        """
+
+        exclude_dirs = ['TMP'] if stream == 'flux_fast' else None
+        rt.push_data_rdm(site, stream, exclude_dirs=exclude_dirs)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def rclone_pull_data(self, site, stream):
         """
         Pull data from Cloudstor to local folders. Currently limited to slow
@@ -233,6 +252,9 @@ class TasksManager():
                 },
             'Rclone_push_RTMC': {
                 'function': self.rclone_push_data, 'stream': 'RTMC'
+                },
+            'Rclone_push_slow_rdm': {
+                'function': self.rclone_push_data_rdm, 'stream': 'rtmc'
                 },
             'reformat_10Hz': {
                 'function': self.reformat_10Hz_data, 'stream': None
