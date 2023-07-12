@@ -91,53 +91,13 @@ class TasksManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def generate_L1_excel(self, site):
-
-        constructor = cf.L1Constructor(site=site)
-        constructor.write_to_excel()
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def generate_merged_file(self, site):
-        """
-        Pull data from downloaded tables and merge into single table with
-        standard names for variables. Used for RTMC plotting.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-
-        """
-
-        merger = cf.TableMerger(site=site)
-        merger.make_output_file()
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def generate_site_details_file(self, site):
-        """
-        Create the file containing the site information in dummy TOA5 format,
-        and write to the appropriate directory.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-
-        """
-
-        cf.make_site_info_TOA5(site=site)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_site_list_for_task(self, task_string):
+    def get_site_list_for_task(self, task):
         """
         Get the list of sites for which a given task is enabled.
         """
 
         return (
-            self.tasks_df.loc[self.tasks_df[task_string]==True]
+            self.tasks_df.loc[self.tasks_df[task]==True]
             .index
             .to_list()
             )
@@ -153,125 +113,7 @@ class TasksManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def rclone_push_data(self, site, stream):
-        """
-        Push data from local to Cloudstor folders.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-        stream : str
-            The data stream to push (limited to flux_slow, flux_fast and
-                                     RTMC).
-
-        """
-
-        rt.rclone_push_data(site=site, stream=stream)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def rclone_push_data_rdm(self, site, stream):
-        """
-        Push data from local to UQRDM folders.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-        stream : str
-            The data stream to push (limited to flux_slow, flux_fast and
-                                     RTMC).
-
-        """
-
-        exclude_dirs = ['TMP'] if stream == 'flux_fast' else None
-        rt.push_data_rdm(site, stream, exclude_dirs=exclude_dirs)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def rclone_pull_data(self, site, stream):
-        """
-        Pull data from Cloudstor to local folders. Currently limited to slow
-        data.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-        stream : str
-            The data stream to pull (limited to flux_slow, flux_fast and
-                                     RTMC).
-
-        """
-
-        rt.rclone_pull_data(site=site, stream=stream)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def reformat_10Hz_data(self, site):
-
-        ptd.main(site=site)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def run_task(self, site, task_string):
-        """
-        Run a task from the task list.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-        task_string : str
-            The name of the task to run.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        configs_dict = {
-            'generate_L1_excel': {
-                'function': self.generate_L1_excel, 'stream': None
-                },
-            'generate_merged_file': {
-                'function': self.generate_merged_file, 'stream': None
-                },
-            'generate_site_details_file': {
-                'function': self.generate_site_details_file, 'stream': None
-                },
-            'Rclone_push_slow': {
-                'function': self.rclone_push_data, 'stream': 'flux_slow'
-                },
-            'Rclone_pull_slow': {
-                'function': self.rclone_pull_data, 'stream': 'flux_slow'
-                },
-            'Rclone_push_fast': {
-                'function': self.rclone_push_data, 'stream': 'flux_fast'
-                },
-            'Rclone_push_rtmc': {
-                'function': self.rclone_push_data, 'stream': 'RTMC'
-                },
-            'Rclone_push_slow_rdm': {
-                'function': self.rclone_push_data_rdm, 'stream': 'rtmc'
-                },
-            'reformat_10Hz': {
-                'function': self.reformat_10Hz_data, 'stream': None
-                },
-            }
-
-        task_function = configs_dict[task_string]['function']
-        task_stream = configs_dict[task_string]['stream']
-        if task_stream:
-            task_function(site=site, stream=task_stream)
-        else:
-            task_function(site=site)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def run_a_task(self, site, task):
+    def run_task(self, site, task):
 
         site_only = {'site': site}
 
@@ -303,7 +145,7 @@ class TasksManager():
             'Rclone_push_rtmc': {
                 'func': rclone_move_data,
                 'args': {
-                    'site':site, 'stream':'RTMC', 'service':'cloudstor',
+                    'site':site, 'stream':'rtmc', 'service':'cloudstor',
                     'which_way':'push'
                     }
                 },
@@ -319,7 +161,7 @@ class TasksManager():
             'Rclone_push_rtmc_rdm': {
                 'func': rclone_move_data,
                 'args': {
-                    'site':site, 'stream':'RTMC', 'service':'nextcloud',
+                    'site':site, 'stream':'rtmc', 'service':'nextcloud',
                     'which_way':'push'
                     }
                 },
@@ -332,7 +174,7 @@ class TasksManager():
             }
 
         sub_dict = tasks_dict[task]
-        return sub_dict['func'](**sub_dict['args'])
+        sub_dict['func'](**sub_dict['args'])
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -410,7 +252,7 @@ def parse_task(task, site):
     logger = _set_logger(site=site, task=task)
     logger.info(f'Running task "{task}" for site {site}')
     try:
-        tasks.run_task(site=site, task_string=task)
+        tasks.run_task(site=site, task=task)
     except Exception as e:
         logging.info('Task failed with the following error: {}'.format(e))
     logger.info('Task complete\n')
@@ -423,7 +265,7 @@ if __name__=='__main__':
 
     tasks = TasksManager()
     task = sys.argv[1]
-    site_list = tasks.get_site_list_for_task(task_string=task)
+    site_list = tasks.get_site_list_for_task(task=task)
     try:
         site = sys.argv[2]
         if site in site_list:

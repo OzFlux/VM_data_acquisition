@@ -196,7 +196,7 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
             run_list=obj.move_dict[which_way],
             timeout=60
             )
-        logging.info(rslt.stdout)
+        logging.info(rslt.stdout.decode())
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
         logging.error(e)
         logging.error('Move failed!')
