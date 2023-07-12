@@ -30,7 +30,7 @@ ARGS_LIST = [
     '48', '--timeout', '0'
     ]
 ALLOWED_STREAMS = ['flux_slow', 'flux_fast', 'rtmc']
-ALLOWED_SERVICES = ['nextcloud', 'owncloud']
+ALLOWED_SERVICES = ['nextcloud', 'cloudstor']
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
@@ -77,21 +77,31 @@ class RcloneTransferConfig():
                 '"stream" kwarg must be one of {}'
                 .format(', '.join(ALLOWED_STREAMS))
                 )
-        self.app_path = PATHS.get_application_path(application='rclone')
+        self.app_path = PATHS.get_application_path(application='rclone', as_str=True)
         self.site = site
         self.stream = stream
         self.service = service
         self.args_list = self._build_args(exclude_dirs=exclude_dirs)
         self.local_path = PATHS.get_local_path(
-            site=site, resource='data', stream=stream
+            site=site, resource='data', stream=stream,
             )
         self.remote_path = PATHS.get_remote_path(
-            resource=service, stream=stream, site=site
+            resource=service, stream=stream, site=site, as_str=True
             )
+        self.move_dict = {
+            'push': (
+                [self.app_path] + self.args_list +
+                [self.local_path, self.remote_path]
+                ),
+            'pull': (
+                [self.app_path] + self.args_list +
+                [self.remote_path, self.local_path]
+                )
+            }
 
     def _build_args(self, exclude_dirs):
         """
-        Append the list of exzcluded directories to the end of the rclone
+        Append the list of excluded directories to the end of the rclone
         arguments list.
 
         Parameters
@@ -124,140 +134,10 @@ class RcloneTransferConfig():
         return this_list
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def check_local_exists(self):
-        """
-        Check if local directory exists.
-
-        Raises
-        ------
-        FileNotFoundError
-            Raised if local directory doesn't exist.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        if not self.local_path.exists():
-            raise FileNotFoundError(
-                f'Local directory {self.local_path} does not exist!'
-                )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def check_remote_exists(self):
-        """
-        Check if remote directory exists.
-
-        Raises
-        ------
-        FileNotFoundError
-            Raised if remote directory doesn't exist.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        rslt = spc.run(
-            [str(self.app_path), 'lsd', str(self.remote_path)],
-            capture_output=True,
-            )
-        try:
-            rslt.check_returncode()
-        except spc.CalledProcessError:
-            raise FileNotFoundError(
-                f'Remote directory {self.remote_path} does not exist! '
-                f'Return code: {str(rslt.returncode)}; \n'
-                f'nDetails: {rslt.stderr.decode()}'
-                )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def pull_list(self):
-        """
-        Construct the list of strings to pass to rclone subprocess
-        (push from local to remote).
-
-        Returns
-        -------
-        list
-            The list.
-
-        """
-
-        return (
-            [str(self.app_path)] + self.args_list +
-            [str(self.remote_path), str(self.local_path)]
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def push_list(self):
-        """
-        Construct the list of strings to pass to rclone subprocess
-        (pull from remote to local).
-
-        Returns
-        -------
-        list
-            The list.
-
-        """
-
-        return (
-            [str(self.app_path)] + self.args_list +
-            [str(self.local_path), str(self.remote_path)]
-            )
-    #--------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def push_data_cloudstor(site, stream, exclude_dirs=None):
-    """Convenience function for move_data"""
-
-    move_data(
-        site=site, stream=stream, service='cloudstor', which_way='push',
-        exclude_dirs=exclude_dirs
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def pull_data_cloudstor(site, stream, exclude_dirs=None):
-    """Convenience function for move_data"""
-
-    move_data(
-        site=site, stream=stream, service='cloudstor', which_way='pull',
-        exclude_dirs=exclude_dirs
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def push_data_rdm(site, stream, exclude_dirs=None):
-    """Convenience function for move_data"""
-
-    move_data(
-        site=site, stream=stream, service='nextcloud', which_way='push',
-        exclude_dirs=exclude_dirs
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def pull_data_rdm(site, stream, exclude_dirs=None):
-    """Convenience function for move_data"""
-
-    move_data(
-        site=site, stream=stream, service='nextcloud', which_way='pull',
-        exclude_dirs=exclude_dirs
-        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -295,26 +175,41 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
         f'Begin {which_way} of data stream "{stream}" for site "{site}":'
         )
     obj = RcloneTransferConfig(site=site, stream=stream, service=service)
-    logging.info(
-        'Checking for valid local and remote directories...'
-        )
+    logging.info('Copying now...\n Checking local and remote directories...')
+    if not obj.local_path.exists:
+        msg = f'Local file {str(obj.local_path)} does not exist!'
+        logging.error(msg); raise FileNotFoundError(msg)
+    logging.info('    -> local directory valid')
     try:
-        obj.check_local_exists()
-        logging.info('Found valid local directory!')
-        obj.check_remote_exists()
-        logging.info('Found valid remote directory!')
-    except FileNotFoundError as e:
-        logging.error(e); raise
-    logging.info('Copying now...')
-    move_list = obj.push_list() if which_way == 'push' else obj.pull_list()
-    rslt = spc.Popen(move_list, stdout=spc.PIPE, stderr=spc.STDOUT)
-    (out, err) = rslt.communicate()
-    if out:
-        logging.info(out.decode())
-        logging.info('Copy complete')
-    if err:
-        logging.error(err.decode())
-        logging.error('Copying failed')
+        _run_subprocess(
+            run_list=[obj.app_path, 'lsd', str(obj.remote_path)],
+            timeout=10
+            )
+    except (spc.TimeoutExpired, spc.CalledProcessError) as e:
+        logging.error(e)
+        logging.error('Move failed!')
+        raise
+    logging.info('    -> remote location valid')
+    logging.info('Moving data...')
+    try:
+        rslt = _run_subprocess(
+            run_list=obj.move_dict[which_way],
+            timeout=60
+            )
+        logging.info(rslt.stdout)
+    except (spc.TimeoutExpired, spc.CalledProcessError) as e:
+        logging.error(e)
+        logging.error('Move failed!')
+        raise
+    logging.info('Move succeeded')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _run_subprocess(run_list, timeout=5):
+
+    return spc.run(
+        run_list, capture_output=True, timeout=timeout, check=True
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

@@ -11,11 +11,20 @@ from pytz import timezone
 from timezonefinder import TimezoneFinder
 
 #------------------------------------------------------------------------------
+### CONSTANTS ###
+#------------------------------------------------------------------------------
+
+CO2_MOL_MASS = 44
+H2O_MOL_MASS = 18
+K = 273.15
+R = 8.3143
+
+#------------------------------------------------------------------------------
 ### CLASSES ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class time_functions():
+class TimeFunctions():
 
     def __init__(self, lat, lon, elev, date):
 
@@ -77,7 +86,30 @@ class time_functions():
 def convert_co2(data, from_units='mg/m^2/s'):
 
     if from_units == 'mg/m^2/s':
-        return data * 1000 / 44
+        return data * 1000 / CO2_MOL_MASS
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def convert_CO2_density(data, from_units='mmol/m^3'):
+
+    if from_units == 'mmol/m^3':
+        return data * CO2_MOL_MASS
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def convert_H2O_density(data, from_units='mmol/m^3'):
+
+    if from_units == 'mmol/m^3':
+        return data * H2O_MOL_MASS / 10**3
+    if from_units == 'kg/m^3':
+        return data * 10**3
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def convert_pressure(data, from_units='Pa'):
+
+    if from_units == 'Pa':
+        return data / 10**3
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -88,10 +120,22 @@ def convert_RH(data, from_units='frac'):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def convert_temperature(data, from_units='K'):
+
+    if from_units == 'K':
+        return data - K
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def convert_variable(variable):
 
     conversions_dict = {'Fco2': convert_co2,
-                        'RH': convert_RH}
+                        'RH': convert_RH,
+                        'CO2': convert_CO2_density,
+                        'AH_IRGA': convert_H2O_density,
+                        'AH_sensor': convert_H2O_density,
+                        'Ta': convert_temperature,
+                        'ps': convert_pressure}
     return conversions_dict[variable]
 #------------------------------------------------------------------------------
 
@@ -100,7 +144,7 @@ def calculate_AH_from_RH(**kwargs):
 
     return (
         calculate_e(Ta=kwargs['Ta'], RH=kwargs['RH']) / kwargs['ps'] *
-        calculate_molar_density(Ta=kwargs['Ta'], ps=kwargs['ps']) * 18
+        calculate_molar_density(Ta=kwargs['Ta'], ps=kwargs['ps']) * H2O_MOL_MASS
         )
 #------------------------------------------------------------------------------
 
@@ -109,7 +153,7 @@ def calculate_CO2_density(**kwargs):
 
     return (
         kwargs['CO2'] / 10**3 *
-        calculate_molar_density(Ta=kwargs['Ta'], ps=kwargs['ps']) * 44
+        calculate_molar_density(Ta=kwargs['Ta'], ps=kwargs['ps']) * CO2_MOL_MASS
         )
 #------------------------------------------------------------------------------
 
@@ -117,7 +161,7 @@ def calculate_CO2_density(**kwargs):
 def calculate_CO2_mole_fraction(**kwargs):
 
     return (
-        (kwargs['CO2_density'] / 44) /
+        (kwargs['CO2_density'] / CO2_MOL_MASS) /
         calculate_molar_density(Ta=kwargs['Ta'], ps=kwargs['ps']) * 10**3
         )
 #------------------------------------------------------------------------------
@@ -137,7 +181,7 @@ def calculate_es(**kwargs):
 #------------------------------------------------------------------------------
 def calculate_molar_density(**kwargs):
 
-    return kwargs['ps'] * 1000 / ((kwargs['Ta'] + 273.15) * 8.3143)
+    return kwargs['ps'] * 1000 / ((kwargs['Ta'] + K) * R)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -152,6 +196,12 @@ def calculate_RH_from_AH(**kwargs):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def calculate_ustar_from_tau_rho(**kwargs):
+
+    return abs(kwargs['tau']) / kwargs['rho']
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def get_timezone(lat, lon):
     """Get the timezone (as region/city)"""
 
@@ -161,7 +211,6 @@ def get_timezone(lat, lon):
 
 #------------------------------------------------------------------------------
 def get_timezone_utc_offset(tz, date, dst=False):
-
     """Get the UTC offset (local standard or daylight)"""
 
     tz_obj = timezone(tz)
@@ -187,21 +236,27 @@ def get_function(variable):
 #------------------------------------------------------------------------------
 def calculate_variable_from_std_frame(variable, df):
 
-    args_dict = {'es': ['Ta'],
-                 'e': ['Ta', 'RH'],
-                 'AH_sensor': ['Ta', 'RH', 'ps'],
-                 'molar_density': ['Ta', 'ps'],
-                 'CO2_mole_fraction': ['CO2_density', 'Ta', 'ps'],
-                 'RH': ['Ta', 'AH_sensor', 'ps'],
-                 'CO2_density': ['Ta', 'ps', 'CO2']}
+    args_dict = {
+        'es': ['Ta'],
+        'e': ['Ta', 'RH'],
+        'AH_sensor': ['Ta', 'RH', 'ps'],
+        'molar_density': ['Ta', 'ps'],
+        'CO2_mole_fraction': ['CO2_density', 'Ta', 'ps'],
+        'RH': ['Ta', 'AH_sensor', 'ps'],
+        'CO2_density': ['Ta', 'ps', 'CO2'],
+        'ustar': ['Tau', 'rho']
+        }
 
-    func_dict = {'es': calculate_es,
-                 'e': calculate_e,
-                 'AH_sensor': calculate_AH_from_RH,
-                 'molar_density': calculate_molar_density,
-                 'CO2_mole_fraction': calculate_CO2_mole_fraction,
-                 'RH': calculate_RH_from_AH,
-                 'CO2_density': calculate_CO2_density}
+    func_dict = {
+        'es': calculate_es,
+        'e': calculate_e,
+        'AH_sensor': calculate_AH_from_RH,
+        'molar_density': calculate_molar_density,
+        'CO2_mole_fraction': calculate_CO2_mole_fraction,
+        'RH': calculate_RH_from_AH,
+        'CO2_density': calculate_CO2_density,
+        'ustar': calculate_ustar_from_tau_rho
+        }
 
     func = func_dict[variable]
     args = {arg: df[arg] for arg in args_dict[variable]}

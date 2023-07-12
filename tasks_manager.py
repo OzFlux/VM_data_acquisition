@@ -32,7 +32,7 @@ import rclone_transfer as rt
 ### INITIALISATION ###
 #------------------------------------------------------------------------------
 
-PATHS = pm.paths()
+PathsManager = pm.paths()
 log_byte_limit = 10**6
 
 #------------------------------------------------------------------------------
@@ -45,7 +45,8 @@ def _set_logger(site, task):
     """Create logger and send output to file"""
 
     logger_write_path = (
-        PATHS.get_local_path(resource='logs', site=site) / f'{site}_{task}.txt'
+        PathsManager.get_local_path(
+            resource='logs', site=site) / f'{site}_{task}.txt'
         )
     this_logger = logging.getLogger()
     this_logger.setLevel(logging.INFO)
@@ -84,7 +85,7 @@ class TasksManager():
         """
 
         return pd.read_excel(
-            PATHS.get_local_path(resource='xl_variable_map'),
+            PathsManager.get_local_path(resource='xl_variable_map'),
             sheet_name='Tasks', index_col='Site'
             )
     #--------------------------------------------------------------------------
@@ -250,7 +251,7 @@ class TasksManager():
             'Rclone_push_fast': {
                 'function': self.rclone_push_data, 'stream': 'flux_fast'
                 },
-            'Rclone_push_RTMC': {
+            'Rclone_push_rtmc': {
                 'function': self.rclone_push_data, 'stream': 'RTMC'
                 },
             'Rclone_push_slow_rdm': {
@@ -269,6 +270,133 @@ class TasksManager():
             task_function(site=site)
     #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
+    def run_a_task(self, site, task):
+
+        site_only = {'site': site}
+
+        tasks_dict = {
+
+            'generate_L1_excel': {
+                'func': generate_L1_excel,
+                'args': site_only
+                },
+
+            'generate_merged_file': {
+                'func': generate_merged_file,
+                'args': site_only
+                },
+
+            'generate_site_details_file': {
+                'func': generate_site_details_file,
+                'args': site_only
+                },
+
+            'Rclone_push_slow': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'flux_slow', 'service':'cloudstor',
+                    'which_way':'push'
+                    }
+                },
+
+            'Rclone_push_rtmc': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'RTMC', 'service':'cloudstor',
+                    'which_way':'push'
+                    }
+                },
+
+            'Rclone_push_slow_rdm': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'flux_slow', 'service':'nextcloud',
+                    'which_way':'push'
+                    }
+                },
+
+            'Rclone_push_rtmc_rdm': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'RTMC', 'service':'nextcloud',
+                    'which_way':'push'
+                    }
+                },
+
+            'reformat_10Hz': {
+                'func': reformat_10Hz_data,
+                'args': site_only
+                }
+
+            }
+
+        sub_dict = tasks_dict[task]
+        return sub_dict['func'](**sub_dict['args'])
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+### FUNCTIONS ###
+
+#------------------------------------------------------------------------------
+def generate_L1_excel(**kwargs):
+
+    constructor = cf.L1Constructor(site=kwargs['site'])
+    constructor.write_to_excel()
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def generate_merged_file(**kwargs):
+    """
+    Pull data from downloaded tables and merge into single table with
+    standard names for variables. Used for RTMC plotting.
+
+    Parameters
+    ----------
+    site : str
+        Site name.
+
+    """
+
+    merger = cf.TableMerger(site=kwargs['site'])
+    merger.make_output_file()
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def generate_site_details_file(**kwargs):
+    """
+    Create the file containing the site information in dummy TOA5 format,
+    and write to the appropriate directory.
+
+    Parameters
+    ----------
+    site : str
+        Site name.
+
+    """
+
+    cf.make_site_info_TOA5(site=kwargs['site'])
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def rclone_move_data(**kwargs):
+
+    exclude_dirs = ['TMP'] if kwargs['stream'] == 'flux_fast' else None
+    rt.move_data(
+        site=kwargs['site'],
+        stream=kwargs['stream'],
+        service=kwargs['service'],
+        which_way=kwargs['which_way'],
+        exclude_dirs=exclude_dirs
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def reformat_10Hz_data(**kwargs):
+
+    ptd.main(site=kwargs['site'])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
