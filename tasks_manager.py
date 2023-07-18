@@ -142,6 +142,14 @@ class TasksManager():
                     }
                 },
 
+            'Rclone_pull_slow': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'flux_slow', 'service':'cloudstor',
+                    'which_way':'pull'
+                    }
+                },
+
             'Rclone_push_rtmc': {
                 'func': rclone_move_data,
                 'args': {

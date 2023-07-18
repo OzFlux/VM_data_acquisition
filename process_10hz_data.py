@@ -12,11 +12,11 @@ To do:
 """
 
 import datetime as dt
+import hashlib
 import logging
 import numpy as np
 import subprocess as spc
 import sys
-import pdb
 
 import paths_manager as pm
 sys.path.append('../site_details')
@@ -36,6 +36,14 @@ CCF_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0',
             'ConvertNew': '0'}
 FILENAME_FORMAT = {'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4,
                    'Day': 5}
+OPERATIONAL_SITES = DETAILS.get_operational_sites().index.tolist()
+RAW_FILENAME_FORMAT = ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day']
+PROC_FILENAME_FORMAT = RAW_FILENAME_FORMAT.copy().append('HrMin')
+FILENAME_FORMAT_B = {
+    'TOB3': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day'],
+    'TOA5': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day', 'HrMin']
+    }
+TIME_FORMAT = {'TOB3': '%Y,%m,%d', 'TOA5': '%Y,%m,%d,%H%M'}
 ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
 #------------------------------------------------------------------------------
 
@@ -54,11 +62,10 @@ class generic_handler():
         self.stream = 'flux_fast' if not 'Under' in site else 'flux_fast_aux'
         self.site = site.replace('Under', '')
         site_details = DETAILS.get_single_site_details(site=self.site)
-        intvl = str(int(
+        self.interval = str(int(
             1000 / int(site_details.freq_hz)
             )) + 'ms'
         self.time_step = site_details.time_step
-        self.interval = intvl
         self.raw_data_path = PATHS.get_local_path(
             resource='data', stream=self.stream, subdirs=['TMP'],
             site=self.site
@@ -156,7 +163,57 @@ class raw_file_handler(generic_handler):
             resource='data', stream=self.stream, subdirs=['TOB3'],
             site=self.site
             )
+        self.archived_files = [
+            file for file in self.destination_base_path.rglob('TOB3*.dat')
+            ]
     #--------------------------------------------------------------------------
+
+    #------------------------------------------------------------------------------
+    def check_file_format(self, file):
+
+        # Parse file name elements into dictionary
+        elems = file.stem.split('_')
+        fmt = elems[0]
+        elems_list = FILENAME_FORMAT_B[fmt]
+        elems_dict = dict(zip(elems_list, elems))
+        elems_dict.update({'Ext': file.suffix})
+
+        # Raise error if problem, otherwise return none
+        try:
+
+            # Check critical non-time elements are valid
+            assert(elems_dict['Site'] in OPERATIONAL_SITES)
+            assert(elems_dict['Freq'] == self.interval)
+            assert(elems_dict['Ext'] == '.dat')
+
+            # Check critical time elements are valid
+            dt.datetime.strptime(
+                ','.join(elems_dict[elem] for elem in elems_list[3:]),
+                TIME_FORMAT[elems_dict['Format']]
+                )
+
+        except (AssertionError, TypeError, ValueError) as e:
+
+            raise RuntimeError('Invalid file format!') from e
+
+    def check_file_is_duplicate(self, file):
+
+        out_path = (
+            self.destination_base_path /
+            self._dir_from_file(file=file.name) /
+            file.name
+            )
+        if not out_path.exists():
+            return False
+        test_file_hash = get_hash(file=file)
+        archive_file_hash = get_hash(file=out_path)
+        if test_file_hash == archive_file_hash:
+            return True
+        raise RuntimeError(
+            f'File {file.name} in {self.raw_data_path} exists in archive, but '
+            'hashes do not match!'
+            )
+    #------------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def check_files(self):
@@ -491,6 +548,27 @@ class processed_file_handler(generic_handler):
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def check_raw_file(file):
+
+    allowed_dict = {'Site': DETAILS.get_operational_sites().index.tolist()}
+    parts, ext = file.stem.split('_'), file.suffix
+    parts_dict = dict(zip(RAW_FILENAME_FORMAT.keys(), parts))
+    # for part in parts_dict[:3]:
+
+
+    breakpoint()
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_hash(file):
+
+    with open(file, 'rb') as f:
+        the_bytes=f.read()
+        return hashlib.sha256(the_bytes).hexdigest()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

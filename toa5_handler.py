@@ -1280,12 +1280,12 @@ def _write_TOA5_from_df(df, headers, dest):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_index_interval(idx):
+def get_index_interval(idx, divisor=15):
 
     diffs = (idx[1:] - idx[:-1]).unique()
     return (
         pd.TimedeltaIndex(
-            filter(lambda x: np.mod(x.components.minutes, 30) == 0, diffs)
+            filter(lambda x: np.mod(x.components.minutes, divisor) == 0, diffs)
             )
         .min()
         .components.minutes
