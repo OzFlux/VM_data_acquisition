@@ -24,6 +24,7 @@ import paths_manager as pm
 #------------------------------------------------------------------------------
 
 PATHS = pm.paths()
+APP_PATH = PATHS.get_application_path(application='rclone', as_str=True)
 REMOTE_ALIAS_DICT = {'AliceSpringsMulga': 'AliceMulga'}
 ARGS_LIST = [
     'copy', '--transfers', '36', '--progress', '--checksum', '--checkers',
@@ -77,7 +78,6 @@ class RcloneTransferConfig():
                 '"stream" kwarg must be one of {}'
                 .format(', '.join(ALLOWED_STREAMS))
                 )
-        self.app_path = PATHS.get_application_path(application='rclone', as_str=True)
         self.site = site
         self.stream = stream
         self.service = service
@@ -85,16 +85,20 @@ class RcloneTransferConfig():
         self.local_path = PATHS.get_local_path(
             site=site, resource='data', stream=stream,
             )
+        try:
+            remote_site_name = REMOTE_ALIAS_DICT[site]
+        except KeyError:
+            remote_site_name = site
         self.remote_path = PATHS.get_remote_path(
-            resource=service, stream=stream, site=site, as_str=True
+            resource=service, stream=stream, site=remote_site_name, as_str=True
             )
         self.move_dict = {
             'push': (
-                [self.app_path] + self.args_list +
+                [APP_PATH] + self.args_list +
                 [self.local_path, self.remote_path]
                 ),
             'pull': (
-                [self.app_path] + self.args_list +
+                [APP_PATH] + self.args_list +
                 [self.remote_path, self.local_path]
                 )
             }
@@ -177,24 +181,21 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
     obj = RcloneTransferConfig(site=site, stream=stream, service=service)
     logging.info('Copying now...\n Checking local and remote directories...')
     if not obj.local_path.exists:
-        msg = f'Local file {str(obj.local_path)} does not exist!'
+        msg = f'    -> local file {str(obj.local_path)} is not valid!'
         logging.error(msg); raise FileNotFoundError(msg)
-    logging.info('    -> local directory valid')
+    logging.info(f'    -> local directory {obj.local_path} is valid')
     try:
-        _run_subprocess(
-            run_list=[obj.app_path, 'lsd', str(obj.remote_path)],
-            timeout=10
-            )
+        check_remote_available(str(obj.remote_path))
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
         logging.error(e)
-        logging.error('Move failed!')
+        logging.error(f'    -> remote location {str(obj.local_path)} is not valid!')
         raise
-    logging.info('    -> remote location valid')
+    logging.info(f'    -> remote location {str(obj.remote_path)} is valid')
     logging.info('Moving data...')
     try:
         rslt = _run_subprocess(
             run_list=obj.move_dict[which_way],
-            timeout=60
+            timeout=120
             )
         logging.info(rslt.stdout.decode())
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
@@ -205,6 +206,15 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def check_remote_available(remote_path):
+
+    _run_subprocess(
+        run_list=[APP_PATH, 'lsd', str(remote_path)],
+        timeout=30
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def _run_subprocess(run_list, timeout=5):
 
     return spc.run(
@@ -212,131 +222,131 @@ def _run_subprocess(run_list, timeout=5):
         )
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def rclone_pull_data(site, stream):
-    """
-    Pull data from Cloudstor to local folders. Currently limited to slow
-    data.
+# #------------------------------------------------------------------------------
+# def rclone_pull_data(site, stream):
+#     """
+#     Pull data from Cloudstor to local folders. Currently limited to slow
+#     data.
 
-    Parameters
-    ----------
-    site : str
-        Site name.
-    stream : str
-        The data stream to pull (limited to flux_slow, flux_fast and
-                                 RTMC).
+#     Parameters
+#     ----------
+#     site : str
+#         Site name.
+#     stream : str
+#         The data stream to pull (limited to flux_slow, flux_fast and
+#                                  RTMC).
 
-    """
+#     """
 
-    logging.info(f'Begin pull of data stream "{stream}" for site "{site}"')
-    from_remote = PATHS.get_remote_path(
-        resource='cloudstor', stream=stream, site=site
-        )
-    logging.info('Pulling from remote directory: {}'.format(str(from_remote)))
-    to_local = PATHS.get_local_path(
-        resource='data', stream=stream, site=site, check_exists=True
-        )
-    logging.info('Pulling to local directory: {}'.format(str(to_local)))
-    _rclone_push_pull_generic(
-        source_dir=str(from_remote), target_dir=str(to_local),
-        exclude_dirs=[]
-        )
-#------------------------------------------------------------------------------
+#     logging.info(f'Begin pull of data stream "{stream}" for site "{site}"')
+#     from_remote = PATHS.get_remote_path(
+#         resource='cloudstor', stream=stream, site=site
+#         )
+#     logging.info('Pulling from remote directory: {}'.format(str(from_remote)))
+#     to_local = PATHS.get_local_path(
+#         resource='data', stream=stream, site=site, check_exists=True
+#         )
+#     logging.info('Pulling to local directory: {}'.format(str(to_local)))
+#     _rclone_push_pull_generic(
+#         source_dir=str(from_remote), target_dir=str(to_local),
+#         exclude_dirs=[]
+#         )
+# #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def rclone_push_data(site, stream):
-    """
-    Push data from local to Cloudstor folders.
+# #------------------------------------------------------------------------------
+# def rclone_push_data(site, stream):
+#     """
+#     Push data from local to Cloudstor folders.
 
-    Parameters
-    ----------
-    site : str
-        Site name.
-    stream : str
-        The data stream to push (limited to flux_slow, flux_fast and
-                                 RTMC).
+#     Parameters
+#     ----------
+#     site : str
+#         Site name.
+#     stream : str
+#         The data stream to push (limited to flux_slow, flux_fast and
+#                                  RTMC).
 
-    """
+#     """
 
-    logging.info(f'Begin push of data stream "{stream}" for site "{site}"')
-    exclude_dict = {'flux_fast': 'TMP'}
-    use_site = site if not site in REMOTE_ALIAS_DICT else REMOTE_ALIAS_DICT[site]
-    to_remote = PATHS.get_remote_path(
-        resource='cloudstor', stream=stream, site=use_site
-        )
-    logging.info('Pushing to remote directory: {}'.format(str(to_remote)))
-    from_local = PATHS.get_local_path(
-        resource='data', stream=stream, site=site, check_exists=True
-        )
-    logging.info('Pushing from local directory: {}'.format(str(from_local)))
-    exclude_dirs = (
-        [] if not stream in exclude_dict else list(exclude_dict[stream])
-        )
-    _rclone_push_pull_generic(
-        source_dir=str(from_local), target_dir=str(to_remote),
-        exclude_dirs=exclude_dirs
-        )
-#------------------------------------------------------------------------------
+#     logging.info(f'Begin push of data stream "{stream}" for site "{site}"')
+#     exclude_dict = {'flux_fast': 'TMP'}
+#     use_site = site if not site in REMOTE_ALIAS_DICT else REMOTE_ALIAS_DICT[site]
+#     to_remote = PATHS.get_remote_path(
+#         resource='cloudstor', stream=stream, site=use_site
+#         )
+#     logging.info('Pushing to remote directory: {}'.format(str(to_remote)))
+#     from_local = PATHS.get_local_path(
+#         resource='data', stream=stream, site=site, check_exists=True
+#         )
+#     logging.info('Pushing from local directory: {}'.format(str(from_local)))
+#     exclude_dirs = (
+#         [] if not stream in exclude_dict else list(exclude_dict[stream])
+#         )
+#     _rclone_push_pull_generic(
+#         source_dir=str(from_local), target_dir=str(to_remote),
+#         exclude_dirs=exclude_dirs
+#         )
+# #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _rclone_push_pull_generic(source_dir, target_dir, exclude_dirs):
+# #------------------------------------------------------------------------------
+# def _rclone_push_pull_generic(source_dir, target_dir, exclude_dirs):
 
-    # Set path to rclone
-    app_str = PATHS.get_application_path(
-        application='rclone', check_exists=True, as_str=True
-        )
+#     # Set path to rclone
+#     app_str = PATHS.get_application_path(
+#         application='rclone', check_exists=True, as_str=True
+#         )
 
-    # Set remote and local directories
-    if 'cloudstor' in target_dir:
-        remote = target_dir
-        local = source_dir
-    elif 'cloudstor' in source_dir:
-        remote = source_dir
-        local = target_dir
-    else:
-        msg = (
-            'One of either the source or target directory must be a valid '
-            'cloudstor location'
-            )
-        logging.error(msg); raise RuntimeError
+#     # Set remote and local directories
+#     if 'cloudstor' in target_dir:
+#         remote = target_dir
+#         local = source_dir
+#     elif 'cloudstor' in source_dir:
+#         remote = source_dir
+#         local = target_dir
+#     else:
+#         msg = (
+#             'One of either the source or target directory must be a valid '
+#             'cloudstor location'
+#             )
+#         logging.error(msg); raise RuntimeError
 
-    # Check remote exists
-    logging.info('Checking remote directory is valid...')
-    rslt = spc.run([app_str, 'lsd', remote], capture_output=True)
-    try:
-        rslt.check_returncode()
-    except spc.CalledProcessError:
+#     # Check remote exists
+#     logging.info('Checking remote directory is valid...')
+#     rslt = spc.run([app_str, 'lsd', remote], capture_output=True)
+#     try:
+#         rslt.check_returncode()
+#     except spc.CalledProcessError:
 
-        msg = (
-            'Check failed! Return code: {0};\nDetails: {1}'
-            .format(str(rslt.returncode), rslt.stderr.decode())
-            )
-        logging.error(msg); raise
-    logging.info('Found valid remote directory!')
+#         msg = (
+#             'Check failed! Return code: {0};\nDetails: {1}'
+#             .format(str(rslt.returncode), rslt.stderr.decode())
+#             )
+#         logging.error(msg); raise
+#     logging.info('Found valid remote directory!')
 
-    # Check local exists
-    logging.info('Checking local directory is valid...')
-    if not pathlib.Path(local).exists:
-        msg = 'Check failed! Local directory not found!'
-        logging.error(msg); raise FileNotFoundError(msg)
-    logging.info('Found valid local directory!')
+#     # Check local exists
+#     logging.info('Checking local directory is valid...')
+#     if not pathlib.Path(local).exists:
+#         msg = 'Check failed! Local directory not found!'
+#         logging.error(msg); raise FileNotFoundError(msg)
+#     logging.info('Found valid local directory!')
 
-    # Do copy
-    logging.info('Copying now...')
-    exec_list = [
-        'copy', '--transfers', '36', '--progress', '--checksum',
-        '--checkers', '48', '--timeout', '0'
-        ]
-    if exclude_dirs:
-        for this_dir in exclude_dirs:
-            exec_list.append('--exclude')
-            exec_list.append(str(pathlib.Path('{}/**'.format(this_dir))))
-    exec_list = [app_str] + exec_list + [source_dir, target_dir]
-    rslt = spc.Popen(exec_list, stdout=spc.PIPE, stderr=spc.STDOUT)
-    (out, err) = rslt.communicate()
-    if out:
-        logging.info(out.decode())
-        logging.info('Copy complete')
-    if err:
-        logging.error(err.decode())
-#------------------------------------------------------------------------------
+#     # Do copy
+#     logging.info('Copying now...')
+#     exec_list = [
+#         'copy', '--transfers', '36', '--progress', '--checksum',
+#         '--checkers', '48', '--timeout', '0'
+#         ]
+#     if exclude_dirs:
+#         for this_dir in exclude_dirs:
+#             exec_list.append('--exclude')
+#             exec_list.append(str(pathlib.Path('{}/**'.format(this_dir))))
+#     exec_list = [app_str] + exec_list + [source_dir, target_dir]
+#     rslt = spc.Popen(exec_list, stdout=spc.PIPE, stderr=spc.STDOUT)
+#     (out, err) = rslt.communicate()
+#     if out:
+#         logging.info(out.decode())
+#         logging.info('Copy complete')
+#     if err:
+#         logging.error(err.decode())
+# #------------------------------------------------------------------------------

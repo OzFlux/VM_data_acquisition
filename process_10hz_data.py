@@ -34,12 +34,8 @@ CCF_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0',
             'CSVOptions': '6619599', 'BaleStart': '38718',
             'BaleInterval': '32875', 'DOY': '0', 'Append': '0',
             'ConvertNew': '0'}
-FILENAME_FORMAT = {'Format': 0, 'Site': 1, 'Freq': 2, 'Year': 3, 'Month': 4,
-                   'Day': 5}
 OPERATIONAL_SITES = DETAILS.get_operational_sites().index.tolist()
-RAW_FILENAME_FORMAT = ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day']
-PROC_FILENAME_FORMAT = RAW_FILENAME_FORMAT.copy().append('HrMin')
-FILENAME_FORMAT_B = {
+FILENAME_FORMAT = {
     'TOB3': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day'],
     'TOA5': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day', 'HrMin']
     }
@@ -52,13 +48,13 @@ ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class generic_handler():
+class GenericHandler():
     """Base class that sets attributes and file format checking methods"""
 
     #--------------------------------------------------------------------------
     def __init__(self, site):
 
-        self.file_site_name = site
+        self.site_name = site
         self.stream = 'flux_fast' if not 'Under' in site else 'flux_fast_aux'
         self.site = site.replace('Under', '')
         site_details = DETAILS.get_single_site_details(site=self.site)
@@ -70,89 +66,47 @@ class generic_handler():
             resource='data', stream=self.stream, subdirs=['TMP'],
             site=self.site
             )
-        self.checks_flag = False
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _check_file_name_format(self, file, expected_format):
-        """
-        Check the file format conforms to expected convention.
+    def check_file_name_format(self, file):
 
-        Parameters
-        ----------
-        file : str
-            The file name to check.
-        expected_format : str
-            Sets whether the format to check for is TOB3 (raw) or TOA5.
+        # Parse file name elements into dictionary
+        elems = file.stem.split('_')
+        fmt = elems[0]
+        elem_names = FILENAME_FORMAT[fmt]
+        elems_dict = dict(zip(elem_names, elems))
+        elems_dict.update({'Ext': file.suffix})
 
-        Raises
-        ------
-        RuntimeError
-            Raised if number of elements following split (based on '_') is wrong.
-        TypeError
-            Raised if time or other critical elements are not what is expected.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        # initialisations
-        gen_err_str = (
-            'Integrity check for file {file} failed with the following error: {}'
-            )
-
-        # Initialise formatters
-        format_dict = FILENAME_FORMAT.copy()
-        time_elem_list = ['Year', 'Month', 'Day']
-        time_fmt = '%Y_%m_%d'
-        if expected_format == 'TOA5':
-            format_dict.update({'HrMin': 6})
-            time_fmt += '_%H%M'
-            time_elem_list.append('HrMin')
-
-        # Split file format to dict for comparison of elements
-        name, ext = file.split('.')
-        elem_list = name.split('_')
-        if not len(elem_list) == len(format_dict):
-            msg = gen_err_str.format('Wrong number of elements in file name!')
-            logging.error(msg) ; raise RuntimeError(msg)
-        elem_dict = {x: elem_list[format_dict[x]] for x in format_dict.keys()}
-        elem_dict.update({'Ext': ext})
-
-        # Make comparison dictionary for expected format
-        ex_dict = {
-            'Format': expected_format, 'Site': self.file_site_name,
-            'Freq': self.interval, 'Ext': 'dat'
-            }
-
-        # Check critical non-time elements
-        for i, this_elem in enumerate(ex_dict.keys()):
-            if not elem_dict[this_elem] == ex_dict[this_elem]:
-                msg = gen_err_str.formay(
-                    'Element "{0}" in file name is not of required format; '
-                    'expected "{1}", got "{2}"'
-                    .format(
-                        this_elem, ex_dict[this_elem], elem_dict[this_elem]
-                        )
-                    )
-                logging.error(msg) ; raise TypeError(msg)
-
-        # Check critical time elements
-        time_string = '_'.join([elem_dict[x] for x in time_elem_list])
+        # Raise error if problem, otherwise return none
         try:
-            dt.datetime.strptime(time_string, time_fmt)
-        except TypeError as e:
-            msg = gen_err_str.format(str(e))
-            logging.error(msg) ; raise
-        logging.info(f'    - {file} passed integrity check!')
+
+            # Check critical non-time elements are valid
+            assert elems_dict['Site'] == self.site
+            assert elems_dict['Freq'] == self.interval
+            assert elems_dict['Ext'] == '.dat'
+
+            # Check critical time elements are valid
+            dt.datetime.strptime(
+                ','.join(elems_dict[elem] for elem in elem_names[3:]),
+                TIME_FORMAT[elems_dict['Format']]
+                )
+
+        except (AssertionError, TypeError, ValueError) as e:
+
+            raise RuntimeError('Invalid file format!') from e
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def remove_file(self, file):
+
+        file.unlink()
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class raw_file_handler(generic_handler):
+class RawFileHandler(GenericHandler):
 
     """Inherits from base class generic_handler and adds methods for raw files"""
     #--------------------------------------------------------------------------
@@ -163,86 +117,52 @@ class raw_file_handler(generic_handler):
             resource='data', stream=self.stream, subdirs=['TOB3'],
             site=self.site
             )
-        self.archived_files = [
-            file for file in self.destination_base_path.rglob('TOB3*.dat')
-            ]
+        self.archived_files = list(
+            self.destination_base_path.rglob('TOB3*.dat')
+            )
     #--------------------------------------------------------------------------
 
-    #------------------------------------------------------------------------------
-    def check_file_format(self, file):
+    #--------------------------------------------------------------------------
+    def check_file_parsed(self, file):
 
-        # Parse file name elements into dictionary
-        elems = file.stem.split('_')
-        fmt = elems[0]
-        elems_list = FILENAME_FORMAT_B[fmt]
-        elems_dict = dict(zip(elems_list, elems))
-        elems_dict.update({'Ext': file.suffix})
-
-        # Raise error if problem, otherwise return none
-        try:
-
-            # Check critical non-time elements are valid
-            assert(elems_dict['Site'] in OPERATIONAL_SITES)
-            assert(elems_dict['Freq'] == self.interval)
-            assert(elems_dict['Ext'] == '.dat')
-
-            # Check critical time elements are valid
-            dt.datetime.strptime(
-                ','.join(elems_dict[elem] for elem in elems_list[3:]),
-                TIME_FORMAT[elems_dict['Format']]
-                )
-
-        except (AssertionError, TypeError, ValueError) as e:
-
-            raise RuntimeError('Invalid file format!') from e
-
-    def check_file_is_duplicate(self, file):
-
-        out_path = (
-            self.destination_base_path /
-            self._dir_from_file(file=file.name) /
-            file.name
-            )
-        if not out_path.exists():
+        destination = self.get_destination_path(file=file)
+        if not destination.exists():
             return False
-        test_file_hash = get_hash(file=file)
-        archive_file_hash = get_hash(file=out_path)
-        if test_file_hash == archive_file_hash:
+        if get_hash(file=file) == get_hash(file=destination):
             return True
         raise RuntimeError(
             f'File {file.name} in {self.raw_data_path} exists in archive, but '
             'hashes do not match!'
             )
-    #------------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def check_files(self):
+    def get_destination_path(self, file):
         """
-        Parses the available raw files (if any) to check whether they have been
-        previously parsed or format is bad.
+        Generate requisite directory from file name.
 
-        Raises
-        ------
-        FileExistsError
-            Raised if file has already been moved to final storage.
+        Parameters
+        ----------
+        file : str
+            File name.
 
         Returns
         -------
-        None.
+        str
+            Dir name.
 
         """
 
-        logging.info('Checking raw file integrity...')
-        existing_list = [
-            file.name for file in self.destination_base_path.rglob('TOB3*.dat')
-            ]
-        for file in self.get_raw_file_list():
-            self._check_file_name_format(file=file.name, expected_format='TOB3')
-            if file.name in existing_list:
-                msg = f'File {file.name} already exists in archive area! Aborting...'
-                logging.error(msg) ; raise FileExistsError(msg)
-        self.checks_flag = True
-        logging.info('Done!')
+        elems = file.stem.split('_')
+        fmt = elems[0]
+        elem_names = FILENAME_FORMAT[fmt]
+        elems_dict = dict(zip(elem_names, elems))
+        return (
+            self.destination_base_path /
+            '_'.join([elems_dict['Year'], elems_dict['Month']]) /
+            file.name
+            )
+        return '_'.join([elems_dict['Year'], elems_dict['Month']])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -262,65 +182,26 @@ class raw_file_handler(generic_handler):
 
         """
 
-        l = list(self.raw_data_path.glob('TOB3*.dat'))
+        l = list(self.raw_data_path.glob(f'TOB3_{self.site}*.dat'))
         if not l:
-            msg = 'No new raw files to parse in target directory'
-            logging.error(msg); raise RuntimeError(msg)
-        return list(self.raw_data_path.glob('TOB3*.dat'))
+            raise RuntimeError('No new raw files to parse in target directory')
+        return l
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def move_data_to_final_storage(self):
-        """
-        Move raw files to final storage
+    def move_file(self, file):
 
-        Returns
-        -------
-        None.
-
-        """
-
-        if not self.checks_flag:
-            return
-        logging.info('Moving raw files')
-        for file in self.get_raw_file_list():
-            dest_subdir = self._dir_from_file(file.name)
-            target_path = self.destination_base_path / dest_subdir
-            if not target_path.exists():
-                target_path.mkdir(parents=True)
-            logging.info(f'    - {str(file)} -> {target_path / file.name}')
-            file.rename(target_path / file.name)
-        logging.info('Move of raw files complete')
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _dir_from_file(self, file):
-        """
-        Generate requisite directory from file name.
-
-        Parameters
-        ----------
-        file : str
-            File name.
-
-        Returns
-        -------
-        str
-            Dir name.
-
-        """
-
-        elem_list = file.split('.')[0].split('_')
-        elem_dict = {
-            x: elem_list[FILENAME_FORMAT[x]] for x in FILENAME_FORMAT
-            }
-        return '_'.join([elem_dict['Year'], elem_dict['Month']])
+        destination = self.get_destination_path(file=file)
+        if not destination.parent.exists():
+            destination.parent.mkdir(parents=True)
+        if not self.check_file_parsed(file=file):
+            file.rename(destination)
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class processed_file_handler(generic_handler):
+class ConvertedFileHandler(GenericHandler):
     """Inherits from base class generic_handler and adds methods for converted
     files"""
 
@@ -328,7 +209,6 @@ class processed_file_handler(generic_handler):
     def __init__(self, site):
 
         super().__init__(site)
-        self.rename_flag = False
         self.destination_base_path = PATHS.get_local_path(
             resource='data', stream=self.stream, subdirs=['TOA5'],
             site=self.site
@@ -336,173 +216,21 @@ class processed_file_handler(generic_handler):
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def check_files(self):
-        """
-        Parses the available processed files to check whether they have been
-        previously parsed or format is bad.
+    def check_file_parsed(self, file):
 
-        Raises
-        ------
-        FileExistsError
-            Raised if file has already been moved to final storage.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        logging.info('Checking formatted file integrity...')
-        existing_list = [
-            file.name for file in self.destination_base_path.rglob('TOA5*.dat')
-            ]
-        for file in self.get_renamed_file_list():
-            self._check_file_name_format(file=file.name, expected_format='TOA5')
-            if file.name in existing_list:
-                msg = 'This file already exists in archive area! Aborting...'
-                logging.error(msg) ; raise FileExistsError(msg)
-        self.checks_flag = True
-        logging.info('Done')
+        destination = self.get_destination_path(file=file)
+        if not destination.exists():
+            return False
+        if get_hash(file=file) == get_hash(file=destination):
+            return True
+        raise RuntimeError(
+            f'File {file.name} in {self.raw_data_path} exists in archive, but '
+            'hashes do not match!'
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_converted_file_list(self):
-        """
-        Check for new processed files in the directory.
-
-        Raises
-        ------
-        RuntimeError
-            Raised if files have already been renamed.
-
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
-
-        """
-
-        if self.rename_flag:
-            msg = 'Files already renamed'
-            logging.error(msg) ; raise RuntimeError(msg)
-        return self.raw_data_path.glob('TOA5_TOB3*.dat')
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_renamed_file_list(self):
-        """
-        Check for new renamed files in the directory.
-
-        Raises
-        ------
-        RuntimeError
-            Raised if files haven't already been renamed.
-
-        Returns
-        -------
-        generator
-            Contains the relevant contents of the directory (all TOA5 files).
-
-        """
-
-        if not self.rename_flag:
-            msg = 'Files not renamed yet!'
-            logging.error(msg) ; raise RuntimeError(msg)
-        return self.raw_data_path.glob('TOA5*.dat')
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def move_data_to_final_storage(self):
-        """
-        Move the processed data to final storage.
-
-        Raises
-        ------
-        RuntimeError
-            Raised if check and rename flags are not high.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        if not self.checks_flag:
-            msg = 'Files not checked yet!'
-            logging.error(msg) ; raise RuntimeError(msg)
-        logging.info('Moving converted files:')
-        for file in self.get_renamed_file_list():
-            dest_subdir_list = self._dir_from_file(file.name)
-            target_path = self.destination_base_path
-            for subdir in dest_subdir_list:
-                target_path = target_path / subdir
-            if not target_path.exists():
-                target_path.mkdir(parents=True)
-            logging.info(f'    - {str(file)} -> {target_path / file.name}')
-            file.rename(target_path / file.name)
-        logging.info('Move of processed files complete')
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _dir_from_file(self, file):
-        """
-        Generates the requisite directory name based on the file name.
-
-        Parameters
-        ----------
-        file : str
-            File name for which to generate the directory name.
-
-        Returns
-        -------
-        list
-            DESCRIPTION.
-
-        """
-
-        format_dict = FILENAME_FORMAT.copy()
-        format_dict.update({'HrMin': 6})
-        elem_list = file.split('.')[0].split('_')
-        elem_dict = {x: elem_list[format_dict[x]] for x in format_dict}
-        if not elem_dict['HrMin'] == '0000':
-            time_elems = [
-                elem_dict['Year'], elem_dict['Month'], elem_dict['Day']
-                ]
-        else:
-            new_date = (
-                dt.datetime(int(elem_dict['Year']), int(elem_dict['Month']),
-                            int(elem_dict['Day'])) -
-                dt.timedelta(minutes=self.time_step)
-                )
-            time_elems = [
-                str(new_date.year), str(new_date.month).zfill(2),
-                str(new_date.day).zfill(2)
-                ]
-        return ['_'.join(time_elems[:-1]), time_elems[-1]]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def rename_files(self):
-        """
-        Rename the coverted files.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        logging.info('Renaming converted files:')
-        for file in self.get_converted_file_list():
-            new_filename = self._rebuild_filename(file.name)
-            file.rename(self.raw_data_path / new_filename)
-            logging.info(f'   {file.name} -> {new_filename}')
-        logging.info('Done')
-        self.rename_flag = True
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _rebuild_filename(self, file):
+    def get_destination_path(self, file, use_dest_path=True):
         """
         Get the new filename (CardConvert prepends the new format and appends
         year, month, day, hour and minute; we drop old format and redundant
@@ -515,52 +243,96 @@ class processed_file_handler(generic_handler):
 
         Returns
         -------
-        str
-            Demangled filename.
+        pathlib.Path
+            Demangled absolute filename.
 
         """
 
-        filename, ext = file.split('.')
-        mangled_list = filename.split('_')
-        mangled_list.remove('TOB3')
-        mangled_list.append(ext)
-        format_dict = FILENAME_FORMAT.copy()
-        format_dict.update({'HrMin': 9})
-        elem_dict = {x: mangled_list[format_dict[x]] for x in format_dict}
-        hr, mins = elem_dict['HrMin'][:2], elem_dict['HrMin'][2:]
+        elems = file.stem.split('_')
+        elems.remove('TOB3')
+        if not len(elems) == 10:
+            raise RuntimeError('Unexpected elements in filename!')
+        elems = elems[:3] + elems[6:]
+        elem_names = FILENAME_FORMAT['TOA5']
+        elems_dict = dict(zip(elem_names, elems))
+
+        # Explain this!
+        new_dir_name = (
+            f'{elems_dict["Year"]}_{elems_dict["Month"]}/{elems_dict["Day"]}'
+            )
+
+        elems_dict.update(self._roll_time(time_dict=elems_dict))
+        new_file_name = '_'.join(elems_dict.values()) + file.suffix
+        self.check_file_name_format(file=file.parent / new_file_name)
+        if use_dest_path:
+            return (
+                self.destination_base_path / new_dir_name / new_file_name
+                )
+        return file.parent / ('_'.join(elems_dict.values()) + file.suffix)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_converted_file_list(self):
+        """
+        Check for new processed files in the directory.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if no new files.
+
+        Returns
+        -------
+        list
+            List of files.
+
+        """
+
+        l = list(self.raw_data_path.glob('TOA5_TOB3*.dat'))
+        if not l:
+            raise RuntimeError(
+                'No new processed files to parse in target directory'
+                )
+        return l
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def move_file(self, file):
+
+        destination = self.get_destination_path(file=file)
+        if not destination.parent.exists():
+            destination.parent.mkdir(parents=True)
+        if not self.check_file_parsed(file=file):
+            file.rename(destination)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _roll_time(self, time_dict):
+
+        time = dt.datetime.strptime(time_dict['HrMin'], '%H%M').time()
         delta_mins = (
-            (int(mins) - np.mod(int(mins), self.time_step) +
-             self.time_step).item()
+            (int(time.minute) - np.mod(int(time.minute), self.time_step) +
+             self.time_step)
+            .item()
             )
-        py_datetime = (
-            dt.datetime(int(elem_dict['Year']), int(elem_dict['Month']),
-                        int(elem_dict['Day']), int(hr), 0) +
-            dt.timedelta(minutes=delta_mins)
+        py_dt = (
+            (dt.datetime(
+                year=int(time_dict['Year']), month=int(time_dict['Month']),
+                day=int(time_dict['Day']), hour=time.hour
+                ) +
+                dt.timedelta(minutes=delta_mins)
+                )
             )
-        info_str = (
-            '_'.join([elem_dict['Format'], elem_dict['Site'], elem_dict['Freq']])
-            )
-        time_str = py_datetime.strftime('%Y_%m_%d_%H%M.dat')
-        return '_'.join([info_str, time_str])
+        return {
+            'Year': py_dt.strftime('%Y'), 'Month': py_dt.strftime('%m'),
+            'Day': py_dt.strftime('%d'), 'HrMin': py_dt.strftime('%H%M')
+            }
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def check_raw_file(file):
-
-    allowed_dict = {'Site': DETAILS.get_operational_sites().index.tolist()}
-    parts, ext = file.stem.split('_'), file.suffix
-    parts_dict = dict(zip(RAW_FILENAME_FORMAT.keys(), parts))
-    # for part in parts_dict[:3]:
-
-
-    breakpoint()
-    pass
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -593,21 +365,12 @@ def run_CardConvert(site):
 
     """
 
-    logging.info('Running TOA5 format conversion with CardConvert_parser...')
     cc_path = str(PATHS.get_application_path(application='CardConvert'))
     path_to_file = (
         PATHS.get_local_path(resource='ccf_config') / f'TOA5_{site}.ccf'
         )
     spc_args = [cc_path, f'runfile={path_to_file}']
-    rslt = spc.Popen(spc_args, stdout=spc.PIPE, stderr=spc.STDOUT)
-    (out, err) = rslt.communicate()
-    if out:
-        logging.info(out.decode())
-        logging.info('CardConvert conversion complete')
-    if err:
-        logging.error('CardConvert processing failed with the following message:')
-        logging.error(err.decode())
-        raise spc.CalledProcessError()
+    return spc.run(spc_args, capture_output=True)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -635,7 +398,6 @@ def write_ccf_file(site, time_step, overwrite=True):
 
     """
 
-    logging.info('Writing CardConvert configuration file...')
     site_file_name = site
     site = site.replace('Under', '')
     stream = 'flux_fast' if not 'Under' in site_file_name else 'flux_fast_aux'
@@ -650,9 +412,6 @@ def write_ccf_file(site, time_step, overwrite=True):
     # Skip it if overwrite is not enabled
     if not overwrite:
         if path_to_file.exists():
-            logging.info(
-                'File exists, overwrite flag is False, skipping write...'
-                )
             return
 
     # Construct the dictionary
@@ -673,9 +432,8 @@ def write_ccf_file(site, time_step, overwrite=True):
     # Write it
     with open(path_to_file, mode='w') as f:
         f.write('[main]\n')
-        for this_item in write_dict:
-            f.write('{0}={1}\n'.format(this_item, write_dict[this_item]))
-    logging.info('Done!')
+        for key, value in write_dict.items():
+            f.write(f'{key}={value}\n')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -685,24 +443,75 @@ def write_ccf_file(site, time_step, overwrite=True):
 def main(site, overwrite_ccf=True):
 
     # Instantiate raw file handler
-    raw_handler = raw_file_handler(site=site)
+    raw_handler = RawFileHandler(site=site)
 
-    # Check raw files
-    files_to_process = raw_handler.get_raw_file_list()
-    raw_handler.check_files()
+    # Iterate over list of raw files and check if exist
+    logging.info('Checking raw files...')
+    raw_files_to_convert = raw_handler.get_raw_file_list()
+
+    if not raw_files_to_convert:
+        msg = 'No files to convert!'
+        logging.error(msg); raise FileNotFoundError(msg)
+
+    for file in raw_files_to_convert:
+
+        logging.info(f'{file.name}')
+
+        try:
+            raw_handler.check_file_name_format(file=file)
+            logging.info('    - format -> OK')
+        except RuntimeError as e:
+            logging.error(e); raise
+
+        try:
+            if raw_handler.check_file_parsed(file=file):
+                raw_handler.remove_file(file=file)
+                logging.error(
+                    '    - already_parsed -> True! Checksums match - deleting!'
+                    )
+                continue
+            else:
+                logging.info('    - already parsed -> False')
+        except RuntimeError as e:
+            logging.error(e); raise
+
+    # Check whether any raw files disappeared
+    raw_files_to_convert= raw_handler.get_raw_file_list()
+
+    if not raw_files_to_convert:
+        msg = 'Available files were all duplicates! Exiting...'
+        logging.error(msg); raise FileNotFoundError(msg)
 
     # Make the ccf file
+    logging.info('Writing CardConvert configuration file...')
     write_ccf_file(
         site=site, time_step=raw_handler.time_step, overwrite=overwrite_ccf
         )
+    logging.info('Done!')
 
     # Run CardConvert
-    run_CardConvert(site=site)
+    logging.info('Running TOA5 format conversion with CardConvert_parser...')
+    rslt = run_CardConvert(site=site)
+    try:
+        rslt.check_returncode()
+        logging.info('CardConvert conversion complete')
+    except spc.CalledProcessError():
+        logging.error(
+            'Failed to run CardConvert due to the following: '
+            f'{rslt.stderr.decode()}'
+            )
+        raise
+    logging.info('Format conversion done!')
+
+    # Move all of the raw files...
+    logging.info('Moving raw files to final destination...')
+    for file in raw_files_to_convert:
+        raw_handler.move_file(file=file)
 
     # Count the number of files yielded and write all to log
-    processed_handler = processed_file_handler(site=site)
+    processed_handler = ConvertedFileHandler(site=site)
     n_expected_files = (
-        int(len(list(files_to_process)) * 1440 / raw_handler.time_step)
+        int(len(list(raw_files_to_convert)) * 1440 / raw_handler.time_step)
         )
     yielded_files = processed_handler.get_converted_file_list()
     n_yielded_files = int(len(list(yielded_files)))
@@ -712,14 +521,31 @@ def main(site, overwrite_ccf=True):
     else:
         logging.warning(msg)
 
-    # Rename the CardConvert files
-    processed_handler.rename_files()
+    # Iterate over list of converted files
+    logging.info('Rebuilding and moving converted files...')
+    for file in yielded_files:
 
-    # Check the integrity of the renamed files
-    processed_handler.check_files()
+        dest = processed_handler.get_destination_path(file=file)
 
-    # Move the raw data to final storage
-    raw_handler.move_data_to_final_storage()
+        logging.info(f'{file.name} -> {dest}')
 
-    # Move the renamed and checked files to final storage
-    processed_handler.move_data_to_final_storage()
+        try:
+            raw_handler.check_file_name_format(file=dest)
+            logging.info('    - format -> OK')
+        except RuntimeError as e:
+            logging.error(e); raise
+
+        try:
+            if processed_handler.check_file_parsed(file=file):
+                processed_handler.remove_file(file=file)
+                logging.error(
+                    '    - already_parsed -> True! Checksums match - deleting!'
+                    )
+            else:
+                logging.info('    - already parsed -> False')
+        except RuntimeError as e:
+            logging.error(e); raise
+
+        processed_handler.move_file(file=file)
+
+    logging.info('Conversion complete!')
