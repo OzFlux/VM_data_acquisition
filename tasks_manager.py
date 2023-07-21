@@ -23,7 +23,7 @@ import sys
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import campbell_funcs as cf
+import file_constructors as fc
 import paths_manager as pm
 import process_10hz_data as ptd
 import rclone_transfer as rt
@@ -193,7 +193,7 @@ class TasksManager():
 #------------------------------------------------------------------------------
 def generate_L1_excel(**kwargs):
 
-    constructor = cf.L1Constructor(site=kwargs['site'])
+    constructor = fc.L1Constructor(site=kwargs['site'])
     constructor.write_to_excel()
 #------------------------------------------------------------------------------
 
@@ -210,7 +210,7 @@ def generate_merged_file(**kwargs):
 
     """
 
-    merger = cf.TableMerger(site=kwargs['site'])
+    merger = fc.TableMerger(site=kwargs['site'])
     merger.make_output_file()
 #------------------------------------------------------------------------------
 
@@ -227,7 +227,7 @@ def generate_site_details_file(**kwargs):
 
     """
 
-    cf.make_site_info_TOA5(site=kwargs['site'])
+    fc.make_site_info_TOA5(site=kwargs['site'])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
