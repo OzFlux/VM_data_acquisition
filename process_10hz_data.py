@@ -494,21 +494,22 @@ def main(site, overwrite_ccf=True):
     rslt = run_CardConvert(site=site)
     try:
         rslt.check_returncode()
-        logging.info('CardConvert conversion complete')
+        logging.info('Format conversion done!')
     except spc.CalledProcessError():
         logging.error(
             'Failed to run CardConvert due to the following: '
             f'{rslt.stderr.decode()}'
             )
         raise
-    logging.info('Format conversion done!')
 
     # Move all of the raw files...
     logging.info('Moving raw files to final destination...')
     for file in raw_files_to_convert:
         raw_handler.move_file(file=file)
+    logging.info('Raw file move complete!')
 
     # Count the number of files yielded and write all to log
+    logging.info('Checking number of files yielded...')
     processed_handler = ConvertedFileHandler(site=site)
     n_expected_files = (
         int(len(list(raw_files_to_convert)) * 1440 / raw_handler.time_step)
@@ -548,4 +549,4 @@ def main(site, overwrite_ccf=True):
 
         processed_handler.move_file(file=file)
 
-    logging.info('Conversion complete!')
+    logging.info('Rebuild and move of converted files complete!')
