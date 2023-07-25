@@ -34,13 +34,13 @@ CCF_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0',
             'CSVOptions': '6619599', 'BaleStart': '38718',
             'BaleInterval': '32875', 'DOY': '0', 'Append': '0',
             'ConvertNew': '0'}
-OPERATIONAL_SITES = DETAILS.get_operational_sites().index.tolist()
 FILENAME_FORMAT = {
     'TOB3': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day'],
     'TOA5': ['Format', 'Site', 'Freq', 'Year', 'Month', 'Day', 'HrMin']
     }
 TIME_FORMAT = {'TOB3': '%Y,%m,%d', 'TOA5': '%Y,%m,%d,%H%M'}
 ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
+STREAM_DICT = {'main': 'flux_fast', 'under': 'flux_fast_aux'}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -49,27 +49,57 @@ ALIAS_DICT = {'GWW': 'GreatWesternWoodlands'}
 
 #------------------------------------------------------------------------------
 class GenericHandler():
-    """Base class that sets attributes and file format checking methods"""
+    """
+    Base class that sets attributes and file format checking methods
+    """
 
     #--------------------------------------------------------------------------
-    def __init__(self, site):
+    def __init__(self, site, system):
+        """
+        Initialise class instance
 
-        self.site_name = site
-        self.stream = 'flux_fast' if not 'Under' in site else 'flux_fast_aux'
-        self.site = site.replace('Under', '')
-        site_details = DETAILS.get_single_site_details(site=self.site)
-        self.interval = str(int(
-            1000 / int(site_details.freq_hz)
-            )) + 'ms'
+        Parameters
+        ----------
+        site : str
+            The site.
+        system : str
+            The eddy covariance system - either 'main' or 'under'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        self.site = site
+        self.stream = STREAM_DICT[system]
+        self.system_name = get_system_name(site=site, system=system)
+        site_details = DETAILS.get_single_site_details(site=site)
+        self.interval = str(int(1000 / int(site_details.freq_hz))) + 'ms'
         self.time_step = site_details.time_step
-        self.raw_data_path = PATHS.get_local_path(
-            resource='data', stream=self.stream, subdirs=['TMP'],
-            site=self.site
-            )
+
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def check_file_name_format(self, file):
+        """
+        Check that the passed file name conforms to expected convention.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path of the file.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if file name format does not conform.
+
+        Returns
+        -------
+        None.
+
+        """
 
         # Parse file name elements into dictionary
         elems = file.stem.split('_')
@@ -82,7 +112,7 @@ class GenericHandler():
         try:
 
             # Check critical non-time elements are valid
-            assert elems_dict['Site'] == self.site
+            assert elems_dict['Site'] == self.system_name
             assert elems_dict['Freq'] == self.interval
             assert elems_dict['Ext'] == '.dat'
 
@@ -99,6 +129,19 @@ class GenericHandler():
 
     #--------------------------------------------------------------------------
     def remove_file(self, file):
+        """
+        Delete file.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path to file.
+
+        Returns
+        -------
+        None.
+
+        """
 
         file.unlink()
     #--------------------------------------------------------------------------
@@ -107,23 +150,47 @@ class GenericHandler():
 
 #------------------------------------------------------------------------------
 class RawFileHandler(GenericHandler):
+    """
+    Inherits from base class generic_handler and adds handling methods
+    for raw files
+    """
 
-    """Inherits from base class generic_handler and adds methods for raw files"""
     #--------------------------------------------------------------------------
-    def __init__(self, site):
+    def __init__(self, site, system='main'):
 
-        super().__init__(site)
-        self.destination_base_path = PATHS.get_local_path(
-            resource='data', stream=self.stream, subdirs=['TOB3'],
-            site=self.site
+        super().__init__(site, system=system)
+        self.input_data_path = get_path(
+            site=site, system=system, data='raw', io='input'
             )
-        self.archived_files = list(
-            self.destination_base_path.rglob('TOB3*.dat')
+        self.output_data_path = get_path(
+            site=site, system=system, data='raw', io='output'
             )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def check_file_parsed(self, file):
+        """
+        Check whether the passed file has been parsed and written to final
+        storage.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path to file.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the file has been parsed and written to final storage BUT
+            checksums are different.
+
+        Returns
+        -------
+        bool
+            True if file successfully parsed and written to final storage,
+            false if not.
+
+        """
 
         destination = self.get_destination_path(file=file)
         if not destination.exists():
@@ -131,7 +198,7 @@ class RawFileHandler(GenericHandler):
         if get_hash(file=file) == get_hash(file=destination):
             return True
         raise RuntimeError(
-            f'File {file.name} in {self.raw_data_path} exists in archive, but '
+            f'File {file.name} in {file.parent} exists in archive, but '
             'hashes do not match!'
             )
     #--------------------------------------------------------------------------
@@ -158,7 +225,7 @@ class RawFileHandler(GenericHandler):
         elem_names = FILENAME_FORMAT[fmt]
         elems_dict = dict(zip(elem_names, elems))
         return (
-            self.destination_base_path /
+            self.output_data_path /
             '_'.join([elems_dict['Year'], elems_dict['Month']]) /
             file.name
             )
@@ -182,7 +249,7 @@ class RawFileHandler(GenericHandler):
 
         """
 
-        l = list(self.raw_data_path.glob(f'TOB3_{self.site}*.dat'))
+        l = list(self.input_data_path.glob(f'TOB3_{self.system_name}*.dat'))
         if not l:
             raise RuntimeError('No new raw files to parse in target directory')
         return l
@@ -190,6 +257,20 @@ class RawFileHandler(GenericHandler):
 
     #--------------------------------------------------------------------------
     def move_file(self, file):
+        """
+        Move file to final storage.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path to file.
+
+        Returns
+        -------
+        None.
+
+        """
+
 
         destination = self.get_destination_path(file=file)
         if not destination.parent.exists():
@@ -202,21 +283,47 @@ class RawFileHandler(GenericHandler):
 
 #------------------------------------------------------------------------------
 class ConvertedFileHandler(GenericHandler):
-    """Inherits from base class generic_handler and adds methods for converted
-    files"""
+    """
+    Inherits from base class generic_handler and adds methods for converted
+    files.
+    """
 
     #--------------------------------------------------------------------------
-    def __init__(self, site):
+    def __init__(self, site, system='main'):
 
-        super().__init__(site)
-        self.destination_base_path = PATHS.get_local_path(
-            resource='data', stream=self.stream, subdirs=['TOA5'],
-            site=self.site
+        super().__init__(site, system=system)
+        self.input_data_path = get_path(
+            site=site, system=system, data='converted', io='input'
+            )
+        self.output_data_path = get_path(
+            site=site, system=system, data='converted', io='output'
             )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def check_file_parsed(self, file):
+        """
+        Check whether the passed file has been parsed and written to final
+        storage.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path to file.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the file has been parsed and written to final storage BUT
+            checksums are different.
+
+        Returns
+        -------
+        bool
+            True if file successfully parsed and written to final storage,
+            false if not.
+
+        """
 
         destination = self.get_destination_path(file=file)
         if not destination.exists():
@@ -224,7 +331,7 @@ class ConvertedFileHandler(GenericHandler):
         if get_hash(file=file) == get_hash(file=destination):
             return True
         raise RuntimeError(
-            f'File {file.name} in {self.raw_data_path} exists in archive, but '
+            f'File {file.name} in {file.parent} exists in archive, but '
             'hashes do not match!'
             )
     #--------------------------------------------------------------------------
@@ -266,7 +373,7 @@ class ConvertedFileHandler(GenericHandler):
         self.check_file_name_format(file=file.parent / new_file_name)
         if use_dest_path:
             return (
-                self.destination_base_path / new_dir_name / new_file_name
+                self.output_data_path / new_dir_name / new_file_name
                 )
         return file.parent / ('_'.join(elems_dict.values()) + file.suffix)
     #--------------------------------------------------------------------------
@@ -288,8 +395,9 @@ class ConvertedFileHandler(GenericHandler):
 
         """
 
-        l = list(self.raw_data_path.glob('TOA5_TOB3*.dat'))
+        l = list(self.input_data_path.glob('TOA5_TOB3*.dat'))
         if not l:
+            breakpoint()
             raise RuntimeError(
                 'No new processed files to parse in target directory'
                 )
@@ -298,6 +406,19 @@ class ConvertedFileHandler(GenericHandler):
 
     #--------------------------------------------------------------------------
     def move_file(self, file):
+        """
+        Move file to final storage.
+
+        Parameters
+        ----------
+        file : pathlib.Path
+            Absolute path to file.
+
+        Returns
+        -------
+        None.
+
+        """
 
         destination = self.get_destination_path(file=file)
         if not destination.parent.exists():
@@ -308,6 +429,22 @@ class ConvertedFileHandler(GenericHandler):
 
     #--------------------------------------------------------------------------
     def _roll_time(self, time_dict):
+        """
+        Roll the embedded time components forward (Campbell CardConvert uses
+        uses the start of the period as the timestamp when carvin up the TOB3
+        files).
+
+        Parameters
+        ----------
+        time_dict : dict
+            Dictionary containing the time components.
+
+        Returns
+        -------
+        dict
+            Time components rolled forward by one site interval (mostly 30 mins).
+
+        """
 
         time = dt.datetime.strptime(time_dict['HrMin'], '%H%M').time()
         delta_mins = (
@@ -337,6 +474,20 @@ class ConvertedFileHandler(GenericHandler):
 
 #------------------------------------------------------------------------------
 def get_hash(file):
+    """
+    Do the checksum for the file.
+
+    Parameters
+    ----------
+    file : pathlib.path
+        Absolute path to file.
+
+    Returns
+    -------
+    str
+        Hash for the file.
+
+    """
 
     with open(file, 'rb') as f:
         the_bytes=f.read()
@@ -344,7 +495,76 @@ def get_hash(file):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def run_CardConvert(site):
+def get_path(site, system, data, io):
+
+    ref_dict = {
+        'raw': {
+            'input': PATHS.get_local_path(
+                resource='data',
+                stream=STREAM_DICT[system],
+                subdirs=['TMP', 'TOB3'],
+                site=site
+                ),
+            'output': PATHS.get_local_path(
+                resource='data',
+                stream=STREAM_DICT[system],
+                subdirs=['TOB3'],
+                site=site
+                )
+            },
+         'converted': {
+            'input': PATHS.get_local_path(
+                resource='data',
+                stream=STREAM_DICT[system],
+                subdirs=['TMP', 'TOA5'],
+                site=site
+                ),
+            'output': PATHS.get_local_path(
+                resource='data',
+                stream=STREAM_DICT[system],
+                subdirs=['TOA5'],
+                site=site
+                )
+             }
+         }
+
+    return ref_dict[data][io]
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_system_name(site, system):
+    """
+    Get the snippet that is expected in the middle of the file name
+    (e.g. Calperum for the main EC system or CalperumUnder for the understorey)
+
+    Parameters
+    ----------
+    site : str
+        The site.
+    system : str
+        The eddy covariance system - either 'main' or 'under'.
+
+    Raises
+    ------
+    KeyError
+        Raised if invalid system name.
+
+    Returns
+    -------
+    str
+        System name.
+
+    """
+
+    if not system in STREAM_DICT.keys():
+        raise KeyError('Positional arg "system" must be either main or under!')
+    if system == 'main':
+        return site
+    return site + 'Under'
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def run_CardConvert(site, system):
     """
     Spawn subprocess -> CampbellSci Loggernet CardConvert utility to convert
     proprietary binary format to ASCII
@@ -365,16 +585,17 @@ def run_CardConvert(site):
 
     """
 
-    cc_path = str(PATHS.get_application_path(application='CardConvert'))
+    app_path = str(PATHS.get_application_path(application='CardConvert'))
+    system_name = get_system_name(site=site, system=system)
     path_to_file = (
-        PATHS.get_local_path(resource='ccf_config') / f'TOA5_{site}.ccf'
+        PATHS.get_local_path(resource='ccf_config') / f'TOA5_{system_name}.ccf'
         )
-    spc_args = [cc_path, f'runfile={path_to_file}']
+    spc_args = [app_path, f'runfile={path_to_file}']
     return spc.run(spc_args, capture_output=True)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def write_ccf_file(site, time_step, overwrite=True):
+def write_ccf_file(site, time_step, system='main', overwrite=True):
     """
 
 
@@ -384,6 +605,9 @@ def write_ccf_file(site, time_step, overwrite=True):
         The site for which to write the ccf file.
     time_step : int
         Averaging interval in minutes of the data.
+    system : str
+        Main eddy covariance system or understorey ('under').
+        The default is 'main'.
     overwrite : Bool, optional
         Whether to overwrite existing file or use it. The default is True.
 
@@ -398,39 +622,38 @@ def write_ccf_file(site, time_step, overwrite=True):
 
     """
 
-    site_file_name = site
-    site = site.replace('Under', '')
-    stream = 'flux_fast' if not 'Under' in site_file_name else 'flux_fast_aux'
-    path_to_file = (
+    system_name = get_system_name(site=site, system=system)
+    path_to_config = (
         PATHS.get_local_path(resource='ccf_config') /
-        f'TOA5_{site_file_name}.ccf'
-        )
-    path_to_data = PATHS.get_local_path(
-        resource='data', stream=stream, subdirs=['TMP'], site=site
+        f'TOA5_{system_name}.ccf'
         )
 
     # Skip it if overwrite is not enabled
     if not overwrite:
-        if path_to_file.exists():
+        if path_to_config.exists():
             return
 
     # Construct the dictionary
-    src_dir = str(path_to_data) + '\\'
-    write_dict = {'SourceDir': src_dir, 'TargetDir': src_dir}
+    input_path = str(get_path(
+        site=site, system=system, data='raw', io='input'
+        )) + '\\'
+    output_path = str(get_path(
+            site=site, system=system, data='converted', io='input'
+            )) + '\\'
+    write_dict = {'SourceDir': input_path, 'TargetDir': output_path}
     write_dict.update(CCF_DICT)
 
     # Get and set the bale interval
     bale_intvl_frac = 1 / (1440 / time_step)
     if bale_intvl_frac > 1:
-        msg = 'Error! Minutes must sum to less than 1 day!'
-        logging.error(msg); raise RuntimeError(msg)
+        raise RuntimeError('Error! Minutes must sum to less than 1 day!')
     bale_intvl = (
         str(int(CCF_DICT['BaleInterval']) - 1 + round(bale_intvl_frac, 10))
         )
     write_dict['BaleInterval'] = bale_intvl
 
     # Write it
-    with open(path_to_file, mode='w') as f:
+    with open(path_to_config, mode='w') as f:
         f.write('[main]\n')
         for key, value in write_dict.items():
             f.write(f'{key}={value}\n')
@@ -440,10 +663,10 @@ def write_ccf_file(site, time_step, overwrite=True):
 ### MAIN FUNCTION ###
 #------------------------------------------------------------------------------
 
-def main(site, overwrite_ccf=True):
+def main(site, system, overwrite_ccf=True):
 
     # Instantiate raw file handler
-    raw_handler = RawFileHandler(site=site)
+    raw_handler = RawFileHandler(site=site, system=system)
 
     # Iterate over list of raw files and check if exist
     logging.info('Checking raw files...')
@@ -491,7 +714,7 @@ def main(site, overwrite_ccf=True):
 
     # Run CardConvert
     logging.info('Running TOA5 format conversion with CardConvert_parser...')
-    rslt = run_CardConvert(site=site)
+    rslt = run_CardConvert(site=site, system=system)
     try:
         rslt.check_returncode()
         logging.info('Format conversion done!')
@@ -510,9 +733,9 @@ def main(site, overwrite_ccf=True):
 
     # Count the number of files yielded and write all to log
     logging.info('Checking number of files yielded...')
-    processed_handler = ConvertedFileHandler(site=site)
+    processed_handler = ConvertedFileHandler(site=site, system=system)
     n_expected_files = (
-        int(len(list(raw_files_to_convert)) * 1440 / raw_handler.time_step)
+        int(len(list(raw_files_to_convert)) * 1440 / processed_handler.time_step)
         )
     yielded_files = processed_handler.get_converted_file_list()
     n_yielded_files = int(len(list(yielded_files)))

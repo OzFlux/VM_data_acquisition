@@ -521,3 +521,26 @@ def make_site_logger_TOA5(site):
     output_path = PATHS.get_local_path(resource='site_details')
     TOA5_maker.write_output_file(dest=output_path / f'{site}_logger_details.dat')
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def make_site_info_excel():
+
+    df = vm.make_table_df().reset_index()
+    new_index = pd.MultiIndex.from_frame(df[['site', 'file_name']])
+    df.index = new_index
+    df.drop(['format', 'site', 'file_name'], axis=1, inplace=True)
+    records_list = []
+    for entry in df.index:
+        handler = toa5.single_file_data_handler(file=df.loc[entry, 'full_path'])
+        rslt_dict = handler.get_missing_records()
+        rslt_dict.pop('gap_distribution')
+        rslt_dict.update(
+            {'duplicate_records': any(handler.get_duplicate_records()),
+             'duplicate_indices': any(handler.get_duplicate_indices())
+             }
+            )
+        records_list.append(rslt_dict)
+    return pd.concat([df, pd.DataFrame(records_list, index=new_index)], axis=1)
+    df.to_excel('E:/Sites/test.xlsx')
+#------------------------------------------------------------------------------
+

@@ -174,9 +174,14 @@ class TasksManager():
                     }
                 },
 
-            'reformat_10Hz': {
+            'reformat_10Hz_main': {
                 'func': reformat_10Hz_data,
-                'args': site_only
+                'args': {'site': site, 'system': 'main'}
+                },
+
+            'reformat_10Hz_under': {
+                'func': reformat_10Hz_data,
+                'args': {'site': site, 'system': 'under'}
                 }
 
             }
@@ -246,7 +251,7 @@ def rclone_move_data(**kwargs):
 #------------------------------------------------------------------------------
 def reformat_10Hz_data(**kwargs):
 
-    ptd.main(site=kwargs['site'])
+    ptd.main(site=kwargs['site'], system=kwargs['system'])
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
