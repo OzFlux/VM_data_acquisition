@@ -31,7 +31,7 @@ ARGS_LIST = [
     '48', '--timeout', '0'
     ]
 ALLOWED_STREAMS = ['flux_slow', 'flux_fast', 'rtmc']
-ALLOWED_SERVICES = ['nextcloud', 'cloudstor']
+ALLOWED_SERVICES = ['nextcloud', 'cloudstor', 'ten_Hz_archive']
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
@@ -82,16 +82,18 @@ class RcloneTransferConfig():
         self.stream = stream
         self.service = service
         self.args_list = self._build_args(exclude_dirs=exclude_dirs)
+
+        # Note that rclone doesn't like backslashes EVEN ON WINDOWS!!!
         self.local_path = PATHS.get_local_path(
-            site=site, resource='data', stream=stream,
-            )
+            site=site, resource='data', stream=stream, as_str=True
+            ).replace('\\', '/')
         try:
             remote_site_name = REMOTE_ALIAS_DICT[site]
         except KeyError:
             remote_site_name = site
         self.remote_path = PATHS.get_remote_path(
             resource=service, stream=stream, site=remote_site_name, as_str=True
-            )
+            ).replace('\\', '/')
         self.move_dict = {
             'push': (
                 [APP_PATH] + self.args_list +
@@ -134,7 +136,7 @@ class RcloneTransferConfig():
                 )
         for this_dir in exclude_dirs:
             this_list.append('--exclude')
-            this_list.append(str(pathlib.Path('{}/**'.format(this_dir))))
+            this_list.append(f'{this_dir}/**')
         return this_list
     #--------------------------------------------------------------------------
 
@@ -178,9 +180,11 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
     logging.info(
         f'Begin {which_way} of data stream "{stream}" for site "{site}":'
         )
-    obj = RcloneTransferConfig(site=site, stream=stream, service=service)
+    obj = RcloneTransferConfig(
+        site=site, stream=stream, service=service, exclude_dirs=exclude_dirs
+        )
     logging.info('Copying now...\n Checking local and remote directories...')
-    if not obj.local_path.exists:
+    if not pathlib.Path(obj.local_path).exists:
         msg = f'    -> local file {str(obj.local_path)} is not valid!'
         logging.error(msg); raise FileNotFoundError(msg)
     logging.info(f'    -> local directory {obj.local_path} is valid')
@@ -195,7 +199,7 @@ def move_data(site, stream, service, which_way='push', exclude_dirs=None):
     try:
         rslt = _run_subprocess(
             run_list=obj.move_dict[which_way],
-            timeout=120
+            timeout=600
             )
         logging.info(rslt.stdout.decode())
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:

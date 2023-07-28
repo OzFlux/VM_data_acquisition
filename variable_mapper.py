@@ -252,6 +252,14 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_table_from_variable(self, variable):
+
+        return self.site_df.loc[
+            self.site_df.translation_name==variable, 'table_name'
+            ].item()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_translation_dict(self, table_file=None):
 
         if table_file:

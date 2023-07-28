@@ -523,24 +523,75 @@ def make_site_logger_TOA5(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def make_site_info_excel():
+def make_site_info_excel(dest='E:/Sites/test.xlsx'):
 
+    index_vars = [
+        'site', 'station_name', 'logger_type', 'serial_num', 'OS_version',
+        'program_name'
+        ]
+    drop_vars = ['full_path', 'file_name', 'full_path', 'format']
     df = vm.make_table_df().reset_index()
-    new_index = pd.MultiIndex.from_frame(df[['site', 'file_name']])
-    df.index = new_index
-    df.drop(['format', 'site', 'file_name'], axis=1, inplace=True)
+    full_path = df.full_path
+    df.index = pd.MultiIndex.from_frame(df[index_vars])
+    df.drop(index_vars + drop_vars, axis=1, inplace=True)
     records_list = []
-    for entry in df.index:
-        handler = toa5.single_file_data_handler(file=df.loc[entry, 'full_path'])
+    for file in full_path:
+        handler = toa5.single_file_data_handler(file=file)
         rslt_dict = handler.get_missing_records()
         rslt_dict.pop('gap_distribution')
         rslt_dict.update(
             {'duplicate_records': any(handler.get_duplicate_records()),
-             'duplicate_indices': any(handler.get_duplicate_indices())
+             'duplicate_indices': any(handler.get_duplicate_indices()),
+             'last_record': handler.data.index[-1].strftime('%Y-%m-%d %H:%M'),
+             'days_since_last_record': (
+                 (dt.datetime.now() - handler.data.index[-1].to_pydatetime())
+                 .days
+                 )
              }
             )
+
         records_list.append(rslt_dict)
-    return pd.concat([df, pd.DataFrame(records_list, index=new_index)], axis=1)
-    df.to_excel('E:/Sites/test.xlsx')
+    df = pd.concat([df, pd.DataFrame(records_list, index=df.index)], axis=1)
+    with pd.ExcelWriter(path=dest) as writer:
+        df.to_excel(writer, sheet_name='All')
+        for site in df.index.get_level_values('site').unique():
+            print (site)
+            site_df = build_site_variable_data(site=site)
+            site_df.to_excel(writer, sheet_name=site)
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def build_site_variable_data(site):
+
+    merger = TableMerger(site=site)
+    df = merger.merge_tables()
+    rslt_list = []
+    for variable in df.columns:
+        s = df[variable].dropna()
+        fields = (
+            merger.var_map.site_df.loc[
+                merger.var_map.site_df.translation_name==variable
+                ]
+            )
+        rslt_dict = {
+            'variable': variable,
+            'station': fields.logger_name.item(),
+            'table': fields.table_name.item()
+            }
+        try:
+            rslt_dict.update(
+                {
+                    'last_valid_record': s.index[-1].strftime('%Y-%m-%d %H:%M'),
+                    'value': s[-1]
+                    }
+                )
+        except IndexError:
+            rslt_dict.update(
+                {
+                    'last_valid_record': None,
+                    'value': None
+                    }
+                )
+        rslt_list.append(rslt_dict)
+    return pd.DataFrame(rslt_list).set_index(keys='variable')
+#------------------------------------------------------------------------------

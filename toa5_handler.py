@@ -221,10 +221,12 @@ class single_file_data_handler():
 
         """
 
+        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
+        local_data = self.data[~dupes]
         gap_series = (
             (
-                self.data.reset_index()['TIMESTAMP'] -
-                self.data.reset_index()['TIMESTAMP'].shift()
+                local_data.reset_index()['TIMESTAMP'] -
+                local_data.reset_index()['TIMESTAMP'].shift()
                 )
             .astype('timedelta64[m]')
             .replace(self.interval_as_num, np.nan)
@@ -255,12 +257,14 @@ class single_file_data_handler():
 
         """
 
+        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
+        local_data = self.data[~dupes]
         complete_index = pd.date_range(
-            start=self.data.index[0],
-            end=self.data.index[-1],
+            start=local_data.index[0],
+            end=local_data.index[-1],
             freq=self.interval_as_offset
             )
-        n_missing = len(complete_index) - len(self.data)
+        n_missing = len(complete_index) - len(local_data)
         return {
             'n_missing': n_missing,
             '%_missing': round(n_missing / len(complete_index) * 100, 2),
@@ -1246,17 +1250,11 @@ def get_backup_files(file):
     """
 
     file_to_parse = check_file_path(file=file)
-    file_list = [
-        x.name for x in file_to_parse.parent.glob(f'{file_to_parse.stem}*')
+    return [
+        x.name for x in file_to_parse.parent.glob(
+            f'{file_to_parse.stem}*.backup'
+            )
         ]
-    file_list.remove(file_to_parse.name)
-    first_backup = file_to_parse.name + '.backup'
-    try:
-        temp = file_list.pop(file_list.index(first_backup))
-        file_list = [temp] + file_list
-    except ValueError:
-        pass
-    return file_list
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
