@@ -525,16 +525,21 @@ def make_site_logger_TOA5(site):
 #------------------------------------------------------------------------------
 def make_site_info_excel(dest='E:/Sites/test.xlsx'):
 
+    # Set the index and redundant variables
     index_vars = [
         'site', 'station_name', 'logger_type', 'serial_num', 'OS_version',
         'program_name'
         ]
-    drop_vars = ['full_path', 'file_name', 'full_path', 'format']
+    drop_vars = ['full_path', 'file_name', 'format']
+
+    # Build and format the dataframe
     df = vm.make_table_df().reset_index()
     full_path = df.full_path
     df.index = pd.MultiIndex.from_frame(df[index_vars])
     df.drop(index_vars + drop_vars, axis=1, inplace=True)
     records_list = []
+
+    # Use the toa5 handler to get info about records from file
     for file in full_path:
         handler = toa5.single_file_data_handler(file=file)
         rslt_dict = handler.get_missing_records()
@@ -542,20 +547,31 @@ def make_site_info_excel(dest='E:/Sites/test.xlsx'):
         rslt_dict.update(
             {'duplicate_records': any(handler.get_duplicate_records()),
              'duplicate_indices': any(handler.get_duplicate_indices()),
-             'last_record': handler.data.index[-1].strftime('%Y-%m-%d %H:%M'),
              'days_since_last_record': (
                  (dt.datetime.now() - handler.data.index[-1].to_pydatetime())
                  .days
                  )
              }
             )
-
         records_list.append(rslt_dict)
+
+    # Update the dataframe with the newly collected info
     df = pd.concat([df, pd.DataFrame(records_list, index=df.index)], axis=1)
+
+    # Get the list of sites to iterate over
+    sites = df.index.get_level_values('site').unique()
+
+    # Get the list of 10Hz files collected by site
+    files = pd.DataFrame(
+        {site: get_latest_10Hz_file(site) for site in sites},
+        index=['file_name']
+        ).T
+
+    # Write sheets
     with pd.ExcelWriter(path=dest) as writer:
-        df.to_excel(writer, sheet_name='All')
-        for site in df.index.get_level_values('site').unique():
-            print (site)
+        df.to_excel(writer, sheet_name='Summary')
+        files.to_excel(writer, sheet_name='10Hz_files')
+        for site in sites:
             site_df = build_site_variable_data(site=site)
             site_df.to_excel(writer, sheet_name=site)
 #------------------------------------------------------------------------------

@@ -158,6 +158,14 @@ class TasksManager():
                     }
                 },
 
+            'Rclone_push_fast_rdm': {
+                'func': rclone_move_data,
+                'args': {
+                    'site':site, 'stream':'flux_fast', 'service':'ten_Hz_archive',
+                    'which_way':'push'
+                    }
+                },
+
             'Rclone_push_slow_rdm': {
                 'func': rclone_move_data,
                 'args': {
