@@ -64,7 +64,7 @@ class mapper():
         """
 
         self.site = site
-        self.table_df = make_table_df(site=site)
+        # self.table_df = make_table_df(site=site)
         self.site_df = make_site_df(site=site)
         self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
 
@@ -89,27 +89,6 @@ class mapper():
         """
 
         return self.site_df.loc[~self.site_df.Missing & self.site_df.conversion]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_header_info(self, file):
-        """
-        Returns a list of all files documented in the mapping spreadsheet.
-
-        Returns
-        -------
-        list
-            List of the files.
-
-        """
-
-        files = self.get_file_list()
-        if not file in files:
-            raise KeyError(
-                'File not in file list: {}'
-                .format(', '.join(files.tolist()))
-                )
-        return self.table_df.loc[file]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
