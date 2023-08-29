@@ -397,7 +397,6 @@ class ConvertedFileHandler(GenericHandler):
 
         l = list(self.input_data_path.glob('TOA5_TOB3*.dat'))
         if not l:
-            breakpoint()
             raise RuntimeError(
                 'No new processed files to parse in target directory'
                 )
