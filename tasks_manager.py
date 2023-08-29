@@ -267,30 +267,30 @@ def reformat_10Hz_data(**kwargs):
 #------------------------------------------------------------------------------
 
 # Parse single task for single site and log it
-def parse_task(task, site):
+def parse_task(task, site=None):
 
     tasks = TasksManager()
-    logger = _set_logger(site=site, task=task)
-    logger.info(f'Running task "{task}" for site {site}')
-    try:
-        tasks.run_task(site=site, task=task)
-    except Exception as e:
-        logging.info('Task failed with the following error: {}'.format(e))
-    logger.info('Task complete\n')
-    logger.handlers.clear()
+    if site:
+        sites = [site]
+    else:
+        sites = tasks.get_site_list_for_task(task=task)
+    for site in sites:
+        logger = _set_logger(site=site, task=task)
+        logger.info(f'Running task "{task}" for site {site}')
+        try:
+            tasks.run_task(site=site, task=task)
+        except Exception as e:
+            logging.info(f'Task failed with the following error: {e}')
+        logger.info('Task complete\n')
+        logger.handlers.clear()
 
 # Main function - first arg passed is task name, second arg (site) is optional;
 # if not passed, run for all sites for which task is enabled (in spreadsheet);
 # if passed, check that task is enabled for that site and run if so (otherwise do nothing).
 if __name__=='__main__':
 
-    tasks = TasksManager()
     task = sys.argv[1]
-    site_list = tasks.get_site_list_for_task(task=task)
     try:
-        site = sys.argv[2]
-        if site in site_list:
-            parse_task(task=task, site=site)
+        parse_task(task=task, site=sys.argv[2])
     except IndexError:
-        for site in site_list:
-            parse_task(task=task, site=site)
+        parse_task(task=task)
