@@ -64,9 +64,10 @@ class mapper():
         """
 
         self.site = site
-        # self.table_df = make_table_df(site=site)
+        self.path = PATHS.get_local_path(
+            resource='data', stream='flux_slow', site=site
+            )
         self.site_df = make_site_df(site=site)
-        self.rtmc_syntax_generator = _RTMC_syntax_generator(self.site_df)
 
     #--------------------------------------------------------------------------
     ### PUBLIC METHODS ###
@@ -231,11 +232,64 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_table_from_variable(self, variable):
+    def get_file_from_variable(
+            self, variable, from_field='long_name', abs_path=False
+            ):
 
-        return self.site_df.loc[
-            self.site_df.translation_name==variable, 'table_name'
-            ].item()
+        files = self.get_field_from_variable(
+            variable=variable, from_field=from_field,
+            return_field='file_name'
+            )
+        if not abs_path:
+            return files
+        return [self.path / file for file in files]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_table_from_variable(self, variable, from_field='long_name'):
+
+        return self.get_field_from_variable(
+            variable=variable, from_field=from_field,
+            return_field='table_name'
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_logger_from_variable(self, variable, from_field='long_name'):
+
+        return self.get_field_from_variable(
+            variable=variable, from_field=from_field,
+            return_field='logger_name'
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_field_from_variable(
+            self, variable, from_field='long_name', return_field=None,
+            raise_if_missing=True):
+
+        local_df = self.site_df.reset_index()
+
+        ALLOWED_NAMES = ['long_name', 'site_name', 'translation_name']
+        if not from_field in ALLOWED_NAMES:
+            raise KeyError(
+                'Variable source field (kwarg from_field) must be one of '
+                f'{", ".join(ALLOWED_NAMES)}!'
+                )
+
+        if return_field == from_field:
+            raise KeyError('return_field must be different from from_field!')
+
+        if raise_if_missing:
+            if not variable in local_df[from_field].tolist():
+                raise KeyError(
+                    f'Variable {variable} not found in field {from_field}'
+                    )
+
+        all_fields = local_df.loc[local_df[from_field] == variable]
+        if not return_field:
+            return all_fields.set_index(keys='long_name')
+        return all_fields[return_field].tolist()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -285,11 +339,11 @@ class mapper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class _RTMC_syntax_generator():
+class RtmcSyntaxGenerator():
 
-    def __init__(self, site_df):
+    def __init__(self, site):
 
-        self.site_df = site_df
+        self.site_df = make_site_df(site=site)
 
     #--------------------------------------------------------------------------
     def _get_init_dict(self, start_cond):
@@ -412,26 +466,69 @@ class _RTMC_syntax_generator():
 
     #--------------------------------------------------------------------------
     def get_aliased_output(
-            self, long_name, multiple_to_avg=True, as_str=True,
-            start_cond=None, scaled_to_range=False
+            self, long_name, as_str=True, start_cond=None,
+            scaled_to_range=False
             ):
 
         variable = self._get_variable_frame(long_name=long_name)
         alias_string = self.get_alias_string(long_name=long_name)
-        eval_string = '+'.join(variable.translation_name.tolist())
+        eval_string = ','.join(variable.translation_name.tolist())
+        if len(variable) > 1:
+            eval_string = f'AvgSpa({eval_string})'
         if scaled_to_range:
             eval_string = self._get_scaled_to_range(eval_string=eval_string)
             start_cond = 'start_absolute'
-        n = len(variable)
-        if n > 1:
-            if multiple_to_avg:
-                eval_string = '({0})/{1}'.format(eval_string, n)
-            else:
-                raise NotImplementedError('Only averages implemented!')
         strings_dict = self._get_init_dict(start_cond=start_cond)
         strings_dict.update(
             {'alias_string': alias_string, 'eval_string': eval_string}
             )
+        if as_str:
+            return self._str_joiner(list(strings_dict.values()))
+        return strings_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_net_radiation(self, as_str=True):
+
+        long_names = [
+            'Downwelling shortwave', 'Upwelling shortwave',
+            'Downwelling longwave', 'Upwelling longwave'
+            ]
+        alias_list, eval_dict = [], {}
+        for long_name in long_names:
+            output = self.get_aliased_output(long_name=long_name, as_str=False)
+            alias_list.append(output['alias_string'])
+            eval_dict[long_name] = output['eval_string']
+        strings_dict = {
+            'alias_string': self._str_joiner(alias_list, joiner='\r\n'),
+            'eval_string': (
+                eval_dict['Downwelling shortwave'] + '-' +
+                eval_dict['Upwelling shortwave'] + '+' +
+                eval_dict['Downwelling longwave'] + '-' +
+                eval_dict['Upwelling longwave']
+                )
+            }
+        if as_str:
+            return self._str_joiner(list(strings_dict.values()))
+        return strings_dict
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_available_energy(self, as_str=True):
+
+        net_rad = self.get_net_radiation(as_str=False)
+        soil_flux = self.get_aliased_output(
+            long_name='Soil heat flux at depth z', as_str=False
+            )
+        strings_dict = {
+            'alias_string': self._str_joiner(
+                [net_rad['alias_string'], soil_flux['alias_string']],
+                joiner='\r\n'
+                ),
+            'eval_string': (
+                f'({net_rad["eval_string"]})-{soil_flux["eval_string"]}'
+                )
+            }
         if as_str:
             return self._str_joiner(list(strings_dict.values()))
         return strings_dict
@@ -571,6 +668,7 @@ def make_site_df(site):
     missing_list = list(
         set(master_df[master_df.Required].index) - set(site_df.index)
         )
+
     site_df = pd.concat([site_df, master_df.loc[missing_list]])
     site_df = site_df.assign(Missing=pd.isnull(site_df.site_name))
 
