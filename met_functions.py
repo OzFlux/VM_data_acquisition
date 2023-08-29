@@ -32,8 +32,8 @@ class TimeFunctions():
         self.time_zone = get_timezone(lat=lat, lon=lon)
         self.utc_offset = get_timezone_utc_offset(tz=self.time_zone, date=date)
         obs = ephem.Observer()
-        obs.lat = lat
-        obs.long = lon
+        obs.lat = str(lat)
+        obs.long = str(lon)
         obs.elev = elev
         obs.date = date
         self.obs = obs
