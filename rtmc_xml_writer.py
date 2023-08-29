@@ -14,10 +14,9 @@ standard output files written.
 #------------------------------------------------------------------------------
 
 from matplotlib.pyplot import cm
+import matplotlib.colors as colors
 import numpy as np
-import pandas as pd
 import sys
-import pdb
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
@@ -30,11 +29,33 @@ sys.path.append('../site_details')
 import sparql_site_details as sd
 
 #------------------------------------------------------------------------------
+### STUFF ###
+#------------------------------------------------------------------------------
+
+PATHS = pm.paths()
+
+#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def colour_getter(long_name):
+def old_colour_getter(long_name):
+
+
+    RGB_DICT = {
+        'Soil heat flux at depth z': cm.get_cmap(name='Set2'),
+        'Soil temperature': cm.get_cmap(name='Set1_r'),
+        'Soil water content': cm.get_cmap(name='Set1')
+        }
+
+    colours = [RGB_DICT[long_name](i) for i in range(8)]
+    for colour in colours:
+        rgb_str = ','.join([str(int(x)) for x in np.array(colour[:-1]) * 255])
+        yield f'RGBA({rgb_str},1)'
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def colour_getter(long_name, n_col=6):
     """
     Generator to create a set of formatted strings to specify successive
     colours for a line plot
@@ -43,6 +64,8 @@ def colour_getter(long_name):
     ----------
     long_name : str
         The long name of the variable as it appears in RGB_DICT.
+    n_col : int
+        Number of colours to yield
 
     Yields
     ------
@@ -52,64 +75,67 @@ def colour_getter(long_name):
 
     """
 
-    RGB_DICT = {
-        'Soil heat flux at depth z': cm.get_cmap(name='Set1'),
-        'Soil temperature': cm.get_cmap(name='Set1_r'),
-        'Soil water content': cm.get_cmap(name='Set1')
+    SCHEME = {
+        'Soil heat flux at depth z': {
+            'colour': 'Set1', 'seq': False, 'min': None, 'max': None
+            },
+        'Soil temperature': {
+            'colour': 'hot', 'seq': True, 'min': 0.3, 'max': 0.6
+            },
+        'Soil water content': {
+            'colour': 'winter', 'seq': True, 'min': 0, 'max': 1
+            }
         }
-    output_str = 'RGBA({},1)'
-    colours = [RGB_DICT[long_name](i) for i in range(9)]
-    for colour in colours:
-        colour_string = (
-            output_str.format(
-                ','.join([str(int(x)) for x in np.array(colour[:-1]) * 255])
-                )
+    scheme = SCHEME[long_name]
+    cmap = cm.get_cmap(name=scheme['colour'])
+    if scheme['seq']:
+        cmap = colors.LinearSegmentedColormap.from_list(
+            f'trunc({cmap.name},{scheme["min"]:.2f},{scheme["max"]:.2f})',
+            cmap(np.linspace(scheme['min'], scheme['max'], 100))
             )
-        yield colour_string
+        colours = [cmap(val) for val in np.linspace(0, 1, n_col)]
+    else:
+        colours = [cmap(i) for i in range(8)]
+    for colour in colours:
+        yield (
+            'RGBA('
+            f'{",".join((np.array(colour[:3])*255).astype(int).astype(str))},'
+            '1)'
+            )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_comm_status_string(logger_name):
+def line_plot_parser_new(site, parser, long_name, screen_name, component_name):
 
-    return (
-        '"Server:__statistics__.{}_std.Collection State" > 2 '
-        .format(logger_name)
-        )
-#------------------------------------------------------------------------------
+    mapper = vm.mapper(site=site)
 
-#------------------------------------------------------------------------------
-def get_no_data_status_string(logger_name, table_name):
-
-    return '"Server:{0}.{1}"'.format(logger_name, table_name)
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def line_plot_parser(long_name, screen_name, component_name):
-
-    try:
-        df = mapper.site_df.loc[long_name]
-        if isinstance(df, pd.core.series.Series):
-            df = df.to_frame().T
-    except KeyError:
-        'No data for this variable!'
-        return
+    # Get the plot editor and find the existing labels
     plot_editor = parser.get_editor_by_component_name(
         screen=screen_name, component_name=component_name,
         )
+
+    # Find the existing and new labels - if there are more in the template file,
+    # drop the extras
     old_labels = [
         x for x in plot_editor.get_trace_labels()
         if plot_editor.get_axis_by_label(x)=='left'
         ]
-    new_labels = df.translation_name.tolist()
+    new_labels = mapper.get_field_from_variable(
+        variable=long_name, return_field='translation_name'
+        )
     if len(old_labels) > len(new_labels):
         drop_labels = old_labels[len(new_labels):]
         for this_label in drop_labels:
             plot_editor.drop_trace_element_by_label(label=this_label)
             old_labels.remove(this_label)
-    palette = colour_getter(long_name=long_name)
+
+    # Get the palette generator
+    palette = colour_getter(long_name=long_name, n_col=len(new_labels))
+
+    # Now reconstruct the plot traces
     for i, new_label in enumerate(new_labels):
         colour = next(palette)
-        calculation_str = '"DataFile:merged.{}"'.format(new_label)
+        calculation_str = f'"DataFile:merged.{new_label}"'
         try:
             elem_label = old_labels[i]
             plot_editor.set_trace_attributes_by_label(
@@ -126,222 +152,402 @@ def line_plot_parser(long_name, screen_name, component_name):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-### MAIN CODE ###
+def do_file_config(site, parser):
+
+    # Get the data source editor and set the source path
+    data_source_editor = parser.get_file_source_editor(source_type='data')
+    data_source_editor.get_set_source_file(
+        path=str(
+            PATHS.get_local_path(
+                resource='data', stream='flux_slow', site=site, check_exists=True
+                ) / f'{site}_merged_std.dat'
+            )
+        )
+
+    # Get the details source editor and set the source path
+    details_source_editor = parser.get_file_source_editor(source_type='details')
+    details_source_editor.get_set_source_file(
+        path=str(
+            PATHS.get_local_path(resource='site_details', site=site) /
+            f'{site}_details.dat'
+            )
+        )
+
+    # Get the settings editor and change the data path for the snapshot output
+    settings_editor = parser.get_basic_settings_editor()
+    settings_editor.get_set_snapshot_destination(
+        text=PATHS.get_local_path(
+            resource='data', stream='rtmc', site=site, as_str=True
+            )
+        )
 #------------------------------------------------------------------------------
 
-# Create the mapper and parser objects
-PATHS = pm.paths()
-deets = sd.site_details()
-site = sys.argv[1]
-mapper = vm.mapper(site=site)
-template_path = PATHS.get_local_path(
-    resource='RTMC_project_template', check_exists=True
-    )
-parser = rxp.rtmc_parser(template_path)
-
 #------------------------------------------------------------------------------
-# Background configs
-#------------------------------------------------------------------------------
+def do_system_config(site, parser):
 
-# Change the data path for the logger data
-logger_data_source = str(
-    PATHS.get_local_path(resource='data', stream='flux_slow', site=site,
-                         check_exists=True) /
-    f'{site}_merged_std.dat'
-    )
-data_source_editor = parser.get_file_source_editor(source_type='data')
-data_source_editor.get_set_source_file(path=logger_data_source)
+    # Set the screen name
+    SCREEN = 'System'
+    mapper = vm.mapper(site=site)
+    syntax_generator = rxp.RtmcSyntaxGenerator()
+    component_aliases = {
+        'utc_time': 'Segmented Time1',
+        'Comm Status Alarm': 'Comm Status Alarm',
+        'No Data Alarm': 'No Data Alarm',
+        'contour_image': 'Image1',
+        'tower_image': 'Image2',
+        'IRGA_signal_chart': 'Time Series Chart1',
+        'IRGA_signal_digital': 'Digital13'
+         }
 
-# Change the data path for the details data
-details_data_source = str(
-    PATHS.get_local_path(resource='site_details', site=site)
-    )
-details_source_editor = parser.get_file_source_editor(source_type='details')
-details_source_editor.get_set_source_file(path=details_data_source)
+    # Change the UTC offset argument to the correct one for site
+    # (using negative minutes as offset from site time as format)
+    time_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['utc_time']
+        )
+    time_editor.get_set_element_offset_text(
+        text=str(int(
+            sd.site_details().get_single_site_details(
+                site=site, field='UTC_offset'
+                ) *
+            -60
+            ))
+        )
 
-# Change the data path for the snapshot output
-snapshot_destination = (
-    PATHS.get_local_path(resource='data', stream='rtmc', site=site, as_str=True)
-    )
-settings_editor = parser.get_basic_settings_editor()
-settings_editor.get_set_snapshot_destination(text=snapshot_destination)
-
-#------------------------------------------------------------------------------
-# System screen configs
-#------------------------------------------------------------------------------
-
-# Change the UTC offset argument to the correct one for site
-time_editor = parser.get_editor_by_component_name(
-    screen='System', component_name='Segmented Time1'
-    )
-utc_offset = str(int(deets.df.loc[site, 'UTC_offset']*-60))
-time_editor.get_set_element_offset_text(text=utc_offset)
-
-# Change the comm status alarm component calculation string
-logger_name = mapper.get_logger_list(long_name='CO2 flux')
-if not isinstance(logger_name, float):
-    calculation_str = get_comm_status_string(logger_name=logger_name)
+    # Change the comm status alarm component calculation string
+    logger_name = mapper.get_field_from_variable(
+        variable='CO2 flux', return_field='logger_name'
+        )[0]
     comm_status_editor = parser.get_editor_by_component_name(
-        screen='System', component_name='Comm Status Alarm'
+        screen=SCREEN, component_name=component_aliases['Comm Status Alarm']
         )
     comm_status_editor.get_set_element_calculation_text(
-        text=calculation_str)
-
-# Change the no data alarm component calculation string
-logger_name = mapper.get_logger_list(long_name='CO2 flux')
-table_name = mapper.get_table_list(long_name='CO2 flux')
-if not isinstance(logger_name, float):
-    calculation_str = get_no_data_status_string(
-        logger_name=logger_name, table_name=table_name
+        text=syntax_generator.get_comm_status_string(logger_name=logger_name)
         )
+
+    # Change the no data alarm component calculation string
+    table_name = mapper.get_field_from_variable(
+        variable='CO2 flux', return_field='table_name'
+        )[0]
     no_data_editor = parser.get_editor_by_component_name(
-        screen='System', component_name='No Data Alarm'
+        screen=SCREEN, component_name=component_aliases['No Data Alarm']
         )
     no_data_editor.get_set_element_calculation_text(
-        text=calculation_str)
-
-# Reconfigure the figure sources (contour and site photo)
-contour_path = str(PATHS.get_site_image(site=site, img_type='contour'))
-img_editor = parser.get_editor_by_component_name(
-    screen='System', component_name='Image1'
-    )
-img_editor.get_set_element_ImgName(text=contour_path)
-try:
-    tower_path = str(PATHS.get_site_image(
-        site=site, img_type='tower', check_exists=True
-        ))
-    img_editor = parser.get_editor_by_component_name(
-        screen='System', component_name='Image2'
+        text=syntax_generator.get_no_data_status_string(
+            logger_name=logger_name, table_name=table_name
+            )
         )
-    img_editor.get_set_element_ImgName(text=tower_path)
-except FileNotFoundError:
-    print('No tower image found for {}'.format(site))
-    pass
 
-# Reconfigure the signal diagnostic plot to use the correct IRGA signal type
-signal_str = mapper.rtmc_syntax_generator.get_aliased_output(
-    long_name='IRGA signal'
-    )
-line_plot_editor = parser.get_editor_by_component_name(
-    screen='System', component_name='Time Series Chart1'
-    )
-line_plot_editor.get_set_trace_calculation_by_label(
-    label='Signal', calculation_text=signal_str)
+    # Reconfigure the figure sources for:
+    # Contour image...
+    try:
+        img_editor = parser.get_editor_by_component_name(
+            screen=SCREEN, component_name=component_aliases['contour_image']
+            )
+        img_editor.get_set_element_ImgName(
+            text=str(PATHS.get_site_image(
+                site=site, img_type='contour', check_exists=True
+                ))
+            )
+    except FileNotFoundError:
+        print('No contour image found for {}'.format(site))
 
-# Reconfigure the signal digital output to use the correct IRGA signal type
-digital_editor = parser.get_editor_by_component_name(
-    screen='System', component_name='Digital13'
-    )
-digital_editor.get_set_element_calculation_text(text=signal_str)
+    # Site image...
+    try:
+        img_editor = parser.get_editor_by_component_name(
+            screen=SCREEN, component_name=component_aliases['tower_image']
+            )
+        img_editor.get_set_element_ImgName(
+            text=str(PATHS.get_site_image(
+                site=site, img_type='tower', check_exists=True
+                ))
+            )
+    except FileNotFoundError:
+        print('No tower image found for {}'.format(site))
 
-#------------------------------------------------------------------------------
-# Turbulent_flux screen configs
-#------------------------------------------------------------------------------
 
-# Reconfigure the mean water trace of the time series
-digital_moist_str = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil water content'
+    # Reconfigure the signal diagnostic plot to use the correct IRGA signal type
+    signal_str = syntax_generator.get_aliased_output(
+        var_list=mapper.get_field_from_variable(
+            variable='IRGA signal', return_field='translation_name'
+            )
         )
-    )
-line_plot_editor = parser.get_editor_by_component_name(
-    screen='Turbulent_flux', component_name='Time Series Chart2'
-    )
-line_plot_editor.get_set_trace_calculation_by_label(
-    label='Sws', calculation_text=digital_moist_str
-    )
-
-# Reconfigure the mean soil temperature and basic status bar
-digital_temp_str = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil temperature'
+    line_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['IRGA_signal_chart']
         )
-    )
-soil_T_digital_editor = parser.get_editor_by_component_name(
-    screen='Turbulent_flux', component_name='Digital2'
-    )
-soil_T_digital_editor.get_set_element_calculation_text(text=digital_temp_str)
-StatusBar_temp_str = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil temperature', scaled_to_range=True,
-        start_cond='start_absolute'
+    line_plot_editor.get_set_trace_calculation_by_label(
+        label='Signal', calculation_text=signal_str
         )
-    )
-soil_T_StatusBar_editor = parser.get_editor_by_component_name(
-    screen='Turbulent_flux', component_name='Basic Status Bar'
-    )
-soil_T_StatusBar_editor.get_set_pointer_calculation_text(
-    text=StatusBar_temp_str
-    )
 
-# Reconfigure the mean soil moisture and basic status bar
-soil_moist_digital_editor = parser.get_editor_by_component_name(
-    screen='Turbulent_flux', component_name='Digital4'
-    )
-soil_moist_digital_editor.get_set_element_calculation_text(
-    text=digital_moist_str
-    )
-soil_moist_StatusBar_editor = parser.get_editor_by_component_name(
-    screen='Turbulent_flux', component_name='Basic Status Bar4'
-    )
-StatusBar_moist_str = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil water content', scaled_to_range=True,
-        start_cond='start_absolute'
+    # Reconfigure the signal digital output to use the correct IRGA signal type
+    digital_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['IRGA_signal_digital']
         )
-    )
-soil_moist_StatusBar_editor.get_set_pointer_calculation_text(
-    text=StatusBar_moist_str
-    )
-
-#------------------------------------------------------------------------------
-# Soil screen configs
+    digital_editor.get_set_element_calculation_text(text=signal_str)
 #------------------------------------------------------------------------------
 
-# Reconfigure the soil heat flux plot
-line_plot_parser(long_name='Soil heat flux at depth z', screen_name='Soil',
-                  component_name='Time Series Chart')
+#------------------------------------------------------------------------------
+def do_turbulent_flux_config(site, parser):
 
-# Reconfigure the soil temperature plot
-line_plot_parser(long_name='Soil temperature', screen_name='Soil',
-                  component_name='Time Series Chart1')
+    SCREEN = 'Turbulent_flux'
+    mapper = vm.mapper(site=site)
+    syntax_generator = rxp.RtmcSyntaxGenerator()
+    component_aliases = {
+        'soil_moisture_chart': 'Time Series Chart2',
+        'soil_moisture_digital': 'Digital4',
+        'soil_moisture_status_bar': 'Basic Status Bar4',
+        'soil_temperature_chart': 'Time Series Chart3',
+        'soil_temperature_digital': 'Digital2',
+        'soil_temperature_status_bar': 'Basic Status Bar'
+        }
 
-# Reconfigure the soil moisture plot
-line_plot_parser(long_name='Soil water content', screen_name='Soil',
-                  component_name='Time Series Chart2')
+    # Get the soil moisture variables
+    soil_moist_vars = mapper.get_field_from_variable(
+        variable='Soil water content', return_field='translation_name'
+        )
 
-# Reconfigure the soil heat flux and storage average plot
-# First heat storage
-soil_plot_editor = parser.get_editor_by_component_name(
-    screen='Soil', component_name='Time Series Chart3'
-    )
-heat_storage_string = (
-    mapper.rtmc_syntax_generator.get_soil_heat_storage()
-    )
-soil_plot_editor.set_trace_attributes_by_label(
-    label='Gs_mean', calculation=heat_storage_string
-    )
+    # Reconfigure the mean soil water trace of the time series
+    digital_moist_str = syntax_generator.get_aliased_output(
+        var_list=soil_moist_vars
+        )
+    line_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['soil_moisture_chart']
+        )
+    line_plot_editor.get_set_trace_calculation_by_label(
+        label='Sws', calculation_text=digital_moist_str
+        )
 
-# Then heat flux plates
-uncorr_heat_flux_string = (
-    mapper.rtmc_syntax_generator.get_aliased_output(
-        long_name='Soil heat flux at depth z')
-    )
-soil_plot_editor.set_trace_attributes_by_label(
-    label='Gz_mean', calculation=uncorr_heat_flux_string
-    )
+    # Reconfigure the mean soil moisture digital display
+    soil_moist_digital_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['soil_moisture_digital']
+        )
+    soil_moist_digital_editor.get_set_element_calculation_text(
+        text=digital_moist_str
+        )
 
-# Then combination method
-corr_heat_flux_string = (
-    mapper.rtmc_syntax_generator.get_corrected_soil_heat_flux()
-    )
-soil_plot_editor.set_trace_attributes_by_label(
-    label='G_mean', calculation=corr_heat_flux_string
-    )
+    # Reconfigure the mean soil moisture basic status bar
+    soil_moist_StatusBar_editor = parser.get_editor_by_component_name(
+        screen=SCREEN,
+        component_name=component_aliases['soil_moisture_status_bar']
+        )
+    soil_moist_StatusBar_editor.get_set_pointer_calculation_text(
+        text=syntax_generator.get_aliased_output(
+            var_list=soil_moist_vars,
+            scaled_to_range=True,
+            start_cond='start_absolute'
+            )
+        )
 
-# Write to a new file
-new_file_name = str(
-    PATHS.get_local_path(resource='RTMC_project_template').parent /
-    '{}_std.rtmc2'.format(site)
-    )
-parser.write_to_file(file_name=new_file_name)
+    # Get the soil temperature variables
+    soil_T_vars = mapper.get_field_from_variable(
+        variable='Soil temperature', return_field='translation_name'
+        )
+    soil_T_str = syntax_generator.get_aliased_output(soil_T_vars)
+
+    # Reconfigure the mean soil temperature trace of the air / soil T and Fsd chart
+    soil_T_line_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['soil_temperature_chart']
+        )
+    soil_T_line_plot_editor.get_set_trace_calculation_by_label(
+        label='Tsoil', calculation_text=soil_T_str
+        )
+
+    # Reconfigure the mean soil temperature digital display
+    soil_T_digital_editor = parser.get_editor_by_component_name(
+        screen=SCREEN,
+        component_name=component_aliases['soil_temperature_digital']
+        )
+    soil_T_digital_editor.get_set_element_calculation_text(
+        text=soil_T_str
+        )
+
+    # Reconfigure the mean soil temperature basic status bar
+    soil_T_StatusBar_editor = parser.get_editor_by_component_name(
+        screen=SCREEN,
+        component_name=component_aliases['soil_temperature_status_bar']
+        )
+    soil_T_StatusBar_editor.get_set_pointer_calculation_text(
+        text=syntax_generator.get_aliased_output(
+            var_list=soil_T_vars, scaled_to_range=True,
+            start_cond='start_absolute'
+            )
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def do_radiant_flux_config(site, parser):
+
+    SCREEN = 'Radiant_flux'
+    mapper = vm.mapper(site=site)
+    syntax_generator = rxp.RtmcSyntaxGenerator()
+    component_aliases = {
+        'avail_energy_chart': 'Time Series Chart2',
+        'energy_balance_chart': 'Time Series Chart3'
+        }
+
+    # Get soil variables for available energy and energy balance calculation
+    soil_HF_list = mapper.get_field_from_variable(
+        variable='Soil heat flux at depth z', return_field='translation_name'
+        )
+    soil_T_list = mapper.get_field_from_variable(
+        variable='Soil temperature', return_field='translation_name'
+        )
+
+    # Reconfigure available energy plot
+    avail_energy_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['avail_energy_chart']
+        )
+    avail_energy_plot_editor.get_set_trace_calculation_by_label(
+        label='Avail',
+        calculation_text=syntax_generator.get_available_energy(
+            soil_HF_list=soil_HF_list, soil_T_list=soil_T_list
+            )
+        )
+
+    # Reconfigure available energy digital
+    avail_energy_digital_editor=parser.get_editor_by_component_name(
+        screen='Radiant_flux', component_name='Digital10'
+        )
+    avail_energy_digital_editor.get_set_element_calculation_text(
+        syntax_generator.get_available_energy(
+            soil_HF_list=soil_HF_list, soil_T_list=soil_T_list
+            )
+        )
+
+    # Reconfigure residual plot
+    residual_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name=component_aliases['energy_balance_chart']
+        )
+    residual_plot_editor.get_set_trace_calculation_by_label(
+        label='Residual',
+        calculation_text=syntax_generator.get_energy_balance_residual(
+            soil_HF_list=soil_HF_list, soil_T_list=soil_T_list
+            )
+        )
+    residual_plot_editor.get_set_trace_calculation_by_label(
+        label='Rad',
+        calculation_text=syntax_generator.get_net_radiation(cuml=True)
+        )
+    residual_plot_editor.get_set_trace_calculation_by_label(
+        label='NonRad',
+        calculation_text=syntax_generator.get_net_non_radiant_energy(
+            soil_HF_list=soil_HF_list, soil_T_list=soil_T_list, cuml=True
+            )
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def do_soil_config(site, parser):
+
+    SCREEN = 'Soil'
+    mapper = vm.mapper(site=site)
+    syntax_generator = rxp.RtmcSyntaxGenerator()
+    component_aliases = {
+        'soil_heat_flux_chart': 'Time Series Chart',
+        'soil_temperature_chart': 'Time Series Chart1',
+        'soil_moisture_chart': 'Time Series Chart2'
+        }
+
+    # Get soil variables for available energy and energy balance calculation
+    soil_HF_list = mapper.get_field_from_variable(
+        variable='Soil heat flux at depth z', return_field='translation_name'
+        )
+    soil_T_list = mapper.get_field_from_variable(
+        variable='Soil temperature', return_field='translation_name'
+        )
+
+    # Reconfigure the soil heat flux plot
+    line_plot_parser_new(
+        site=site,
+        parser=parser,
+        long_name='Soil heat flux at depth z',
+        screen_name=SCREEN,
+        component_name=component_aliases['soil_heat_flux_chart']
+        )
+
+    # Reconfigure the soil temperature plot
+    line_plot_parser_new(
+        site=site,
+        parser=parser,
+        long_name='Soil temperature',
+        screen_name=SCREEN,
+        component_name=component_aliases['soil_temperature_chart']
+        )
+
+    # Reconfigure the soil moisture plot
+    line_plot_parser_new(
+        site=site,
+        parser=parser,
+        long_name='Soil water content',
+        screen_name=SCREEN,
+        component_name=component_aliases['soil_moisture_chart']
+        )
+
+    # Reconfigure the soil heat flux and storage average plot
+    # Get the editor
+    soil_plot_editor = parser.get_editor_by_component_name(
+        screen=SCREEN, component_name='Time Series Chart3'
+        )
+
+    # Edit storage
+    soil_plot_editor.set_trace_attributes_by_label(
+        label='Gs_mean',
+        calculation=syntax_generator.get_soil_heat_storage(
+            soil_T_list=soil_T_list
+            )
+        )
+
+    # Edit heat flux plates
+    soil_plot_editor.set_trace_attributes_by_label(
+        label='Gz_mean',
+        calculation=syntax_generator.get_soil_heat_flux(
+            soil_HF_list=soil_HF_list
+            )
+        )
+
+    # Edit combination method
+    soil_plot_editor.set_trace_attributes_by_label(
+        label='G_mean',
+        calculation=syntax_generator.get_corrected_soil_heat_flux(
+            soil_HF_list=soil_HF_list, soil_T_list=soil_T_list)
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def main(site, file_name=None):
+
+    # Get the RTMC XML parser
+    path_to_template = PATHS.get_local_path(
+        resource='RTMC_project_template', check_exists=True
+        )
+    parser = rxp.rtmc_parser(path=path_to_template)
+
+    # Don't allow overwrite of original template file, or misnaming of extension
+    if file_name:
+        if file_name == path_to_template.name:
+            raise FileExistsError('Overwite of template not allowed!')
+        if not file_name.split('.')[-1] == 'rtmc2':
+            raise RuntimeError('File name must have .rtmc2 suffix!')
+        output_path = str(path_to_template.parent / file_name)
+    else:
+        output_path = str(path_to_template.parent / f'{site}_std.rtmc2')
+
+
+    # Edit the XML elements for each screen to reflect site variables
+    do_file_config(site=site, parser=parser)
+    do_system_config(site=site, parser=parser)
+    do_turbulent_flux_config(site=site, parser=parser)
+    do_radiant_flux_config(site=site, parser=parser)
+    do_soil_config(site=site, parser=parser)
+
+    # Write altered content to a new file
+    parser.write_to_file(file_name=output_path)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+if __name__=='__main__':
+
+    site = sys.argv[1]
+    main(
+        site=site,
+        file_name=f'{site}_test.rtmc2'
+        )
