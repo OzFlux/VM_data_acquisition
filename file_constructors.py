@@ -453,40 +453,105 @@ def get_latest_10Hz_file(site):
         return 'No files'
 #------------------------------------------------------------------------------
 
+# #------------------------------------------------------------------------------
+# def make_site_info_TOA5_old(site):
+
+#     """Make TOA5 constructor containing details from site_master"""
+
+#     rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude',
+#                    'elevation': 'Elevation', 'time_zone': 'Time zone',
+#                    'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
+
+#     logging.info('Generating site details file')
+#     details = SITE_DETAILS.get_single_site_details(site=site).copy()
+#     details.rename(rename_dict, inplace=True)
+#     details_new = pd.concat([
+#         pd.Series({'Start year': details.date_commissioned.year}),
+#         details[rename_dict.values()]
+#         ])
+#     details_new.name = details.name
+#     for var in ['Elevation', 'Time step']:
+#         details_new.loc[var] = details_new.loc[var].astype(int)
+#     details_new['sunrise'] = (
+#         SITE_DETAILS.get_sunrise(site=site, date=dt.datetime.now(), which='next')
+#         .strftime('%H:%M')
+#         )
+#     details_new['sunset'] = (
+#         SITE_DETAILS.get_sunset(site=site, date=dt.datetime.now(), which='next')
+#         .strftime('%H:%M')
+#         )
+#     details_new['10Hz file'] = get_latest_10Hz_file(site=site)
+#     df = pd.DataFrame(details_new).T
+#     df.index = [
+#         dt.datetime.combine(dt.datetime.now().date(), dt.datetime.min.time())
+#         ]
+#     df.index.name = 'TIMESTAMP'
+#     df.loc[:, 'Start year'] = str(df.loc[:, 'Start year'].item())
+#     info_header = ['TOA5', site, 'CR1000', '9999', 'cr1000.std.99.99',
+#                    'CPU:noprogram.cr1', '9999', 'site_details']
+#     constructor = toa5.TOA5_file_constructor(data=df, info_header=info_header)
+#     output_path = (
+#         PATHS.get_local_path(resource='site_details') / f'{site}_details.dat'
+#         )
+#     constructor.write_output_file(dest=output_path)
+# #------------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 def make_site_info_TOA5(site):
 
     """Make TOA5 constructor containing details from site_master"""
 
-    rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude',
-                   'elevation': 'Elevation', 'time_zone': 'Time zone',
-                   'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
-
     logging.info('Generating site details file')
+
+    # Get the site info
     details = SITE_DETAILS.get_single_site_details(site=site).copy()
-    details.rename(rename_dict, inplace=True)
-    details_new = pd.concat([
-        pd.Series({'Start year': details.date_commissioned.year}),
-        details[rename_dict.values()]
-        ])
-    details_new.name = details.name
-    for var in ['Elevation', 'Time step']:
-        details_new.loc[var] = details_new.loc[var].astype(int)
-    details_new['sunrise'] = (
-        SITE_DETAILS.get_sunrise(site=site, date=dt.datetime.now(), which='next')
-        .strftime('%H:%M')
+
+    # Get the name of the flux file
+    mapper = vm.mapper(site=site)
+    flux_file = mapper.get_file_from_variable(
+        variable='CO2 flux', abs_path=True
+        )[0]
+
+    # Get the EC logger info
+    logger_info = (
+        vm.make_table_df(site=site)
+        .loc[
+            flux_file.name,
+            ['station_name', 'logger_type', 'serial_num', 'OS_version',
+             'program_name']
+            ]
         )
-    details_new['sunset'] = (
-        SITE_DETAILS.get_sunset(site=site, date=dt.datetime.now(), which='next')
-        .strftime('%H:%M')
+
+    # Get the pct missing data
+    handler = toa5.single_file_data_handler(file=flux_file)
+    missing = pd.Series(
+        {'pct_missing': handler.get_missing_records()['%_missing']}
         )
-    details_new['10Hz file'] = get_latest_10Hz_file(site=site)
-    df = pd.DataFrame(details_new).T
-    df.index = [
-        dt.datetime.combine(dt.datetime.now().date(), dt.datetime.min.time())
-        ]
+
+    # Build additional details
+    midnight_time = dt.datetime.combine(
+        dt.datetime.now().date(), dt.datetime.min.time()
+        )
+    time_getter = mf.TimeFunctions(
+        lat=details.latitude, lon=details.longitude, elev=details.elevation,
+        date=midnight_time)
+    extra_details = pd.Series({
+        'start_year': str(details.date_commissioned.year),
+        'sunrise': time_getter.get_next_sunrise().strftime('%H:%M'),
+        'sunset': time_getter.get_next_sunset().strftime('%H:%M'),
+        '10Hz_file': get_latest_10Hz_file(site=site)
+        })
+
+    # Make the dataframe
+    df = (
+        pd.concat([details, extra_details, logger_info, missing])
+        .to_frame()
+        .T
+        )
+
+    # Gussy it up for output to TOA5, and then write
+    df.index = [midnight_time]
     df.index.name = 'TIMESTAMP'
-    df.loc[:, 'Start year'] = str(df.loc[:, 'Start year'].item())
     info_header = ['TOA5', site, 'CR1000', '9999', 'cr1000.std.99.99',
                    'CPU:noprogram.cr1', '9999', 'site_details']
     constructor = toa5.TOA5_file_constructor(data=df, info_header=info_header)
@@ -496,31 +561,34 @@ def make_site_info_TOA5(site):
     constructor.write_output_file(dest=output_path)
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def make_site_logger_TOA5(site):
 
-    table_df=(
-        vm.make_table_df(site=site)
-        [['station_name', 'logger_type', 'serial_num', 'OS_version',
-          'program_name', 'program_sig']]
-        .reset_index()
-        .set_index(keys='station_name')
-        )
-    table_df = (
-        table_df[~table_df.index.duplicated()]
-        .reset_index()
-        )
-    new_idx = pd.date_range(
-        start=dt.datetime.now().date() - dt.timedelta((len(table_df) - 1)),
-        periods=len(table_df),
-        freq='D'
-        )
-    new_idx.name = 'TIMESTAMP'
-    table_df.index = new_idx
-    TOA5_maker = toa5.TOA5_file_constructor(data=table_df)
-    output_path = PATHS.get_local_path(resource='site_details')
-    TOA5_maker.write_output_file(dest=output_path / f'{site}_logger_details.dat')
-#------------------------------------------------------------------------------
+# #------------------------------------------------------------------------------
+# def make_site_logger_TOA5(site):
+
+#     table_df=(
+#         vm.make_table_df(site=site)
+#         [['station_name', 'logger_type', 'serial_num', 'OS_version',
+#           'program_name']]
+#         .reset_index(drop=True)
+#         .drop_duplicates()
+#         .set_index(keys='station_name')
+#         .loc[f'{site}_EC']
+#         )
+#     table_df = (
+#         table_df[~table_df.index.duplicated()]
+#         .reset_index()
+#         )
+#     new_idx = pd.date_range(
+#         start=dt.datetime.now().date() - dt.timedelta((len(table_df) - 1)),
+#         periods=len(table_df),
+#         freq='D'
+#         )
+#     new_idx.name = 'TIMESTAMP'
+#     table_df.index = new_idx
+#     TOA5_maker = toa5.TOA5_file_constructor(data=table_df)
+#     output_path = PATHS.get_local_path(resource='site_details')
+#     TOA5_maker.write_output_file(dest=output_path / f'{site}_logger_details.dat')
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def make_site_info_excel(dest='E:/Sites/test.xlsx'):
@@ -556,24 +624,41 @@ def make_site_info_excel(dest='E:/Sites/test.xlsx'):
         records_list.append(rslt_dict)
 
     # Update the dataframe with the newly collected info
-    df = pd.concat([df, pd.DataFrame(records_list, index=df.index)], axis=1)
+    df = (
+        pd.concat([df, pd.DataFrame(records_list, index=df.index)], axis=1)
+        .reset_index()
+        )
 
     # Get the list of sites to iterate over
-    sites = df.index.get_level_values('site').unique()
+    sites = df.site.unique()
 
     # Get the list of 10Hz files collected by site
-    files = pd.DataFrame(
-        {site: get_latest_10Hz_file(site) for site in sites},
-        index=['file_name']
-        ).T
+    files_df = pd.DataFrame(
+        zip(
+            sites,
+            [get_latest_10Hz_file(site) for site in sites]
+            ),
+        columns=['site', 'file_name']
+        )
 
     # Write sheets
     with pd.ExcelWriter(path=dest) as writer:
-        df.to_excel(writer, sheet_name='Summary')
-        files.to_excel(writer, sheet_name='10Hz_files')
+
+        # Summary sheet with data tables for all sites
+        sheet_name = 'Summary'
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+        set_column_lengths(df=df, xl_writer=writer, sheet=sheet_name)
+
+        # 10Hz file acquisition
+        sheet_name = '10Hz_files'
+        files_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        set_column_lengths(df=files_df, xl_writer=writer, sheet=sheet_name)
+
+        # Critical variables for individual sites
         for site in sites:
             site_df = build_site_variable_data(site=site)
-            site_df.to_excel(writer, sheet_name=site)
+            site_df.to_excel(writer, sheet_name=site, index=False)
+            set_column_lengths(df=site_df, xl_writer=writer, sheet=site)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -584,30 +669,52 @@ def build_site_variable_data(site):
     rslt_list = []
     for variable in df.columns:
         s = df[variable].dropna()
-        fields = (
-            merger.var_map.site_df.loc[
-                merger.var_map.site_df.translation_name==variable
-                ]
-            )
-        rslt_dict = {
-            'variable': variable,
-            'station': fields.logger_name.item(),
-            'table': fields.table_name.item()
-            }
+        logger = merger.var_map.get_field_from_variable(
+            variable=variable,
+            from_field='translation_name',
+            return_field='logger_name'
+            )[0]
+        table = merger.var_map.get_field_from_variable(
+            variable=variable,
+            from_field='translation_name',
+            return_field='table_name'
+            )[0]
+        try:
+            np.isnan(logger)
+            logger = 'Calculated'
+            np.isnan(table)
+            table = 'Calculated'
+        except TypeError:
+            pass
+        rslt_dict = {'variable': variable, 'station': logger, 'table': table}
         try:
             rslt_dict.update(
-                {
-                    'last_valid_record': s.index[-1].strftime('%Y-%m-%d %H:%M'),
-                    'value': s[-1]
-                    }
+                {'last_valid_record': s.index[-1].strftime('%Y-%m-%d %H:%M'),
+                 'value': s[-1]}
                 )
         except IndexError:
-            rslt_dict.update(
-                {
-                    'last_valid_record': None,
-                    'value': None
-                    }
-                )
+            rslt_dict.update({'last_valid_record': None, 'value': None})
         rslt_list.append(rslt_dict)
-    return pd.DataFrame(rslt_list).set_index(keys='variable')
+    return pd.DataFrame(rslt_list)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def set_column_lengths(df, xl_writer, sheet, add_space=2):
+
+    alt_list = ['backups']
+
+    for i, column in enumerate(df.columns):
+        if column in alt_list:
+            col_width = (
+                df[column].apply(
+                    lambda x: len(max(x.split(','), key=len))
+                    )
+                .max()
+                )
+        else:
+            col_width = max(
+                df[column].astype(str).map(len).max(),
+                len(column)
+                )
+        xl_writer.sheets[sheet].set_column(i, i, col_width + add_space)
 #------------------------------------------------------------------------------
