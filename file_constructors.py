@@ -335,9 +335,12 @@ class L1Constructor():
         self.path = PATHS.get_local_path(
             resource='data', stream='flux_slow', site=site
             )
-        self.time_step = int(SITE_DETAILS.get_single_site_details(
-            site=site, field='time_step'
-            ))
+        if not site == 'Tumbarumba':
+            self.time_step = int(SITE_DETAILS.get_single_site_details(
+                site=site, field='time_step'
+                ))
+        else:
+            self.time_step = 30
         self.tables_df = vm.make_table_df(site=site)
 
     #--------------------------------------------------------------------------
@@ -358,6 +361,7 @@ class L1Constructor():
             file_list = [file] + toa5.get_backup_files(self.path / file)
             for sub_file in file_list:
                 dict_list.append(toa5.get_file_dates(file=self.path / sub_file))
+
         return pd.date_range(
             start=np.array([x['start_date'] for x in dict_list]).min(),
             end=np.array([x['end_date'] for x in dict_list]).max(),
@@ -453,49 +457,6 @@ def get_latest_10Hz_file(site):
         return 'No files'
 #------------------------------------------------------------------------------
 
-# #------------------------------------------------------------------------------
-# def make_site_info_TOA5_old(site):
-
-#     """Make TOA5 constructor containing details from site_master"""
-
-#     rename_dict = {'latitude': 'Latitude', 'longitude': 'Longitude',
-#                    'elevation': 'Elevation', 'time_zone': 'Time zone',
-#                    'time_step': 'Time step', 'UTC_offset': 'UTC offset'}
-
-#     logging.info('Generating site details file')
-#     details = SITE_DETAILS.get_single_site_details(site=site).copy()
-#     details.rename(rename_dict, inplace=True)
-#     details_new = pd.concat([
-#         pd.Series({'Start year': details.date_commissioned.year}),
-#         details[rename_dict.values()]
-#         ])
-#     details_new.name = details.name
-#     for var in ['Elevation', 'Time step']:
-#         details_new.loc[var] = details_new.loc[var].astype(int)
-#     details_new['sunrise'] = (
-#         SITE_DETAILS.get_sunrise(site=site, date=dt.datetime.now(), which='next')
-#         .strftime('%H:%M')
-#         )
-#     details_new['sunset'] = (
-#         SITE_DETAILS.get_sunset(site=site, date=dt.datetime.now(), which='next')
-#         .strftime('%H:%M')
-#         )
-#     details_new['10Hz file'] = get_latest_10Hz_file(site=site)
-#     df = pd.DataFrame(details_new).T
-#     df.index = [
-#         dt.datetime.combine(dt.datetime.now().date(), dt.datetime.min.time())
-#         ]
-#     df.index.name = 'TIMESTAMP'
-#     df.loc[:, 'Start year'] = str(df.loc[:, 'Start year'].item())
-#     info_header = ['TOA5', site, 'CR1000', '9999', 'cr1000.std.99.99',
-#                    'CPU:noprogram.cr1', '9999', 'site_details']
-#     constructor = toa5.TOA5_file_constructor(data=df, info_header=info_header)
-#     output_path = (
-#         PATHS.get_local_path(resource='site_details') / f'{site}_details.dat'
-#         )
-#     constructor.write_output_file(dest=output_path)
-# #------------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
 def make_site_info_TOA5(site):
 
@@ -561,160 +522,456 @@ def make_site_info_TOA5(site):
     constructor.write_output_file(dest=output_path)
 #------------------------------------------------------------------------------
 
-
-# #------------------------------------------------------------------------------
-# def make_site_logger_TOA5(site):
-
-#     table_df=(
-#         vm.make_table_df(site=site)
-#         [['station_name', 'logger_type', 'serial_num', 'OS_version',
-#           'program_name']]
-#         .reset_index(drop=True)
-#         .drop_duplicates()
-#         .set_index(keys='station_name')
-#         .loc[f'{site}_EC']
-#         )
-#     table_df = (
-#         table_df[~table_df.index.duplicated()]
-#         .reset_index()
-#         )
-#     new_idx = pd.date_range(
-#         start=dt.datetime.now().date() - dt.timedelta((len(table_df) - 1)),
-#         periods=len(table_df),
-#         freq='D'
-#         )
-#     new_idx.name = 'TIMESTAMP'
-#     table_df.index = new_idx
-#     TOA5_maker = toa5.TOA5_file_constructor(data=table_df)
-#     output_path = PATHS.get_local_path(resource='site_details')
-#     TOA5_maker.write_output_file(dest=output_path / f'{site}_logger_details.dat')
-# #------------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
-def make_site_info_excel(dest='E:/Sites/test.xlsx'):
+class SiteStatusConstructor():
+    """
+    Class for retrieving, formatting and outputting data status to file.
+    """
 
-    # Set the index and redundant variables
-    index_vars = [
-        'site', 'station_name', 'logger_type', 'serial_num', 'OS_version',
-        'program_name'
-        ]
-    drop_vars = ['full_path', 'file_name', 'format']
+    def __init__(self):
+        """
+        Set critical attributes.
 
-    # Build and format the dataframe
-    df = vm.make_table_df().reset_index()
-    full_path = df.full_path
-    df.index = pd.MultiIndex.from_frame(df[index_vars])
-    df.drop(index_vars + drop_vars, axis=1, inplace=True)
-    records_list = []
+        Returns
+        -------
+        None.
 
-    # Use the toa5 handler to get info about records from file
-    for file in full_path:
-        handler = toa5.single_file_data_handler(file=file)
-        rslt_dict = handler.get_missing_records()
-        rslt_dict.pop('gap_distribution')
-        rslt_dict.update(
-            {'duplicate_records': any(handler.get_duplicate_records()),
-             'duplicate_indices': any(handler.get_duplicate_indices()),
-             'days_since_last_record': (
-                 (dt.datetime.now() - handler.data.index[-1].to_pydatetime())
-                 .days
-                 )
-             }
+        """
+
+        index_vars = ['site', 'station_name', 'table_name']
+        self.run_date_time = dt.datetime.now()
+        self.table_df = (
+            vm.make_table_df()
+            .reset_index()
+            .set_index(keys=index_vars)
             )
-        records_list.append(rslt_dict)
+        self.site_list = (
+            self.table_df.index.get_level_values(level='site').unique().tolist()
+            )
+    #--------------------------------------------------------------------------
 
-    # Update the dataframe with the newly collected info
-    df = (
-        pd.concat([df, pd.DataFrame(records_list, index=df.index)], axis=1)
-        .reset_index()
-        )
+    #--------------------------------------------------------------------------
+    def build_site_variable_data(self, site):
+        """
+        Get the variable information for a site.
 
-    # Get the list of sites to iterate over
-    sites = df.site.unique()
+        Parameters
+        ----------
+        site : str
+            The site.
 
-    # Get the list of 10Hz files collected by site
-    files_df = pd.DataFrame(
-        zip(
-            sites,
-            [get_latest_10Hz_file(site) for site in sites]
-            ),
-        columns=['site', 'file_name']
-        )
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe.
 
-    # Write sheets
-    with pd.ExcelWriter(path=dest) as writer:
+        """
 
-        # Summary sheet with data tables for all sites
-        sheet_name = 'Summary'
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
-        set_column_lengths(df=df, xl_writer=writer, sheet=sheet_name)
-
-        # 10Hz file acquisition
-        sheet_name = '10Hz_files'
-        files_df.to_excel(writer, sheet_name=sheet_name, index=False)
-        set_column_lengths(df=files_df, xl_writer=writer, sheet=sheet_name)
-
-        # Critical variables for individual sites
-        for site in sites:
-            site_df = build_site_variable_data(site=site)
-            site_df.to_excel(writer, sheet_name=site, index=False)
-            set_column_lengths(df=site_df, xl_writer=writer, sheet=site)
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def build_site_variable_data(site):
-
-    merger = TableMerger(site=site)
-    df = merger.merge_tables()
-    rslt_list = []
-    for variable in df.columns:
-        s = df[variable].dropna()
-        logger = merger.var_map.get_field_from_variable(
-            variable=variable,
-            from_field='translation_name',
-            return_field='logger_name'
-            )[0]
-        table = merger.var_map.get_field_from_variable(
-            variable=variable,
-            from_field='translation_name',
-            return_field='table_name'
-            )[0]
-        try:
-            np.isnan(logger)
-            logger = 'Calculated'
-            np.isnan(table)
-            table = 'Calculated'
-        except TypeError:
-            pass
-        rslt_dict = {'variable': variable, 'station': logger, 'table': table}
-        try:
-            rslt_dict.update(
-                {'last_valid_record': s.index[-1].strftime('%Y-%m-%d %H:%M'),
-                 'value': s[-1]}
+        local_date_time = self._get_site_time(site=site)
+        merger = TableMerger(site=site)
+        df = merger.merge_tables()
+        rslt_list = []
+        for variable in df.columns:
+            series = df[variable].dropna()
+            var_details = merger.var_map.get_field_from_variable(
+                variable=variable, from_field='translation_name'
                 )
-        except IndexError:
-            rslt_dict.update({'last_valid_record': None, 'value': None})
-        rslt_list.append(rslt_dict)
-    return pd.DataFrame(rslt_list)
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def set_column_lengths(df, xl_writer, sheet, add_space=2):
-
-    alt_list = ['backups']
-
-    for i, column in enumerate(df.columns):
-        if column in alt_list:
-            col_width = (
-                df[column].apply(
-                    lambda x: len(max(x.split(','), key=len))
+            logger = var_details.logger_name.item()
+            table = var_details.table_name.item()
+            try:
+                np.isnan(logger)
+                logger = 'Calculated'
+                np.isnan(table)
+                table = 'Calculated'
+            except TypeError:
+                pass
+            rslt_dict = {'variable': variable, 'station': logger, 'table': table}
+            try:
+                last_valid_date_time = series.index[-1]
+                days = (local_date_time - last_valid_date_time).days
+                rslt_dict.update(
+                    {'last_valid_record': last_valid_date_time.strftime(
+                        '%Y-%m-%d %H:%M'
+                        ),
+                     'value': series[-1],
+                     'days_since_last_record': int(days)}
                     )
-                .max()
+            except IndexError:
+                rslt_dict.update(
+                    {'last_valid_record': None, 'value': None,
+                     'days_since_last_record': None}
+                    )
+            rslt_list.append(rslt_dict)
+        return pd.DataFrame(rslt_list)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_10Hz_table(self):
+        """
+        Get a summary of most recent 10Hz data.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe.
+
+        """
+
+        files, days = [], []
+        for site in self.site_list:
+            file = get_latest_10Hz_file(site)
+            files.append(file)
+            try:
+                days.append(
+                    (self.run_date_time -
+                     dt.datetime.strptime(
+                         '-'.join(file.split('.')[0].split('_')[-3:]), '%Y-%m-%d'
+                         )
+                     )
+                    .days
+                    )
+            except ValueError:
+                days.append(None)
+        return pd.DataFrame(
+            zip(self.site_list, files, days),
+            columns=['site', 'file_name', 'days_since_last_record']
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_summary_table(self):
+        """
+        Get the basic file data PLUS data quality / holes / duplicates etc.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe.
+
+        """
+
+        ref_dict = dict(zip(
+            self.table_df.full_path,
+            self.table_df.index.get_level_values(level='site')
+            ))
+        data_list = []
+        for file in ref_dict:
+            site = ref_dict[file]
+            site_time = self._get_site_time(site=site)
+            handler = toa5.single_file_data_handler(file=file)
+            rslt_dict = handler.get_missing_records()
+            rslt_dict.pop('gap_distribution')
+            rslt_dict.update(
+                {'duplicate_records':
+                     len(handler.get_duplicate_records(as_dates=True)),
+                 'duplicate_indices':
+                     len(handler.get_duplicate_indices(as_dates=True)),
+                 'days_since_last_record': (
+                     (site_time - handler.data.index[-1].to_pydatetime())
+                     .days
+                     )
+                 }
                 )
+            data_list.append(rslt_dict)
+        return pd.concat(
+            [self.table_df.drop(['full_path', 'file_name', 'format'], axis=1),
+             pd.DataFrame(data_list, index=self.table_df.index)],
+            axis=1
+            ).reset_index()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_key_details(self):
+        """
+        Get the dataframe that maps the interval (in days) between run time and
+        last data.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The dataframe.
+
+        """
+
+        colours = ['green', 'yellow', 'orange', 'red']
+        intervals = ['< 1 day', '1 <= day < 3', '3 <= day < 7', 'day >= 7']
+        return (
+            pd.DataFrame([colours, intervals], index=['colour', 'interval'])
+            .T
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_to_excel(self, dest='E:/Sites/site_status.xlsx'):
+        """
+        Write all data to excel spreadsheet
+
+        Parameters
+        ----------
+        dest : str, optional
+            Absolute path to write. The default is 'E:/Sites/site_status.xlsx'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Get the non-iterated outputs
+        iter_dict = {
+            'Summary': self.get_summary_table(),
+            '10Hz_files': self.get_10Hz_table()
+            }
+        key_table = self.get_key_details()
+
+        # Write sheets
+        with pd.ExcelWriter(path=dest) as writer:
+
+            # For the Summary and 10Hz_files tables...
+            for item in iter_dict:
+
+                # Set sheet name
+                sheet_name = item
+
+                # Prepend the run date and time to the spreadsheet
+                self._write_time_frame(xl_writer=writer, sheet=sheet_name)
+
+                # Output and format the results
+                (
+                    iter_dict[item].style.apply(self._get_style_df, axis=None)
+                    .to_excel(
+                        writer, sheet_name=sheet_name, index=False, startrow=1
+                        )
+                    )
+                self._set_column_widths(
+                    df=iter_dict[item], xl_writer=writer, sheet=sheet_name
+                    )
+
+            # Iterate over sites...
+            for site in self.site_list:
+
+                # Set sheet name
+                sheet_name = site
+
+                # Prepend the run date and time to the spreadsheet
+                self._write_time_frame(
+                    xl_writer=writer, sheet=sheet_name, site=site
+                    )
+
+                # Output and format the results
+                site_df = self.build_site_variable_data(site=site)
+                (
+                    site_df.style.apply(self._get_style_df, axis=None)
+                    .to_excel(
+                        writer, sheet_name=sheet_name, index=False, startrow=1
+                        )
+                    )
+                self._set_column_widths(
+                    df=site_df, xl_writer=writer, sheet=site
+                    )
+
+            # Output the colour key
+
+            # Set sheet name
+            sheet_name = 'Key'
+
+            # Output and format the results
+            (
+                key_table.style.apply(self._get_key_formatter, axis=None)
+                .to_excel(writer, sheet_name=sheet_name, index=False)
+                )
+            self._set_column_widths(
+                df=key_table, xl_writer=writer, sheet=sheet_name
+                )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_colour(self, n):
+        """
+        Get the formatted colour based on value of n.
+
+        Parameters
+        ----------
+        n : int or float
+            Number.
+
+        Returns
+        -------
+        str
+            Formatted colour for pandas styler.
+
+        """
+
+        if np.isnan(n):
+            return ''
+        if n < 1:
+            colour = 'green'
+        if 1 <= n < 3:
+            colour = 'yellow'
+        if 3 <= n < 7:
+            colour = 'orange'
+        if n >= 7:
+            colour = 'red'
+        return 'background-color: {}'.format(colour)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_style_df(self, df, column_name='days_since_last_record'):
+        """
+        Generate a style df of same dimensions, index and columns, with colour
+        specifications in the appropriate column.
+
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            the dataframe.
+        column_name : str, optional
+            The column to parse for setting of colour. The default is
+            'days_since_last_record'.
+
+        Returns
+        -------
+        style_df : pd.core.frame.DataFrame
+            Formatter dataframe containing empty strings for all non-coloured
+            cells and colour formatting for coloured cells.
+
+        """
+
+        style_df = pd.DataFrame('', index=df.index, columns=df.columns)
+        style_df[column_name] = df[column_name].apply(self._get_colour)
+        return style_df
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_key_formatter(self, df):
+        """
+        Return a dataframe that can be used to format the key spreadsheet.
+
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            The dataframe to return the formatter for.
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The formatted dataframe.
+
+        """
+
+        this_df = df.copy()
+        this_df.loc[:, 'colour']=[0,2,5,7]
+        return self._get_style_df(df=this_df, column_name='colour')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_site_time(self, site):
+        """
+        Correct server run time to local standard time.
+
+        Parameters
+        ----------
+        site : str
+            Site for which to return local standard time.
+
+        Returns
+        -------
+        dt.datetime.datetime
+            Local standard time equivalent of server run time.
+
+        """
+
+        return (
+            self.run_date_time -
+            dt.timedelta(
+                hours=
+                10 -
+                SITE_DETAILS.get_single_site_details(site, 'UTC_offset')
+                )
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _write_time_frame(self, xl_writer, sheet, site=None):
+        """
+        Write the time to the first line of the output spreadsheet.
+
+        Parameters
+        ----------
+        xl_writer : TYPE
+            The xlwriter object.
+        sheet : str
+            Name of the spreadsheet.
+        site : str, optional
+            Name of site, if passed. The default is None.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Return server time if site not passed,
+        # otherwise get local standard site time
+        if not site:
+            use_time = self.run_date_time
+            zone = 'AEST'
         else:
-            col_width = max(
-                df[column].astype(str).map(len).max(),
-                len(column)
-                )
-        xl_writer.sheets[sheet].set_column(i, i, col_width + add_space)
-#------------------------------------------------------------------------------
+            use_time = self._get_site_time(site=site)
+            zone = ''
+        frame = pd.DataFrame(
+            ['RUN date/time: '
+             f'{use_time.strftime("%Y-%m-%d %H:%M")} {zone}'
+             ],
+            index=[0]
+            ).T
+
+        frame.to_excel(
+            xl_writer, sheet_name=sheet, index=False, header=False
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _set_column_widths(self, df, xl_writer, sheet, add_space=2):
+        """
+        Set the column widths for whatever is largest (header or largest
+                                                       content).
+
+        Parameters
+        ----------
+        df : pd.core.frame.DataFrame
+            The frame for which to set the widths.
+        xl_writer : TYPE
+            The xlwriter object.
+        sheet : str
+            Name of the spreadsheet.
+        add_space : int, optional
+            The amount of extra space to add. The default is 2.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        alt_list = ['backups']
+
+        for i, column in enumerate(df.columns):
+
+            # Parse columns with multiple comma-separated values differently...
+            # (get the length of the largest string in each cell)
+            if column in alt_list:
+                col_width = (
+                    df[column].apply(
+                        lambda x: len(max(x.split(','), key=len))
+                        )
+                    .max()
+                    )
+            # Otherwise just use total string length
+            else:
+                col_width = max(
+                    df[column].astype(str).map(len).max(),
+                    len(column)
+                    )
+            xl_writer.sheets[sheet].set_column(i, i, col_width + add_space)
+    #--------------------------------------------------------------------------
