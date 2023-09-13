@@ -9,6 +9,15 @@ from configparser import ConfigParser
 import pathlib
 
 #------------------------------------------------------------------------------
+### CONSTANTS ###
+#------------------------------------------------------------------------------
+
+REMOTE_ALIAS_DICT = {'AliceSpringsMulga': 'AliceMulga'}
+
+#------------------------------------------------------------------------------
+
+
+#------------------------------------------------------------------------------
 class paths():
 
     def __init__(self):
@@ -47,6 +56,12 @@ class paths():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_local_stream_list(self):
+
+        return [x for x in self._config['LOCAL_DATA_STREAM']]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_remote_path(self, **kwargs):
 
         return self._get_path(base_location='REMOTE_PATH', **kwargs)
@@ -56,6 +71,12 @@ class paths():
     def get_remote_resource_list(self):
 
         return [x for x in self._config['REMOTE_PATH']]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_remote_stream_list(self):
+
+        return [x for x in self._config['REMOTE_DATA_STREAM']]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -72,7 +93,9 @@ class paths():
     #--------------------------------------------------------------------------
     def get_stream_list(self, location='local'):
 
-        location_dict = {'local': 'DATA_STREAM', 'remote': 'REMOTE_DATA_STREAM'}
+        location_dict = {
+            'local': 'LOCAL_DATA_STREAM', 'remote': 'REMOTE_DATA_STREAM'
+            }
         stream = location_dict[location]
         return [x for x in self._config[stream]]
     #--------------------------------------------------------------------------
@@ -114,6 +137,11 @@ class paths():
         if elements:
             path = self._add_subdirs(path=path, subdirs_list=elements)
         if site:
+            if base_location == 'REMOTE_PATH':
+                try:
+                    site = REMOTE_ALIAS_DICT[site]
+                except KeyError:
+                    pass
             path = pathlib.Path(self._insert_site_str(target_obj=path, site=site))
         if check_exists:
             self._check_exists(path=path)

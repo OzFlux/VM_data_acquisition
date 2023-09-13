@@ -40,14 +40,20 @@ log_byte_limit = 10**6
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _set_logger(site, task):
+def _set_logger(task, site=None):
 
     """Create logger and send output to file"""
 
-    logger_write_path = (
-        PathsManager.get_local_path(
-            resource='logs', site=site) / f'{site}_{task}.txt'
-        )
+    if site:
+        logger_write_path = (
+            PathsManager.get_local_path(
+                resource='logs', site=site) / f'{site}_{task}.txt'
+            )
+    else:
+        logger_write_path = (
+            PathsManager.get_local_path(
+                resource='generic_task_logs') / f'{task}.txt'
+            )
     this_logger = logging.getLogger()
     this_logger.setLevel(logging.INFO)
     handler = logging.handlers.RotatingFileHandler(logger_write_path,
@@ -113,7 +119,7 @@ class TasksManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def run_task(self, site, task):
+    def run_task(self, task, site=None):
 
         site_only = {'site': site}
 
@@ -130,88 +136,89 @@ class TasksManager():
                 },
 
             'generate_site_details_file': {
-                'func': generate_site_details_file,
+                'func': fc.make_site_info_TOA5,
                 'args': site_only
                 },
 
-            'Rclone_push_slow': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'flux_slow', 'service':'cloudstor',
-                    'which_way':'push'
-                    }
-                },
-
-            'Rclone_pull_slow': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'flux_slow', 'service':'cloudstor',
-                    'which_way':'pull'
-                    }
-                },
-
-            'Rclone_push_rtmc': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'rtmc', 'service':'cloudstor',
-                    'which_way':'push'
-                    }
+            'Rclone_pull_slow_rdm': {
+                'func': rt.pull_slow_flux,
+                'args': site_only
                 },
 
             'Rclone_push_fast_rdm': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'flux_fast', 'service':'ten_Hz_archive',
-                    'which_way':'push'
-                    }
+                'func': rt.push_fast_flux,
+                'args': site_only
                 },
 
             'Rclone_push_slow_rdm': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'flux_slow', 'service':'nextcloud',
-                    'which_way':'push'
-                    }
+                'func': rt.push_slow_flux,
+                'args': site_only
                 },
 
             'Rclone_push_rtmc_rdm': {
-                'func': rclone_move_data,
-                'args': {
-                    'site':site, 'stream':'rtmc', 'service':'nextcloud',
-                    'which_way':'push'
-                    }
+                'func': rt.push_rtmc,
+                'args': site_only
+                },
+
+            'Rclone_push_status': {
+                'func': rt.push_status_files,
+                'args': None
                 },
 
             'reformat_10Hz_main': {
-                'func': reformat_10Hz_data,
+                'func': ptd.main,
                 'args': {'site': site, 'system': 'main'}
                 },
 
             'reformat_10Hz_under': {
-                'func': reformat_10Hz_data,
+                'func': ptd.main,
                 'args': {'site': site, 'system': 'under'}
+                },
+
+            'update_site_status': {
+                'func': update_site_status,
+                'args': None
                 }
 
             }
 
         sub_dict = tasks_dict[task]
-        sub_dict['func'](**sub_dict['args'])
+        if sub_dict['args']:
+            sub_dict['func'](**sub_dict['args'])
+        else:
+            sub_dict['func']()
+
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
+#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def generate_L1_excel(**kwargs):
+def generate_L1_excel(site):
+    """
+    Pull data from downloaded tables and merge into a correctly formatted L1
+    spreadsheet.
 
-    constructor = fc.L1Constructor(site=kwargs['site'])
+    Parameters
+    ----------
+    site : str
+        Site name.
+
+    Returns
+    -------
+    None.
+
+    """
+
+    constructor = fc.L1Constructor(site=site)
     constructor.write_to_excel()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def generate_merged_file(**kwargs):
+def generate_merged_file(site):
     """
     Pull data from downloaded tables and merge into single table with
     standard names for variables. Used for RTMC plotting.
@@ -221,45 +228,29 @@ def generate_merged_file(**kwargs):
     site : str
         Site name.
 
+    Returns
+    -------
+    None.
+
     """
 
-    merger = fc.TableMerger(site=kwargs['site'])
+    merger = fc.TableMerger(site=site)
     merger.make_output_file()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def generate_site_details_file(**kwargs):
+def update_site_status():
     """
-    Create the file containing the site information in dummy TOA5 format,
-    and write to the appropriate directory.
+    Build site status spreadsheet.
 
-    Parameters
-    ----------
-    site : str
-        Site name.
+    Returns
+    -------
+    None.
 
     """
 
-    fc.make_site_info_TOA5(site=kwargs['site'])
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def rclone_move_data(**kwargs):
-
-    exclude_dirs = ['TMP'] if kwargs['stream'] == 'flux_fast' else None
-    rt.move_data(
-        site=kwargs['site'],
-        stream=kwargs['stream'],
-        service=kwargs['service'],
-        which_way=kwargs['which_way'],
-        exclude_dirs=exclude_dirs
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def reformat_10Hz_data(**kwargs):
-
-    ptd.main(site=kwargs['site'], system=kwargs['system'])
+    constructor = fc.SiteStatusConstructor()
+    constructor.write_to_excel()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -270,15 +261,38 @@ def reformat_10Hz_data(**kwargs):
 def parse_task(task, site=None):
 
     tasks = TasksManager()
+
+    # Set sites to empty list, then:
+        # 1. if site kwarg passed, then run task for that site;
+        # 2. if no site kwarg passed, get list of sites for which to run task,
+        #    and execute
+        # 3. if task is not site specific, leave empty list in place
+    sites = []
     if site:
         sites = [site]
     else:
-        sites = tasks.get_site_list_for_task(task=task)
-    for site in sites:
-        logger = _set_logger(site=site, task=task)
-        logger.info(f'Running task "{task}" for site {site}')
         try:
-            tasks.run_task(site=site, task=task)
+            sites = tasks.get_site_list_for_task(task=task)
+        except KeyError:
+            pass
+
+    # If there are sites in the list, parse the task for those sites,
+    # or run generic task
+    if sites:
+        for site in sites:
+            logger = _set_logger(task=task, site=site)
+            logger.info(f'Running task "{task}" for site {site}')
+            try:
+                tasks.run_task(task=task, site=site)
+            except Exception as e:
+                logging.info(f'Task failed with the following error: {e}')
+            logger.info('Task complete\n')
+            logger.handlers.clear()
+    else:
+        logger = _set_logger(task=task)
+        logger.info(f'Running task "{task}"')
+        try:
+            tasks.run_task(task=task, site=site)
         except Exception as e:
             logging.info(f'Task failed with the following error: {e}')
         logger.info('Task complete\n')

@@ -17,10 +17,17 @@ import pathlib
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
 
+TOA5_DATE_FORMAT = '"%Y-%m-%d %H:%M:%S"'
 INFO_LIST = [
     'format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
     'program_name', 'program_sig', 'table_name'
     ]
+UNIT_ALIAS_DICT = {
+    'degC': ['C'],
+    'n': ['arb', 'samples'],
+    'arb': ['n', 'samples'],
+    'samples': ['arb', 'n']
+    }
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
@@ -327,6 +334,44 @@ class single_file_data_handler():
         return self.headers.loc[variable, 'units']
     #--------------------------------------------------------------------------
 
+    #--------------------------------------------------------------------------
+    def map_variable_units(self):
+        """
+        Get a dictionary cross-referencing all variables in file to their units
+
+        Returns
+        -------
+        dict
+            With variables (keys) and units (values).
+
+        """
+
+        return dict(zip(
+            self.headers.index.tolist(),
+            self.headers.units.tolist()
+            ))
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def map_variable_sampling(self):
+        """
+        Get a dictionary cross-referencing all variables in file to their
+        sampling methods
+
+
+        Returns
+        -------
+        dict
+            With variables (keys) and sampling (values).
+
+        """
+
+        return dict(zip(
+            self.headers.index.tolist(),
+            self.headers.sampling.tolist()
+            ))
+    #--------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -422,28 +467,6 @@ class file_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_sampling_header(self, with_file, enforce_legality=False):
-        """
-        Wrapper for comparison of statistical sampling header line.
-
-        Parameters
-        ----------
-        with_file : str or pathlib.Path object
-            Either filename alone (str) or absolute path to file (pathlib).
-
-        Returns
-        -------
-        dict
-            return a dictionary with the mismatched header elements.
-
-        """
-
-        return self._compare_units_sampling_header(
-            with_file=with_file, which='sampling'
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def compare_station_info(self, with_file):
         """
         Compare station info header lines.
@@ -481,6 +504,49 @@ class file_concatenator():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def compare_sampling_header(self, with_file):
+        """
+        Compare sampling header line.
+
+        Parameters
+        ----------
+        with_file : str or pathlib.Path object
+            Either filename alone (str) or absolute path to file (pathlib).
+
+        Returns
+        -------
+        dict
+            return a dictionary with the mismatched header elements.
+
+        """
+
+        common_vars = (
+            self.compare_variable_header(with_file=with_file)
+            ['common_variables']
+            )
+        compare_df = pd.concat(
+            [(get_header_df(file=self.master_file)
+              .rename({'sampling': 'master_sampling'}, axis=1)
+              .loc[common_vars, 'master_sampling']
+              ),
+              (get_header_df(file=self.path / with_file)
+              .rename({'sampling': 'bkp_sampling'}, axis=1)
+              .loc[common_vars, 'bkp_sampling']
+              )], axis=1
+            )
+        mismatched_vars = (
+            compare_df[
+                compare_df['master_sampling']!=compare_df['bkp_sampling']
+                ]
+            .index
+            .tolist()
+            )
+        if len(mismatched_vars) == 0:
+            return {'sampling_mismatch': ['None']}
+        return {'sampling_mismatch': mismatched_vars}
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def compare_units_header(self, with_file):
         """
         Compare units header line (merge is deemed illegal if there are unit
@@ -500,58 +566,43 @@ class file_concatenator():
 
         """
 
-        units_dict = self._compare_units_sampling_header(
-            with_file=with_file, which='units'
-            )
-        if units_dict['units_mismatch'] != ['None']:
-            units_dict['units_merge_legal'] = False
-        else:
-            units_dict['units_merge_legal'] = True
-        return units_dict
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _compare_units_sampling_header(self, with_file, which):
-        """
-        Compare either units (units) or statistical sampling type (stat) header
-        line to see if all elements are consistent.
-
-        Parameters
-        ----------
-        file : str or pathlib.Path object
-            Either filename alone (str) or absolute path to file (pathlib).
-        which : str
-            which of 'units' or 'stat' to compare.
-
-        Returns
-        -------
-        dict
-            return a dictionary with the mismatched header elements.
-
-        """
-
-
+        # Subset the analysis for common variables, and build comparison df
         common_vars = (
             self.compare_variable_header(with_file=with_file)
             ['common_variables']
             )
         compare_df = pd.concat(
             [(get_header_df(file=self.master_file)
-              .rename({which: f'master_{which}'}, axis=1)
-              .loc[common_vars, f'master_{which}']
+              .rename({'units': 'master_units'}, axis=1)
+              .loc[common_vars, 'master_units']
               ),
               (get_header_df(file=self.path / with_file)
-              .rename({which: f'bkp_{which}'}, axis=1)
-              .loc[common_vars, f'bkp_{which}']
+              .rename({'units': 'bkp_units'}, axis=1)
+              .loc[common_vars, 'bkp_units']
               )], axis=1
             )
-        mismatched_vars = (
-            compare_df[compare_df[f'master_{which}']!=compare_df[f'bkp_{which}']]
-            .index
-            .tolist()
-            )
-        if len(mismatched_vars) == 0: mismatched_vars = ['None']
-        return {f'{which}_mismatch': mismatched_vars}
+
+        # Get the mismatched variables
+        mismatch_df = compare_df[compare_df['master_units']!=compare_df['bkp_units']]
+        mismatch_list = []
+        for variable in mismatch_df.index:
+            master_units = mismatch_df.loc[variable, 'master_units']
+            bkp_units = mismatch_df.loc[variable, 'bkp_units']
+            try:
+                assert bkp_units in UNIT_ALIAS_DICT[master_units]
+            except (KeyError, AssertionError):
+                mismatch_list.append(variable)
+
+        # Return the result
+        if not mismatch_list:
+            return {
+                'units_mismatch': ['None'],
+                'units_merge_legal': True
+                }
+        return {
+            'units_mismatch': mismatch_list,
+            'units_merge_legal': False
+            }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -625,6 +676,10 @@ class file_concatenator():
             self.compare_sampling_header(with_file=with_file) |
             self.compare_data_interval(with_file=with_file)
             )
+        merge_dict.update(
+            {'merge_legal': all(
+                [merge_dict[x] for x in merge_dict.keys() if 'legal' in x])}
+            )
         if not as_text:
             return merge_dict
         return self._get_merge_assessment_as_text(merge_dict=merge_dict)
@@ -675,6 +730,7 @@ class file_concatenator():
 
         write_list = []
         write_list.append(f'Backup file {merge_dict["file_name"]}\n\n')
+        write_list.append(f'Merge legal? -> {merge_dict["merge_legal"]}\n')
         write_list.append(
             f'Start_date: {merge_dict["start_date"]}, '
             f'End_date: {merge_dict["end_date"]}\n'
@@ -700,7 +756,7 @@ class file_concatenator():
             )
         mismatched_unit_vars = ', '.join(merge_dict['units_mismatch'])
         write_list.append(
-            f'Variables with mismatched units -> {mismatched_unit_vars}\n'
+            f'    - Variables with mismatched units -> {mismatched_unit_vars}\n'
             )
         mismatched_sampling_vars = ', '.join(merge_dict['sampling_mismatch'])
         write_list.append(
@@ -1026,6 +1082,93 @@ class TOA5_file_constructor():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class FileConformityChecker():
+
+    def __init__(self, file):
+
+        self.file = check_file_path(file)
+        _header_lines = get_file_headers(file=file)
+        self.station_info = _format_line(line=_header_lines[0])
+        self.variables = _format_line(line=_header_lines[1])
+        self.units = _format_line(line=_header_lines[2])
+        self.sampling = _format_line(line=_header_lines[3])
+
+    def check_station_info(self):
+
+        if not len(self.station_info) == len(INFO_LIST):
+            raise RuntimeError(
+                'Wrong number of info elements in first header line '
+                f'(expected {len(INFO_LIST)}, got {len(self.station_info)})'
+                )
+
+    def check_variables(self):
+
+        if not 'TIMESTAMP' in self.variables:
+            raise RuntimeError(
+                'Header line one (variables) must contain TIMESTAMP variable'
+                )
+        if not len(self.variables) > 1:
+            raise RuntimeError(
+                'Header line one (variables) must contain variables additional to '
+                'TIMESTAMP'
+                )
+
+    def check_units(self):
+
+        if not len(self.units) == len(self.variables):
+            raise RuntimeError(
+                'Header line two (units) must have same number of elements as '
+                'header line one (variables)'
+                )
+
+    def check_sampling(self):
+
+        if not len(self.sampling) == len(self.variables):
+            raise RuntimeError(
+                'Header line three (sampling) must have same number of elements as '
+                'header line one (variables)'
+                )
+
+    def check_header(self):
+
+        self.check_station_info()
+        self.check_variables()
+        self.check_units()
+        self.check_sampling()
+
+    def check_all(self):
+
+        self.check_header()
+        self.check_dates()
+
+    def check_dates(self):
+
+        dates = get_file_dates(file=self.file)
+        if not all(dates.values()):
+            raise RuntimeError(
+                'Could not find valid start and end dates!'
+                )
+
+    def check_time_index(self):
+
+        malformed_list = []
+        with open(self.file) as f:
+            for i, line in enumerate(f):
+                if i < 4: continue
+                date_elem = line.split(',')[0]
+                try:
+                    dt.datetime.strptime(date_elem, '"%Y-%m-%d %H:%M:%S"')
+                except ValueError:
+                    malformed_list.append(
+                        {'line_number': i, 'string': date_elem}
+                        )
+        return pd.DataFrame(malformed_list)
+
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
@@ -1064,27 +1207,67 @@ def check_file_path(file, as_str=False):
 #------------------------------------------------------------------------------
 def get_file_dates(file):
 
-    date_format = '"%Y-%m-%d %H:%M:%S"'
+    # Open file in binary
     with open(file, 'rb') as f:
-        while True:
-            line_list = f.readline().decode().split(',')
+
+        # Iterate forward to find first valid start date
+        start_date = None
+        for i, line in enumerate(f):
             try:
                 start_date = (
-                    dt.datetime.strptime(line_list[0], date_format)
+                    dt.datetime.strptime(
+                        line.decode().split(',')[0],
+                        TOA5_DATE_FORMAT
+                        )
                     )
                 break
             except ValueError:
-                pass
+                continue
+
+        # Iterate backwards to find last valid end date
+        end_date = None
         f.seek(2, os.SEEK_END)
-        while f.read(1) != b'\n':
-            f.seek(-2, os.SEEK_CUR)
-        last_line_list = f.readline().decode().split(',')
-        end_date = dt.datetime.strptime(last_line_list[0], date_format)
+        while True:
+            try:
+                if f.read(1) == b'\n':
+                    pos = f.tell()
+                    try:
+                        end_date = (
+                            dt.datetime.strptime(
+                                f.readline().decode().split(',')[0],
+                                TOA5_DATE_FORMAT
+                                )
+                            )
+                        break
+                    except ValueError:
+                        f.seek(pos - f.tell(), os.SEEK_CUR)
+                f.seek(-2, os.SEEK_CUR)
+            except OSError:
+                break
+
     return {'start_date': start_date, 'end_date': end_date}
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_file_handler(file, concat_backups=False):
+    """
+    Get the file handler. If concat_backups is True AND there are backups, a
+    merged file data handler object is returned, otherwise a single file data
+    handler object.
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        Absolute path to file.
+    concat_backups : bool, optional
+        Whether to concatenate backups. The default is False.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
 
     if concat_backups:
         try:
@@ -1189,18 +1372,30 @@ def get_station_info(file, as_dict=True):
 
 #------------------------------------------------------------------------------
 def get_TOA5_data(file, usecols=None):
+    """
+    Read the data from the TOA5 file
 
-    # Make sure usecols contains more than just the timestamp
-    if usecols == ['TIMESTAMP']:
-        raise RuntimeError(
-            'TIMESTAMP is the index column - it cannot be the only '
-            'requested variable!'
-            )
+    Parameters
+    ----------
+    file : str or Pathlib.Path
+        The file to parse.
+    usecols : list, optional
+        The subset of columns to keep. The default is None (all columns retained).
 
-    # Here we want TIMESTAMP even if not requested in usecols arg -
-    # TIMESTAMP becomes the index (and we want to preserve order of columns)
+    Returns
+    -------
+    df : TYPE
+        DESCRIPTION.
+
+    """
+
+    # Usecols MUST include TIMESTAMP and at least ONE additional column; if not,
+    # do not subset the columns on import.
     if usecols:
-        thecols = list(dict.fromkeys(['TIMESTAMP'] + usecols))
+        if usecols == ['TIMESTAMP']:
+            thecols = None
+        else:
+            thecols = list(dict.fromkeys(['TIMESTAMP'] + usecols))
     else:
         thecols = None
 
@@ -1210,6 +1405,11 @@ def get_TOA5_data(file, usecols=None):
         index_col=['TIMESTAMP'], na_values='NAN', sep=',', engine='c',
         on_bad_lines='warn', low_memory=False
         )
+
+    # Check the index type, and if bad time data, dump the record
+    if not df.index.dtype == '<M8[ns]':
+        df.index = pd.to_datetime(df.index, errors='coerce')
+        df = df[~pd.isnull(df.index)]
 
     # Convert any non-numeric data
     non_nums = df.select_dtypes(include='object')
@@ -1227,7 +1427,7 @@ def get_TOA5_data(file, usecols=None):
 def get_TOA5_interval(file, as_offset=True):
 
     df = get_TOA5_data(file=file, usecols=['RECORD'])
-    num = get_index_interval(idx=df.index.drop_duplicates())
+    num = get_index_interval(idx=df.index)
     if as_offset: return f'{num}T'
     return num
 #------------------------------------------------------------------------------
@@ -1280,7 +1480,7 @@ def _write_TOA5_from_df(df, headers, dest):
 #------------------------------------------------------------------------------
 def get_index_interval(idx, divisor=15):
 
-    diffs = (idx[1:] - idx[:-1]).unique()
+    diffs = (idx.drop_duplicates()[1:] - idx.drop_duplicates()[:-1]).unique()
     return (
         pd.TimedeltaIndex(
             filter(lambda x: np.mod(x.components.minutes, divisor) == 0, diffs)

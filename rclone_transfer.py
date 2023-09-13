@@ -25,188 +25,139 @@ import paths_manager as pm
 
 PATHS = pm.paths()
 APP_PATH = PATHS.get_application_path(application='rclone', as_str=True)
-REMOTE_ALIAS_DICT = {'AliceSpringsMulga': 'AliceMulga'}
 ARGS_LIST = [
     'copy', '--transfers', '36', '--progress', '--checksum', '--checkers',
     '48', '--timeout', '0'
     ]
 ALLOWED_STREAMS = ['flux_slow', 'flux_fast', 'rtmc']
-ALLOWED_SERVICES = ['nextcloud', 'cloudstor', 'ten_Hz_archive']
-
-#------------------------------------------------------------------------------
-### CLASSES ###
+ALLOWED_REMOTES = PATHS.get_remote_resource_list()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class RcloneTransferConfig():
+def generic_move(
+        local_location, remote_location, which_way='to_remote',
+        exclude_dirs=None, timeout=600
+        ):
 
-    #--------------------------------------------------------------------------
-    def __init__(self, site, stream, service, exclude_dirs=None):
-        """
-        Configuration class for checking inputs and generating eval strings for
-        rclone subprocess.
+    # Check direction is valid
+    if not which_way in ['to_remote', 'from_remote']:
+        raise KeyError('Arg "which_way" must be "to_remote" or "from_remote"')
 
-        Parameters
-        ----------
-        site : str
-            Site.
-        stream : str
-            Data stream (see ALLOWED_STREAMS).
-        service : str
-            The cloud service (see ALLOWED_SERVICES).
-        exclude_dirs : list, optional
-            Directories to exclude from sync. The default is None.
-
-        Raises
-        ------
-        KeyError
-            Raised if either stream or service is not in allowed lists.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        if not service in ALLOWED_SERVICES:
-            raise KeyError(
-                '"service" kwarg must be one of {}'
-                .format(', '.join(ALLOWED_SERVICES))
-                )
-        if not stream in ALLOWED_STREAMS:
-            raise KeyError(
-                '"stream" kwarg must be one of {}'
-                .format(', '.join(ALLOWED_STREAMS))
-                )
-        self.site = site
-        self.stream = stream
-        self.service = service
-        self.args_list = self._build_args(exclude_dirs=exclude_dirs)
-
-        # Note that rclone doesn't like backslashes EVEN ON WINDOWS!!!
-        self.local_path = PATHS.get_local_path(
-            site=site, resource='data', stream=stream, as_str=True
-            ).replace('\\', '/')
-        try:
-            remote_site_name = REMOTE_ALIAS_DICT[site]
-        except KeyError:
-            remote_site_name = site
-        self.remote_path = PATHS.get_remote_path(
-            resource=service, stream=stream, site=remote_site_name, as_str=True
-            ).replace('\\', '/')
-        self.move_dict = {
-            'push': (
-                [APP_PATH] + self.args_list +
-                [self.local_path, self.remote_path]
-                ),
-            'pull': (
-                [APP_PATH] + self.args_list +
-                [self.remote_path, self.local_path]
-                )
-            }
-
-    def _build_args(self, exclude_dirs):
-        """
-        Append the list of excluded directories to the end of the rclone
-        arguments list.
-
-        Parameters
-        ----------
-        exclude_dirs : list
-            The directories to be added to the arguments.
-
-        Raises
-        ------
-        TypeError
-            Raised if exclude_dirs isn't a list.
-
-        Returns
-        -------
-        this_list : list
-            The expanded args list (if applicable).
-
-        """
-
-        this_list = ARGS_LIST.copy()
-        if not exclude_dirs:
-            return this_list
-        if not isinstance(exclude_dirs, list):
-            raise TypeError(
-                'Arg "exclude_dirs" must be a list of directory strings!'
-                )
-        for this_dir in exclude_dirs:
-            this_list.append('--exclude')
-            this_list.append(f'{this_dir}/**')
-        return this_list
-    #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-### FUNCTIONS ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def move_data(site, stream, service, which_way='push', exclude_dirs=None):
-    """
-    Do the move!
-
-    Parameters
-    ----------
-    site : str
-        Site.
-    stream : str
-        Data stream (see ALLOWED_STREAMS).
-    service : str
-        The cloud service (see ALLOWED_SERVICES).
-    which_way : str, optional
-        'push' or 'pull'. The default is 'push'.
-    exclude_dirs : list, optional
-        Directories to exclude from sync. The default is None.
-
-    Raises
-    ------
-    KeyError
-        Raised if which_way is not either 'push' or 'pull'.
-
-    Returns
-    -------
-    None.
-
-    """
-
-    if not which_way in ['push', 'pull']:
-        raise KeyError('Arg "which_way" must be "push" or "pull"')
-    logging.info(
-        f'Begin {which_way} of data stream "{stream}" for site "{site}":'
-        )
-    obj = RcloneTransferConfig(
-        site=site, stream=stream, service=service, exclude_dirs=exclude_dirs
-        )
-    logging.info('Copying now...\n Checking local and remote directories...')
-    if not pathlib.Path(obj.local_path).exists:
-        msg = f'    -> local file {str(obj.local_path)} is not valid!'
+    # Check local and remote locations are valid
+    logging.info('Checking local and remote directories...')
+    if not pathlib.Path(local_location).exists:
+        msg = f'    -> local file {str(local_location)} is not valid!'
         logging.error(msg); raise FileNotFoundError(msg)
-    logging.info(f'    -> local directory {obj.local_path} is valid')
+    logging.info(f'    -> local directory {local_location} is valid')
     try:
-        check_remote_available(str(obj.remote_path))
+        check_remote_available(str(remote_location))
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
         logging.error(e)
-        logging.error(f'    -> remote location {str(obj.local_path)} is not valid!')
-        raise
-    logging.info(f'    -> remote location {str(obj.remote_path)} is valid')
-    logging.info('Moving data...')
-    try:
-        rslt = _run_subprocess(
-            run_list=obj.move_dict[which_way],
-            timeout=600
+        logging.error(
+            f'    -> remote location {remote_location} is not valid!'
             )
+        raise
+    logging.info(f'    -> remote location {remote_location} is valid')
+
+    # Set from and to locations, based on direction
+    if which_way == 'to_remote':
+        from_location = local_location
+        to_location = remote_location
+    else:
+        from_location = remote_location
+        to_location = local_location
+
+    # Do the transfer
+    run_args = ARGS_LIST.copy()
+    if exclude_dirs:
+        run_args += _add_rclone_exclude(exclude_dirs=exclude_dirs)
+    logging.info('Copying now...')
+    run_list =  [APP_PATH] + run_args + [from_location, to_location]
+    try:
+        rslt = _run_subprocess(run_list=run_list, timeout=timeout)
         logging.info(rslt.stdout.decode())
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
         logging.error(e)
-        logging.error('Move failed!')
+        logging.error('Copy failed!')
         raise
-    logging.info('Move succeeded')
+    logging.info('Copy succeeded')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def pull_slow_flux(site, remote_resource='nextcloud'):
+
+    logging.info(f'Begin retrieval of {site} slow data from UQRDM')
+    _move_site_data_stream(
+        site=site, stream='flux_slow', remote_resource=remote_resource,
+        which_way='from_remote'
+        )
+    logging.info('Done')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def push_status_files():
+
+    logging.info('Begin move of status spreadsheet to UQRDM')
+    generic_move(
+        local_location=PATHS.get_local_path(resource='xl_network_status'),
+        remote_location=PATHS.get_remote_path(resource='epcn_share'),
+        timeout=180
+        )
+    logging.info('Done.')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def push_fast_flux(site):
+
+    logging.info(f'Begin move of {site} fast data to UQRDM flux archive')
+    _move_site_data_stream(
+        site=site, stream='flux_fast', remote_resource='ten_Hz_archive',
+        exclude_dirs=['TMP']
+        )
+    logging.info('Done.')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def push_slow_flux(site, remote_resource='nextcloud'):
+
+    logging.info(f'Begin move of {site} slow flux data to UQRDM')
+    _move_site_data_stream(
+        site=site, stream='flux_slow', remote_resource=remote_resource
+        )
+    logging.info('Done.')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def push_rtmc(site, remote_resource='nextcloud'):
+
+    logging.info(f'Begin move of {site} RTMC images to UQRDM')
+    _move_site_data_stream(
+        site=site, stream='rtmc', remote_resource=remote_resource
+        )
+    logging.info('Done.')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _move_site_data_stream(
+        site, stream, remote_resource, exclude_dirs=None,
+        which_way='to_remote', timeout=600
+        ):
+
+    local_path = _reformat_path_str(
+        PATHS.get_local_path(
+            site=site, resource='data', stream=stream, as_str=True
+            )
+        )
+    remote_path = _reformat_path_str(
+        PATHS.get_remote_path(
+            resource=remote_resource, stream=stream, site=site,
+            as_str=True
+            )
+        )
+    generic_move(
+        local_location=local_path, remote_location=remote_path,
+        exclude_dirs=exclude_dirs, which_way=which_way, timeout=timeout
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -216,6 +167,22 @@ def check_remote_available(remote_path):
         run_list=[APP_PATH, 'lsd', str(remote_path)],
         timeout=30
         )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _add_rclone_exclude(exclude_dirs):
+
+    this_list = []
+    for this_dir in exclude_dirs:
+        this_list.append('--exclude')
+        this_list.append(f'{this_dir}/**')
+    return this_list
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _reformat_path_str(path_str):
+
+    return path_str.replace('\\', '/')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

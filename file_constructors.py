@@ -628,7 +628,7 @@ class SiteStatusConstructor():
                          '-'.join(file.split('.')[0].split('_')[-3:]), '%Y-%m-%d'
                          )
                      )
-                    .days
+                    .days - 1
                     )
             except ValueError:
                 days.append(None)
@@ -702,7 +702,9 @@ class SiteStatusConstructor():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_to_excel(self, dest='E:/Sites/site_status.xlsx'):
+    def write_to_excel(
+            self, dest='E:/Network_documents/Status/site_to_VM_status.xlsx'
+            ):
         """
         Write all data to excel spreadsheet
 
