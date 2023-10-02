@@ -38,21 +38,21 @@ PATHS = pm.paths()
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def old_colour_getter(long_name):
+# #------------------------------------------------------------------------------
+# def old_colour_getter(long_name):
 
 
-    RGB_DICT = {
-        'Soil heat flux at depth z': cm.get_cmap(name='Set2'),
-        'Soil temperature': cm.get_cmap(name='Set1_r'),
-        'Soil water content': cm.get_cmap(name='Set1')
-        }
+#     RGB_DICT = {
+#         'Soil heat flux at depth z': cm.get_cmap(name='Set2'),
+#         'Soil temperature': cm.get_cmap(name='Set1_r'),
+#         'Soil water content': cm.get_cmap(name='Set1')
+#         }
 
-    colours = [RGB_DICT[long_name](i) for i in range(8)]
-    for colour in colours:
-        rgb_str = ','.join([str(int(x)) for x in np.array(colour[:-1]) * 255])
-        yield f'RGBA({rgb_str},1)'
-#------------------------------------------------------------------------------
+#     colours = [RGB_DICT[long_name](i) for i in range(8)]
+#     for colour in colours:
+#         rgb_str = ','.join([str(int(x)) for x in np.array(colour[:-1]) * 255])
+#         yield f'RGBA({rgb_str},1)'
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def colour_getter(long_name, n_col=6):

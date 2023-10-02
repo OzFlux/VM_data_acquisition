@@ -28,6 +28,7 @@ UNIT_ALIAS_DICT = {
     'arb': ['n', 'samples'],
     'samples': ['arb', 'n']
     }
+VALID_MEAS_INTERVALS = {1, 2, 15, 30, 60}
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
@@ -48,7 +49,18 @@ class single_file_data_handler():
         """
 
         self.file = check_file_path(file=file)
-        self.interval_as_num = get_TOA5_interval(file=file, as_offset=False)
+        try:
+            interval = get_TOA5_interval(file=file, as_offset=False)
+        except AttributeError:
+            for interval in VALID_MEAS_INTERVALS:
+                try:
+                    interval = get_TOA5_interval(
+                        file=file, expected_interval=interval, as_offset=False
+                        )
+                    break
+                except AttributeError:
+                    continue
+        self.interval_as_num = interval
         self.interval_as_offset = f'{self.interval_as_num}T'
         self.info = get_station_info(file=file)
         self.headers = get_header_df(file=file)
@@ -1391,13 +1403,9 @@ def get_TOA5_data(file, usecols=None):
 
     # Usecols MUST include TIMESTAMP and at least ONE additional column; if not,
     # do not subset the columns on import.
-    if usecols:
-        if usecols == ['TIMESTAMP']:
-            thecols = None
-        else:
-            thecols = list(dict.fromkeys(['TIMESTAMP'] + usecols))
-    else:
-        thecols = None
+    thecols = None
+    if usecols and not usecols == ['TIMESTAMP']:
+        thecols = list(dict.fromkeys(['TIMESTAMP'] + usecols))
 
     # Import data
     df = pd.read_csv(
@@ -1424,10 +1432,10 @@ def get_TOA5_data(file, usecols=None):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_TOA5_interval(file, as_offset=True):
+def get_TOA5_interval(file, as_offset=True, expected_interval=15):
 
     df = get_TOA5_data(file=file, usecols=['RECORD'])
-    num = get_index_interval(idx=df.index)
+    num = get_index_interval(idx=df.index, divisor=expected_interval)
     if as_offset: return f'{num}T'
     return num
 #------------------------------------------------------------------------------
