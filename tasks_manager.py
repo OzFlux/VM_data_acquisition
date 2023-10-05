@@ -16,16 +16,26 @@ Cloudstor.
 
 import logging
 from logging import handlers
-import pandas as pd
+import pathlib
 import sys
+
+#------------------------------------------------------------------------------
+### SECONDARY IMPORTS ###
+#------------------------------------------------------------------------------
+
+import pandas as pd
 
 #------------------------------------------------------------------------------
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
+sys.path.append(
+    str(pathlib.Path(__file__).parent.parent.resolve() / 'profile')
+    )
 import file_constructors as fc
 import paths_manager as pm
 import process_10hz_data as ptd
+import profile_data_processor as pdp
 import rclone_transfer as rt
 
 #------------------------------------------------------------------------------
@@ -33,7 +43,7 @@ import rclone_transfer as rt
 #------------------------------------------------------------------------------
 
 PathsManager = pm.paths()
-log_byte_limit = 10**6
+LOG_BYTE_LIMIT = 10**6
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
@@ -57,7 +67,7 @@ def _set_logger(task, site=None):
     this_logger = logging.getLogger()
     this_logger.setLevel(logging.INFO)
     handler = logging.handlers.RotatingFileHandler(logger_write_path,
-                                                   maxBytes=log_byte_limit)
+                                                   maxBytes=LOG_BYTE_LIMIT)
     formatter = logging.Formatter(
         '%(asctime)s %(levelname)s [%(name)s] %(message)s'
         )
@@ -140,6 +150,11 @@ class TasksManager():
                 'args': site_only
                 },
 
+            'process_profile_data': {
+                'func': process_profile_data,
+                'args': site_only
+                },
+
             'Rclone_pull_slow_rdm': {
                 'func': rt.pull_slow_flux,
                 'args': site_only
@@ -187,7 +202,6 @@ class TasksManager():
             sub_dict['func'](**sub_dict['args'])
         else:
             sub_dict['func']()
-
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -236,6 +250,24 @@ def generate_merged_file(site):
 
     merger = fc.TableMerger(site=site)
     merger.make_output_file()
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def process_profile_data(site):
+
+    processor = pdp.get_site_profile_class(site=site)
+    output_path = PathsManager.get_local_path(
+            resource='data', stream='profile_proc', site=site
+            )
+    processor.write_to_csv(file_name=output_path / 'storage_data.csv')
+    processor.plot_time_series(
+        output_to_file=output_path / 'storage_time_series_plot.png',
+        open_window=False
+        )
+    processor.plot_diel_storage_mean(
+        output_to_file=output_path / 'storage_diel_mean_plot.png',
+        open_window=False
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

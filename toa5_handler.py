@@ -1434,7 +1434,7 @@ def get_TOA5_data(file, usecols=None):
 #------------------------------------------------------------------------------
 def get_TOA5_interval(file, as_offset=True, expected_interval=15):
 
-    df = get_TOA5_data(file=file, usecols=['RECORD'])
+    df = get_TOA5_data(file=file)
     num = get_index_interval(idx=df.index, divisor=expected_interval)
     if as_offset: return f'{num}T'
     return num

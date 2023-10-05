@@ -338,253 +338,253 @@ class mapper():
 
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-class RtmcSyntaxGenerator():
+# #------------------------------------------------------------------------------
+# class RtmcSyntaxGenerator():
 
-    def __init__(self, site):
+#     def __init__(self, site):
 
-        self.site_df = make_site_df(site=site)
+#         self.site_df = make_site_df(site=site)
 
-    #--------------------------------------------------------------------------
-    def _get_init_dict(self, start_cond):
-        """
-        Get the requested RTMC-formatted start condition.
+#     #--------------------------------------------------------------------------
+#     def _get_init_dict(self, start_cond):
+#         """
+#         Get the requested RTMC-formatted start condition.
 
-        Parameters
-        ----------
-        start_cond : str
-            The start condition required.
+#         Parameters
+#         ----------
+#         start_cond : str
+#             The start condition required.
 
-        Returns
-        -------
-        dict
-            A dictionary with key 'start_cond' and the RTMC start condition
-            string as value.
+#         Returns
+#         -------
+#         dict
+#             A dictionary with key 'start_cond' and the RTMC start condition
+#             string as value.
 
-        """
+#         """
 
-        start_dict = {
-            'start': 'StartRelativeToNewest({},OrderCollected);',
-            'start_absolute': 'StartAtRecord(0,0,OrderCollected);'
-            }
-        if not start_cond:
-            return {}
-        return {'start_cond': start_dict[start_cond]}
-    #--------------------------------------------------------------------------
+#         start_dict = {
+#             'start': 'StartRelativeToNewest({},OrderCollected);',
+#             'start_absolute': 'StartAtRecord(0,0,OrderCollected);'
+#             }
+#         if not start_cond:
+#             return {}
+#         return {'start_cond': start_dict[start_cond]}
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _get_scaled_to_range(self, eval_string):
-        """
-        Scale an RTMC evaluated string relative to its range.
+#     #--------------------------------------------------------------------------
+#     def _get_scaled_to_range(self, eval_string):
+#         """
+#         Scale an RTMC evaluated string relative to its range.
 
-        Parameters
-        ----------
-        eval_string : str
-            The string that will be evaluated by RTMC.
+#         Parameters
+#         ----------
+#         eval_string : str
+#             The string that will be evaluated by RTMC.
 
-        Returns
-        -------
-        str
-            RTMC-readable string to generate a variable scaled relative to its
-            range (max - min).
+#         Returns
+#         -------
+#         str
+#             RTMC-readable string to generate a variable scaled relative to its
+#             range (max - min).
 
-        """
+#         """
 
-        return (
-            '({ev} - MinRun({ev})) / (MaxRun({ev}) - MinRun({ev}))'
-            .format(ev=eval_string)
-            )
-    #--------------------------------------------------------------------------
+#         return (
+#             '({ev} - MinRun({ev})) / (MaxRun({ev}) - MinRun({ev}))'
+#             .format(ev=eval_string)
+#             )
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_alias_string(self, long_name):
-        """
-        Generate an RTMC-valid alias structure.
+#     #--------------------------------------------------------------------------
+#     def get_alias_string(self, long_name):
+#         """
+#         Generate an RTMC-valid alias structure.
 
-        Parameters
-        ----------
-        long_name : str
-            The variable for which to return the alias string.
+#         Parameters
+#         ----------
+#         long_name : str
+#             The variable for which to return the alias string.
 
-        Returns
-        -------
-        str
-            Formatted RTMC alias string.
+#         Returns
+#         -------
+#         str
+#             Formatted RTMC alias string.
 
-        """
+#         """
 
-        variable = self._get_variable_frame(long_name=long_name)
-        alias_list = variable.translation_name.tolist()
-        source_list = [
-            '"DataFile:merged.{}"'.format(x) for x in alias_list
-            ]
-        combined_list = [
-            'Alias({});'.format(x[0] + ',' + x[1])
-            for x in zip(alias_list, source_list)
-            ]
-        return self._str_joiner(combined_list, joiner='\r\n')
-    #--------------------------------------------------------------------------
+#         variable = self._get_variable_frame(long_name=long_name)
+#         alias_list = variable.translation_name.tolist()
+#         source_list = [
+#             '"DataFile:merged.{}"'.format(x) for x in alias_list
+#             ]
+#         combined_list = [
+#             'Alias({});'.format(x[0] + ',' + x[1])
+#             for x in zip(alias_list, source_list)
+#             ]
+#         return self._str_joiner(combined_list, joiner='\r\n')
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_comm_status_string(self, logger_name):
-        """
+#     #--------------------------------------------------------------------------
+#     def get_comm_status_string(self, logger_name):
+#         """
 
 
-        Parameters
-        ----------
-        logger_name : TYPE
-            DESCRIPTION.
+#         Parameters
+#         ----------
+#         logger_name : TYPE
+#             DESCRIPTION.
 
-        Raises
-        ------
-        KeyError
-            DESCRIPTION.
+#         Raises
+#         ------
+#         KeyError
+#             DESCRIPTION.
 
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
+#         Returns
+#         -------
+#         TYPE
+#             DESCRIPTION.
 
-        """
+#         """
 
-        if not logger_name in self.site_df.logger_name.tolist():
-            raise KeyError('No such logger name in table!')
-        return (
-            '"Server:__statistics__.{}_std.Collection State" > 2 '
-            .format(logger_name)
-            )
-    #--------------------------------------------------------------------------
+#         if not logger_name in self.site_df.logger_name.tolist():
+#             raise KeyError('No such logger name in table!')
+#         return (
+#             '"Server:__statistics__.{}_std.Collection State" > 2 '
+#             .format(logger_name)
+#             )
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _get_variable_frame(self, long_name):
+#     #--------------------------------------------------------------------------
+#     def _get_variable_frame(self, long_name):
 
-        variable = self.site_df.loc[long_name]
-        if isinstance(variable, pd.core.series.Series):
-            variable = variable.to_frame().T
-        return variable
-    #--------------------------------------------------------------------------
+#         variable = self.site_df.loc[long_name]
+#         if isinstance(variable, pd.core.series.Series):
+#             variable = variable.to_frame().T
+#         return variable
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_aliased_output(
-            self, long_name, as_str=True, start_cond=None,
-            scaled_to_range=False
-            ):
+#     #--------------------------------------------------------------------------
+#     def get_aliased_output(
+#             self, long_name, as_str=True, start_cond=None,
+#             scaled_to_range=False
+#             ):
 
-        variable = self._get_variable_frame(long_name=long_name)
-        alias_string = self.get_alias_string(long_name=long_name)
-        eval_string = ','.join(variable.translation_name.tolist())
-        if len(variable) > 1:
-            eval_string = f'AvgSpa({eval_string})'
-        if scaled_to_range:
-            eval_string = self._get_scaled_to_range(eval_string=eval_string)
-            start_cond = 'start_absolute'
-        strings_dict = self._get_init_dict(start_cond=start_cond)
-        strings_dict.update(
-            {'alias_string': alias_string, 'eval_string': eval_string}
-            )
-        if as_str:
-            return self._str_joiner(list(strings_dict.values()))
-        return strings_dict
-    #--------------------------------------------------------------------------
+#         variable = self._get_variable_frame(long_name=long_name)
+#         alias_string = self.get_alias_string(long_name=long_name)
+#         eval_string = ','.join(variable.translation_name.tolist())
+#         if len(variable) > 1:
+#             eval_string = f'AvgSpa({eval_string})'
+#         if scaled_to_range:
+#             eval_string = self._get_scaled_to_range(eval_string=eval_string)
+#             start_cond = 'start_absolute'
+#         strings_dict = self._get_init_dict(start_cond=start_cond)
+#         strings_dict.update(
+#             {'alias_string': alias_string, 'eval_string': eval_string}
+#             )
+#         if as_str:
+#             return self._str_joiner(list(strings_dict.values()))
+#         return strings_dict
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_net_radiation(self, as_str=True):
+#     #--------------------------------------------------------------------------
+#     def get_net_radiation(self, as_str=True):
 
-        long_names = [
-            'Downwelling shortwave', 'Upwelling shortwave',
-            'Downwelling longwave', 'Upwelling longwave'
-            ]
-        alias_list, eval_dict = [], {}
-        for long_name in long_names:
-            output = self.get_aliased_output(long_name=long_name, as_str=False)
-            alias_list.append(output['alias_string'])
-            eval_dict[long_name] = output['eval_string']
-        strings_dict = {
-            'alias_string': self._str_joiner(alias_list, joiner='\r\n'),
-            'eval_string': (
-                eval_dict['Downwelling shortwave'] + '-' +
-                eval_dict['Upwelling shortwave'] + '+' +
-                eval_dict['Downwelling longwave'] + '-' +
-                eval_dict['Upwelling longwave']
-                )
-            }
-        if as_str:
-            return self._str_joiner(list(strings_dict.values()))
-        return strings_dict
-    #--------------------------------------------------------------------------
+#         long_names = [
+#             'Downwelling shortwave', 'Upwelling shortwave',
+#             'Downwelling longwave', 'Upwelling longwave'
+#             ]
+#         alias_list, eval_dict = [], {}
+#         for long_name in long_names:
+#             output = self.get_aliased_output(long_name=long_name, as_str=False)
+#             alias_list.append(output['alias_string'])
+#             eval_dict[long_name] = output['eval_string']
+#         strings_dict = {
+#             'alias_string': self._str_joiner(alias_list, joiner='\r\n'),
+#             'eval_string': (
+#                 eval_dict['Downwelling shortwave'] + '-' +
+#                 eval_dict['Upwelling shortwave'] + '+' +
+#                 eval_dict['Downwelling longwave'] + '-' +
+#                 eval_dict['Upwelling longwave']
+#                 )
+#             }
+#         if as_str:
+#             return self._str_joiner(list(strings_dict.values()))
+#         return strings_dict
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_available_energy(self, as_str=True):
+#     #--------------------------------------------------------------------------
+#     def get_available_energy(self, as_str=True):
 
-        net_rad = self.get_net_radiation(as_str=False)
-        soil_flux = self.get_aliased_output(
-            long_name='Soil heat flux at depth z', as_str=False
-            )
-        strings_dict = {
-            'alias_string': self._str_joiner(
-                [net_rad['alias_string'], soil_flux['alias_string']],
-                joiner='\r\n'
-                ),
-            'eval_string': (
-                f'({net_rad["eval_string"]})-{soil_flux["eval_string"]}'
-                )
-            }
-        if as_str:
-            return self._str_joiner(list(strings_dict.values()))
-        return strings_dict
-    #--------------------------------------------------------------------------
+#         net_rad = self.get_net_radiation(as_str=False)
+#         soil_flux = self.get_aliased_output(
+#             long_name='Soil heat flux at depth z', as_str=False
+#             )
+#         strings_dict = {
+#             'alias_string': self._str_joiner(
+#                 [net_rad['alias_string'], soil_flux['alias_string']],
+#                 joiner='\r\n'
+#                 ),
+#             'eval_string': (
+#                 f'({net_rad["eval_string"]})-{soil_flux["eval_string"]}'
+#                 )
+#             }
+#         if as_str:
+#             return self._str_joiner(list(strings_dict.values()))
+#         return strings_dict
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_soil_heat_storage(
-            self, Cp=1800, seconds=1800, layer_depth=0.08, as_str=True,
-            start_cond=None):
+#     #--------------------------------------------------------------------------
+#     def get_soil_heat_storage(
+#             self, Cp=1800, seconds=1800, layer_depth=0.08, as_str=True,
+#             start_cond=None):
 
-        avg_dict = (
-            self.get_aliased_output(long_name='Soil temperature', as_str=False)
-            )
-        alias_string = self._str_joiner(
-            [avg_dict['alias_string'], 'Alias(Cp,{});'.format(Cp)],
-            joiner='\r\n'
-            )
-        eval_string = (
-            'Cp*(({avg})-Last({avg}))/{secs}*1/{dp}'
-            .format(avg=avg_dict['eval_string'], secs=seconds, dp=layer_depth)
-            )
-        strings_dict = self._get_init_dict(start_cond=start_cond)
-        strings_dict.update(
-            {'alias_string': alias_string, 'eval_string': eval_string}
-            )
-        if as_str:
-            return self._str_joiner(list(strings_dict.values()))
-        return strings_dict
-    #--------------------------------------------------------------------------
+#         avg_dict = (
+#             self.get_aliased_output(long_name='Soil temperature', as_str=False)
+#             )
+#         alias_string = self._str_joiner(
+#             [avg_dict['alias_string'], 'Alias(Cp,{});'.format(Cp)],
+#             joiner='\r\n'
+#             )
+#         eval_string = (
+#             'Cp*(({avg})-Last({avg}))/{secs}*1/{dp}'
+#             .format(avg=avg_dict['eval_string'], secs=seconds, dp=layer_depth)
+#             )
+#         strings_dict = self._get_init_dict(start_cond=start_cond)
+#         strings_dict.update(
+#             {'alias_string': alias_string, 'eval_string': eval_string}
+#             )
+#         if as_str:
+#             return self._str_joiner(list(strings_dict.values()))
+#         return strings_dict
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_corrected_soil_heat_flux(
-            self, Cp=1800, seconds=1800, layer_depth=0.08
-            ):
+#     #--------------------------------------------------------------------------
+#     def get_corrected_soil_heat_flux(
+#             self, Cp=1800, seconds=1800, layer_depth=0.08
+#             ):
 
-        stor_dict = self.get_soil_heat_storage(
-            Cp=Cp, seconds=seconds, layer_depth=layer_depth, as_str=False
-            )
-        flux_dict = self.get_aliased_output(
-            long_name='Soil heat flux at depth z', as_str=False
-            )
-        all_alias = self._str_joiner(
-            str_list=[flux_dict['alias_string'], stor_dict['alias_string']],
-                      joiner='\r\n')
-        output_string = (
-            '{flux}+{store}'.format(flux=flux_dict['eval_string'],
-                                    store=stor_dict['eval_string'])
-            )
-        return self._str_joiner([all_alias, output_string])
-    #--------------------------------------------------------------------------
+#         stor_dict = self.get_soil_heat_storage(
+#             Cp=Cp, seconds=seconds, layer_depth=layer_depth, as_str=False
+#             )
+#         flux_dict = self.get_aliased_output(
+#             long_name='Soil heat flux at depth z', as_str=False
+#             )
+#         all_alias = self._str_joiner(
+#             str_list=[flux_dict['alias_string'], stor_dict['alias_string']],
+#                       joiner='\r\n')
+#         output_string = (
+#             '{flux}+{store}'.format(flux=flux_dict['eval_string'],
+#                                     store=stor_dict['eval_string'])
+#             )
+#         return self._str_joiner([all_alias, output_string])
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _str_joiner(self, str_list, joiner='\r\n\r\n'):
+#     #--------------------------------------------------------------------------
+#     def _str_joiner(self, str_list, joiner='\r\n\r\n'):
 
-        return joiner.join(str_list)
-    #--------------------------------------------------------------------------
+#         return joiner.join(str_list)
+#     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
