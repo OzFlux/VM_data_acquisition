@@ -128,6 +128,16 @@ def push_slow_flux(site, remote_resource='nextcloud'):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def push_profile_processed(site, remote_resource='nextcloud'):
+
+    logging.info(f'Begin move of {site} processed profile data to UQRDM')
+    _move_site_data_stream(
+        site=site, stream='profile_proc', remote_resource=remote_resource
+        )
+    logging.info('Done.')
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def push_rtmc(site, remote_resource='nextcloud'):
 
     logging.info(f'Begin move of {site} RTMC images to UQRDM')
