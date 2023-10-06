@@ -165,6 +165,11 @@ class TasksManager():
                 'args': site_only
                 },
 
+            'Rclone_push_profile_rdm': {
+                'func': rt.push_profile_processed,
+                'args': site_only
+                },
+
             'Rclone_push_slow_rdm': {
                 'func': rt.push_slow_flux,
                 'args': site_only
@@ -266,6 +271,10 @@ def process_profile_data(site):
         )
     processor.plot_diel_storage_mean(
         output_to_file=output_path / 'storage_diel_mean_plot.png',
+        open_window=False
+        )
+    processor.plot_vertical_evolution_mean(
+        output_to_file=output_path / 'vertical_time_evoln_mean.png',
         open_window=False
         )
 #------------------------------------------------------------------------------
