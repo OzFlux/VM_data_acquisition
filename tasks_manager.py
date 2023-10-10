@@ -120,6 +120,19 @@ class TasksManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_task_list_for_site(self, site):
+        """
+        Get the list of tasks enabled for a given site.
+        """
+
+        return (
+            self.tasks_df.loc[site, self.tasks_df.loc[site]==True]
+            .index
+            .tolist()
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_task_list(self):
         """
         Get the list of tasks.
