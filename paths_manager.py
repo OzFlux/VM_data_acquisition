@@ -12,7 +12,9 @@ import pathlib
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
 
-REMOTE_ALIAS_DICT = {'AliceSpringsMulga': 'AliceMulga'}
+REMOTE_ALIAS_DICT = {
+    'AliceSpringsMulga': 'AliceMulga', 'Longreach': 'MitchellGrassRangeland'
+    }
 
 #------------------------------------------------------------------------------
 
