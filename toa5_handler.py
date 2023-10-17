@@ -423,7 +423,7 @@ class merged_file_data_handler(single_file_data_handler):
 #------------------------------------------------------------------------------
 class file_concatenator():
 
-    def __init__(self, file, enforce_consistent_sampling=True):
+    def __init__(self, file):
         """
         Class to concatenate backups.
 
@@ -431,8 +431,6 @@ class file_concatenator():
         ----------
         file : str or pathlib.Path
             Absolute path to file.
-        enforce_consistent_sampling : TYPE, optional
-            DESCRIPTION. The default is True.
 
         Raises
         ------
