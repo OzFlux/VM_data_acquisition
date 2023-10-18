@@ -6,9 +6,11 @@ Created on Thu Oct 12 13:37:33 2023
 """
 
 import datetime as dt
+import pathlib
 
 import numpy as np
 import pandas as pd
+
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -44,53 +46,6 @@ UNIT_ALIASES = {
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class merge_report_handler():
-
-    def __init__(self, merge_results):
-
-        self.master_file = merge_results['master_file']
-        self.merge_file = merge_results['merge_file']
-        self.variable_merge_legal = merge_results['variable_merge_legal']
-        self.units_merge_legal = merge_results['units_merge_legal']
-        self.interval_merge_legal = merge_results['interval_merge_legal']
-        self.file_merge_legal = all(
-            [merge_results[key] for key in merge_results.keys() if 'legal' in key]
-            )
-
-        common_variables = merge_results['common_variables']
-        if common_variables:
-            self.common_variables = common_variables
-        else:
-            self.common_variables = None
-
-        master_variables = merge_results['master_only']
-        if master_variables:
-            self.master_variables = master_variables
-        else:
-            self.master_variables = None
-
-        merge_variables = merge_results['merge_only']
-        if merge_variables:
-            self.merge_variables = master_variables
-        else:
-            self.merge_variables = None
-
-    def get_report_text(self):
-
-        write_list = []
-        write_list.append(f'Master file: {self.master_file}')
-        write_list.append(f'Merge file: {self.merge_file}')
-        return write_list
-
-    def write_report(self):
-
-        pass
-
-
-
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -370,28 +325,80 @@ class generic_data_ingester():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class file_concatenator():
+# Merging / concatenation classes #
+#------------------------------------------------------------------------------
 
-    def __init__(self, master_file, file_type, concat_list):
+#------------------------------------------------------------------------------
+class FileConcatenator():
+
+    def __init__(self, master_file, concat_list, file_type):
 
         self.master_file = master_file
-        self.master_interval = get_file_interval(
-            file=master_file, file_type=file_type
-            )
-        temp_list = concat_list.copy()
-        if master_file in temp_list:
-            temp_list.remove(master_file)
-        self.concat_list = temp_list
+        self.concat_list = concat_list
         self.file_type = file_type
 
+    def get_concatenated_file(self):
 
-    def compare_variables(self, with_file):
+        merge_results = self._get_all_merge_results()
+        df_list = [get_data(file=self.master_file, file_type=self.file_type)]
+        for result in merge_results:
+            if result.file_merge_legal:
+                df_list.append(
+                    get_data(file=result.merge_file, file_type=self.file_type)
+                    .rename(result.aliased_units, axis=1)
+                    )
+        return (
+            pd.concat(df_list)
+            .sort_index()
+            )
+
+    def map_legal_merge_files(self):
+
+        return dict(zip(
+            self.concat_list,
+            [merge_results.file_merge_legal for merge_results in
+             self._get_all_merge_results()]
+            ))
+
+    def get_full_merge_report_text(self):
+
+        return [
+            merge_results.get_report_text() for merge_results in
+            self._get_all_merge_results()
+            ]
+
+    def _get_all_merge_results(self):
+
+        return [
+            FileMergeAnalyser(
+                master_file=self.master_file,
+                merge_file=file,
+                file_type=self.file_type
+                )
+            .get_merge_results()
+            for file in self.concat_list
+            ]
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class FileMergeAnalyser():
+    """Analyse compatibility of merge between master and merge file."""
+
+    def __init__(self, master_file, merge_file, file_type):
+
+        self.master_file = master_file
+        self.merge_file = merge_file
+        self.file_type = file_type
+
+    #--------------------------------------------------------------------------
+    def compare_variables(self):
 
         master_df = get_header_df(
             file=self.master_file, file_type=self.file_type
             )
         merge_df = get_header_df(
-            file=with_file, file_type=self.file_type
+            file=self.merge_file, file_type=self.file_type
             )
         common = list(set(master_df.index).intersection(merge_df.index))
         return {
@@ -404,9 +411,10 @@ class file_concatenator():
                 set(merge_df.index.tolist()) - set(master_df.index.tolist())
                 )
             }
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_units(self, with_file):
+    def compare_units(self):
         """
         Compare units header line (merge is deemed illegal if there are unit
                                    changes).
@@ -420,35 +428,37 @@ class file_concatenator():
         -------
         dict
             return a dictionary with the mismatched header elements
-            (key='units_mismatch') and whether the merge is legal
-            (key='units_merge_legal').
+            (key='units_mismatch'), any aliased units(key='aliased units')
+            and whether the merge is legal (key='units_merge_legal').
 
         """
 
         # Subset the analysis for common variables, and build comparison df
         common_vars = (
-            self.compare_variables(with_file=with_file)['common_variables']
+            self.compare_variables()['common_variables']
             )
         compare_df = pd.concat(
             [(get_header_df(file=self.master_file, file_type=self.file_type)
               .rename({'units': 'master'}, axis=1)
               .loc[common_vars, 'master']
               ),
-              (get_header_df(file=with_file, file_type=self.file_type)
+              (get_header_df(file=self.merge_file, file_type=self.file_type)
               .rename({'units': 'merge'}, axis=1)
               .loc[common_vars, 'merge']
               )], axis=1
             )
 
         # Get mismatched variables and check whether they are just aliases
-        # (in which case merge is deemed legal)
+        # (in which case merge is deemed legal, and alias mapped to master)
         mismatch_df = compare_df[compare_df['master']!=compare_df['merge']]
-        mismatch_list, units_merge_legal = [], True
+        mismatch_list, alias_dict = [], {}
+        units_merge_legal = True
         for variable in mismatch_df.index:
             master_units = mismatch_df.loc[variable, 'master']
             merge_units = mismatch_df.loc[variable, 'merge']
             try:
                 assert merge_units in UNIT_ALIASES[master_units]
+                alias_dict.update({merge_units: master_units})
             except (KeyError, AssertionError):
                 mismatch_list.append(variable)
                 units_merge_legal = False
@@ -456,12 +466,13 @@ class file_concatenator():
         # Return the result
         return {
             'units_mismatch': mismatch_list,
+            'aliased_units': alias_dict,
             'units_merge_legal': units_merge_legal
             }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def compare_interval(self, with_file):
+    def compare_interval(self):
         """
         Cross-check concatenation file has same frequency as master.
 
@@ -480,13 +491,31 @@ class file_concatenator():
 
         return {
             'interval_merge_legal':
-                self.master_interval ==
-                get_file_interval(file=with_file, file_type=self.file_type)
+                get_file_interval(
+                    file=self.master_file, file_type=self.file_type
+                    ) ==
+                get_file_interval(
+                    file=self.merge_file, file_type=self.file_type
+                    )
                 }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def do_merge_assessment(self, with_file, as_text=False):
+    def compare_dates(self):
+
+        master_dates = get_dates(
+            file=self.master_file, file_type=self.file_type
+            )
+        merge_dates = get_dates(
+            file=self.merge_file, file_type=self.file_type
+            )
+        return {'date_merge_legal':
+                len(set(merge_dates) - set(master_dates)) > 0
+                }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_merge_results(self):
         """
         Do full assessment of merge
 
@@ -495,8 +524,6 @@ class file_concatenator():
         with_file : str
             Name of file to compare to the master file (filename only,
                                                         omit directory).
-        as_text : bool, optional
-            If true, returns a formatted text output. The default is False.
 
         Returns
         -------
@@ -506,12 +533,66 @@ class file_concatenator():
 
         """
 
-        return merge_report_handler(
-            {'master_file': str(self.master_file), 'merge_file': str(with_file)} |
-            self.compare_variables(with_file=with_file) |
-            self.compare_units(with_file=with_file) |
-            self.compare_interval(with_file=with_file)
+        return _MergeReportHandler(
+            {'master_file': str(self.master_file),
+             'merge_file': str(self.merge_file)} |
+            self.compare_dates() |
+            self.compare_variables() |
+            self.compare_units() |
+            self.compare_interval()
             )
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class _MergeReportHandler():
+
+    def __init__(self, merge_results):
+
+        self.merge_results = merge_results
+        self.master_file = merge_results['master_file']
+        self.merge_file = merge_results['merge_file']
+        self.date_merge_legal = merge_results['date_merge_legal']
+        self.variable_merge_legal = merge_results['variable_merge_legal']
+        self.units_merge_legal = merge_results['units_merge_legal']
+        self.interval_merge_legal = merge_results['interval_merge_legal']
+        self.file_merge_legal = all(
+            [merge_results[key] for key in merge_results.keys() if 'legal' in key]
+            )
+        self.common_variables = merge_results['common_variables']
+        self.master_variables = merge_results['master_only']
+        self.merge_variables = merge_results['merge_only']
+        self.aliased_units = merge_results['aliased_units']
+        self.mismatched_unit_variables = merge_results['units_mismatch']
+
+    #--------------------------------------------------------------------------
+    def get_report_text(self):
+
+        return [
+            f'Merge file: {self.merge_file}',
+            f'Merge legal? -> {str(self.file_merge_legal)}',
+            f'  - Date merge legal? -> {str(self.date_merge_legal)}',
+            f'  - Variable merge legal? -> {str(self.file_merge_legal)}',
+            f'    * Variables contained only in master file -> {self.master_variables}',
+            f'    * Variables contained only in merge file -> {self.merge_variables}',
+            f'  - Units merge legal? -> {str(self.units_merge_legal)}',
+            f'    * Variables with aliased units -> {self.aliased_units}',
+            f'    * Variables with mismatched units -> {self.mismatched_unit_variables}',
+            f'  - Interval merge legal? -> {str(self.interval_merge_legal)}'
+            ]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_report(self, target_directory=None):
+
+        master_file = pathlib.Path(self.master_file)
+        dir_path = target_directory if target_directory else master_file.parent
+        assert dir_path.exists()
+        out_file = dir_path / f'merge_report_{master_file.stem}.txt'
+        with open(out_file, 'w') as f:
+            for line in self.get_report_text():
+                f.write(f'{line}\n')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -523,14 +604,6 @@ class file_concatenator():
 #---------------#
 # File handling #
 #---------------#
-
-#------------------------------------------------------------------------------
-def concatenate_files(file_list, file_type):
-
-    return pd.concat(
-        [get_data(file=file, file_type=file_type) for file in file_list]
-        )
-#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_data(file, file_type, usecols=None):
@@ -729,17 +802,15 @@ def _TOA5_line_formatter(line):
 def get_dates(file, file_type):
 
     line_formatter = get_line_formatter(file_type=file_type)
-    last_line = max(FILE_CONFIGS[file_type]['header_lines'].values())
     with open(file) as f:
         for i, line in enumerate(f):
-            if i > last_line:
-                try:
-                    date_list = [
-                        _date_extractor(line_formatter(line), file_type=file_type)
-                        for line in f
-                        ]
-                except (TypeError, ValueError):
-                    continue
+            try:
+                date_list = [
+                    _date_extractor(line_formatter(line), file_type=file_type)
+                    for line in f
+                    ]
+            except (TypeError, ValueError):
+                continue
     return date_list
 #------------------------------------------------------------------------------
 
