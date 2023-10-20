@@ -21,7 +21,7 @@ FILE_CONFIGS = {
         'info_line': 0,
         'header_lines': {'variable': 1, 'units': 2, 'sampling': 3},
         'separator': ',',
-        'non_numeric_cols': [],
+        'non_numeric_cols': ['TIMESTAMP'],
         'time_variables': {'TIMESTAMP': 0},
         'na_values': 'NAN'
         },
@@ -29,7 +29,7 @@ FILE_CONFIGS = {
         'info_line': None,
         'header_lines': {'variable': 0, 'units': 1},
         'separator': '\t',
-        'non_numeric_cols': ['DATAH', 'filename'],
+        'non_numeric_cols': ['date', 'time',  'DATAH', 'filename'],
         'time_variables': {'date': 2, 'time': 3},
         'na_values': 'NaN'
         }
@@ -52,7 +52,7 @@ UNIT_ALIASES = {
 class generic_data_ingester():
 
     #--------------------------------------------------------------------------
-    def __init__(self, file, file_type):
+    def __init__(self, file, file_type, concat_list=None):
 
         self.file = file
         self.file_type = file_type
@@ -60,6 +60,7 @@ class generic_data_ingester():
         self.interval_as_num = get_index_interval(idx=self.data.index)
         self.interval_as_offset = f'{self.interval_as_num}T'
         self.headers = get_header_df(file=file, file_type=file_type)
+        self.concat_list = concat_list()
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
@@ -312,6 +313,16 @@ class generic_data_ingester():
 
     #--------------------------------------------------------------------------
     def map_sampling_units(self):
+        """
+        Get a dictionary cross-referencing all variables in file to their
+        sampling methods
+
+        Returns
+        -------
+        dict
+            With variables (keys) and sampling (values).
+
+        """
 
         if self.file_type == 'SF_summary':
             raise NotImplementedError(
@@ -336,47 +347,51 @@ class FileConcatenator():
         self.master_file = master_file
         self.concat_list = concat_list
         self.file_type = file_type
+        self._all_merge_reports = [
+            FileMergeAnalyser(
+                master_file=master_file,
+                merge_file=file,
+                file_type=file_type
+                )
+            .get_merge_results()
+            for file in concat_list
+            ]
+        self._legal_merge_reports = [
+            report for report in self._all_merge_reports if
+            report.file_merge_legal
+            ]
 
-    def get_concatenated_file(self):
+    def get_concatenated_data(self):
 
-        merge_results = self._get_all_merge_results()
         df_list = [get_data(file=self.master_file, file_type=self.file_type)]
-        for result in merge_results:
-            if result.file_merge_legal:
-                df_list.append(
-                    get_data(file=result.merge_file, file_type=self.file_type)
-                    .rename(result.aliased_units, axis=1)
-                    )
+        for report in self._legal_merge_reports:
+            df_list.append(
+                get_data(file=report.merge_file, file_type=self.file_type)
+                .rename(report.aliased_units, axis=1)
+                )
+        ordered_vars = self.get_concatenated_header().index.tolist()
         return (
             pd.concat(df_list)
+            [ordered_vars]
             .sort_index()
             )
 
-    def map_legal_merge_files(self):
+    def get_concatenated_header(self):
 
-        return dict(zip(
-            self.concat_list,
-            [merge_results.file_merge_legal for merge_results in
-             self._get_all_merge_results()]
-            ))
+        df_list = [get_header_df(file=self.master_file, file_type=self.file_type)]
+        for report in self._legal_merge_reports:
+            df_list.append(
+                get_header_df(file=report.merge_file, file_type=self.file_type)
+                .rename(report.aliased_units)
+                )
+        df = pd.concat(df_list)
+        return df[~df.index.duplicated()]
 
     def get_full_merge_report_text(self):
 
         return [
             merge_results.get_report_text() for merge_results in
-            self._get_all_merge_results()
-            ]
-
-    def _get_all_merge_results(self):
-
-        return [
-            FileMergeAnalyser(
-                master_file=self.master_file,
-                merge_file=file,
-                file_type=self.file_type
-                )
-            .get_merge_results()
-            for file in self.concat_list
+            self._all_merge_reports
             ]
 
 #------------------------------------------------------------------------------
@@ -393,6 +408,15 @@ class FileMergeAnalyser():
 
     #--------------------------------------------------------------------------
     def compare_variables(self):
+        """
+
+
+        Returns
+        -------
+        dict
+            DESCRIPTION.
+
+        """
 
         master_df = get_header_df(
             file=self.master_file, file_type=self.file_type
@@ -573,7 +597,7 @@ class _MergeReportHandler():
             f'Merge file: {self.merge_file}',
             f'Merge legal? -> {str(self.file_merge_legal)}',
             f'  - Date merge legal? -> {str(self.date_merge_legal)}',
-            f'  - Variable merge legal? -> {str(self.file_merge_legal)}',
+            f'  - Variable merge legal? -> {str(self.variable_merge_legal)}',
             f'    * Variables contained only in master file -> {self.master_variables}',
             f'    * Variables contained only in merge file -> {self.merge_variables}',
             f'  - Units merge legal? -> {str(self.units_merge_legal)}',
@@ -597,9 +621,13 @@ class _MergeReportHandler():
 
 #------------------------------------------------------------------------------
 
+
+
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
+
+
 
 #---------------#
 # File handling #
@@ -635,9 +663,6 @@ def get_data(file, file_type, usecols=None):
         ]
     rows_to_skip.remove(MASTER_DICT['header_lines']['variable'])
     index_col = '_'.join(REQ_TIME_VARS)
-    timestamp_cols = REQ_TIME_VARS.copy()
-    if len(timestamp_cols) > 1:
-        timestamp_cols = [timestamp_cols]
 
     # Usecols MUST include time variables and at least ONE additional column;
     # if this condition is not satisifed, do not subset the columns on import.
@@ -645,13 +670,23 @@ def get_data(file, file_type, usecols=None):
     if usecols and not usecols == REQ_TIME_VARS:
         thecols = list(set(REQ_TIME_VARS + usecols))
 
+    # The eddypro output date and time are in separate columns, so we make a
+    # TIMESTAMP variable by combining them; we DON'T want to keep TIMESTAMP as
+    # an original variable because it isn't one - we just want the date and time
+    # columns; in the case of the TOA5 data, we DO want to keep the TIMESTAMP
+    # column as data, because it IS part of the dataset
+    drop_index_vars = True
+    if len(REQ_TIME_VARS):
+        drop_index_vars = False
+
     # Now import data
     return (
         pd.read_csv(
             file,
             skiprows=rows_to_skip,
             usecols=thecols,
-            parse_dates=timestamp_cols,
+            parse_dates=REQ_TIME_VARS,
+            keep_date_col=True,
             na_values=MASTER_DICT['na_values'],
             sep=MASTER_DICT['separator'],
             engine='c',
@@ -659,13 +694,29 @@ def get_data(file, file_type, usecols=None):
             low_memory=False
             )
         .rename({index_col: 'TIMESTAMP'}, axis=1)
-        .set_index(keys='TIMESTAMP')
+        .set_index(keys='TIMESTAMP', drop=drop_index_vars)
         .pipe(_integrity_checks, non_numeric=MASTER_DICT['non_numeric_cols'])
         )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def _integrity_checks(df, non_numeric):
+    """
+    Check the integrity of data and indices.
+
+    Parameters
+    ----------
+    df : pd.core.frame.DataFrame
+        Dataframe containing the data.
+    non_numeric : list
+        Column names to ignore when coercing to numeric type.
+
+    Returns
+    -------
+    df : pd.core.frame.DataFrame
+        Dataframe containing the checked / altered data.
+
+    """
 
     # Coerce non-numeric data in numeric columns
     non_nums = df.select_dtypes(include='object')
