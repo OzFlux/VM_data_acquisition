@@ -49,18 +49,17 @@ UNIT_ALIASES = {
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class generic_data_ingester():
+class _generic_data_handler():
 
     #--------------------------------------------------------------------------
-    def __init__(self, file, file_type, concat_list=None):
+    def __init__(self, data, headers, concat_list=None, concat_report=None):
 
-        self.file = file
-        self.file_type = file_type
-        self.data = get_data(file=file, file_type=file_type)
+        self.data = data
+        self.headers = headers
         self.interval_as_num = get_index_interval(idx=self.data.index)
         self.interval_as_offset = f'{self.interval_as_num}T'
-        self.headers = get_header_df(file=file, file_type=file_type)
-        self.concat_list = concat_list()
+        self.concat_list = concat_list
+        self.concat_report = concat_report
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
@@ -341,8 +340,26 @@ class generic_data_ingester():
 
 #------------------------------------------------------------------------------
 class FileConcatenator():
+    """"""
 
     def __init__(self, master_file, concat_list, file_type):
+        """
+
+
+        Parameters
+        ----------
+        master_file : TYPE
+            DESCRIPTION.
+        concat_list : TYPE
+            DESCRIPTION.
+        file_type : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
 
         self.master_file = master_file
         self.concat_list = concat_list
@@ -387,12 +404,25 @@ class FileConcatenator():
         df = pd.concat(df_list)
         return df[~df.index.duplicated()]
 
-    def get_full_merge_report_text(self):
+    def get_merge_report(self):
 
-        return [
-            merge_results.get_report_text() for merge_results in
-            self._all_merge_reports
+        return {
+            report.merge_file: report.get_report_text()
+            for report in self._all_merge_reports
+            }
+
+    def write_merge_report(self, write_to_file=None):
+
+        result = self.get_merge_report()
+        flat_list = [
+            f'Merge report for {self.file_type} master file {self.master_file}\n'
             ]
+        for file in result.keys():
+            flat_list.extend(result[file] + ['\n'])
+        _write_text_to_file(
+            line_list=flat_list,
+            abs_file_path=write_to_file
+            )
 
 #------------------------------------------------------------------------------
 
@@ -401,6 +431,23 @@ class FileMergeAnalyser():
     """Analyse compatibility of merge between master and merge file."""
 
     def __init__(self, master_file, merge_file, file_type):
+        """
+        Initialise master, merge and file type parameters.
+
+        Parameters
+        ----------
+        master_file : str or pathlib.Path
+            Absolute path to master file.
+        merge_file : str or pathlib.Path
+            Absolute path to merge file.
+        file_type : str
+            The type of file (must be either "TOA5" or "SF_summary")
+
+        Returns
+        -------
+        None.
+
+        """
 
         self.master_file = master_file
         self.merge_file = merge_file
@@ -409,12 +456,13 @@ class FileMergeAnalyser():
     #--------------------------------------------------------------------------
     def compare_variables(self):
         """
-
+        Check which variables are common or held in one or other of master and
+        merge file (merge is deemed illegal if there are no common variables).
 
         Returns
         -------
         dict
-            DESCRIPTION.
+            Analysis results and boolean legality.
 
         """
 
@@ -441,19 +489,14 @@ class FileMergeAnalyser():
     def compare_units(self):
         """
         Compare units header line (merge is deemed illegal if there are unit
-                                   changes).
-
-        Parameters
-        ----------
-        with_file : str or pathlib.Path object
-            Either filename alone (str) or absolute path to file (pathlib).
+        changes).
 
         Returns
         -------
         dict
             return a dictionary with the mismatched header elements
             (key='units_mismatch'), any aliased units(key='aliased units')
-            and whether the merge is legal (key='units_merge_legal').
+            and boolean legality (key='units_merge_legal').
 
         """
 
@@ -498,12 +541,8 @@ class FileMergeAnalyser():
     #--------------------------------------------------------------------------
     def compare_interval(self):
         """
-        Cross-check concatenation file has same frequency as master.
-
-        Parameters
-        ----------
-        with_file : str or pathlib.Path object
-            Either filename alone (str) or absolute path to file (pathlib).
+        Cross-check concatenation file has same frequency as master (merge is
+        deemed illegal if not).
 
         Returns
         -------
@@ -526,34 +565,41 @@ class FileMergeAnalyser():
 
     #--------------------------------------------------------------------------
     def compare_dates(self):
+        """
+        Check that the merge file contains unique dates (merge is deemed
+        illegal if there are none).
 
-        master_dates = get_dates(
-            file=self.master_file, file_type=self.file_type
-            )
-        merge_dates = get_dates(
-            file=self.merge_file, file_type=self.file_type
-            )
-        return {'date_merge_legal':
-                len(set(merge_dates) - set(master_dates)) > 0
+        Returns
+        -------
+        dict
+            Dictionary with indication of whether unique dates exist (legal)
+            or otherwise (illegal).
+
+
+        """
+
+        return {
+            'date_merge_legal':
+                len(
+                    set(get_dates(
+                        file=self.master_file, file_type=self.file_type
+                        )) -
+                    set(get_dates(
+                        file=self.merge_file, file_type=self.file_type
+                        ))
+                    ) > 0
                 }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_merge_results(self):
         """
-        Do full assessment of merge
-
-        Parameters
-        ----------
-        with_file : str
-            Name of file to compare to the master file (filename only,
-                                                        omit directory).
+        Do full assessment of merge - dates are deemed illegal if there is no
 
         Returns
         -------
-        dict or list
-            Dictionary containing results of merge assessment, or list of
-            formatted strings if requested.
+        dict
+            Dictionary containing results of merge assessment.
 
         """
 
@@ -608,15 +654,16 @@ class _MergeReportHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_report(self, target_directory=None):
+    def write_report(self, abs_file_path=None):
 
-        master_file = pathlib.Path(self.master_file)
-        dir_path = target_directory if target_directory else master_file.parent
-        assert dir_path.exists()
-        out_file = dir_path / f'merge_report_{master_file.stem}.txt'
-        with open(out_file, 'w') as f:
-            for line in self.get_report_text():
-                f.write(f'{line}\n')
+        _write_text_to_file(
+            line_list=(
+                [f'Merge report for {self.file_type} '
+                 'master file {self.master_file}\n'] +
+                self.get_report_text()
+                ),
+            abs_file_path=abs_file_path
+            )
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -627,7 +674,64 @@ class _MergeReportHandler():
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
+#-------------------#
+# Handler retrieval #
+#-------------------#
 
+#------------------------------------------------------------------------------
+def get_data_handler(file, file_type, concat_list=None):
+    """
+    Parameterise and return file handler for either single file or
+    multi-file concatenated data.
+
+    Parameters
+    ----------
+    file : str or pathlib.Path
+        Absolute path to master file.
+    file_type : str
+        The type of file (must be either "TOA5" or "SF_summary")
+    concat_list : list, optional
+        A list of files to merge with the master (master file variables and
+                                                  units are king).
+        The default is None.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
+    # Configure and return a file handler with data from single
+    if not concat_list:
+        return _generic_data_handler(
+            data=get_data(
+                file=file,
+                file_type=file_type
+                ),
+            headers=get_header_df(
+                file=file,
+                file_type=file_type
+                )
+            )
+
+    # Configure and return a file handler with data concatenated from multiple files
+
+    # Get the concatenator
+    concatenator = FileConcatenator(
+        master_file=file,
+        file_type=file_type,
+        concat_list=concat_list
+        )
+
+    # Configure and return the file handler
+    return _generic_data_handler(
+        data=concatenator.get_concatenated_data(),
+        headers=concatenator.get_concatenated_header(),
+        concat_list=concat_list,
+        concat_report=concatenator.get_full_merge_report_text()
+        )
+#------------------------------------------------------------------------------
 
 #---------------#
 # File handling #
@@ -654,15 +758,24 @@ def get_data(file, file_type, usecols=None):
 
     """
 
-    # Get dictionary containing file configurations, and create requisite
-    # config variables
+    # Get dictionary containing file configurations
     MASTER_DICT = FILE_CONFIGS[file_type]
+
+    # Set rows to skip
     REQ_TIME_VARS = list(MASTER_DICT['time_variables'].keys())
     rows_to_skip = [
         i for i in set([0] + list(MASTER_DICT['header_lines'].values()))
         ]
     rows_to_skip.remove(MASTER_DICT['header_lines']['variable'])
-    index_col = '_'.join(REQ_TIME_VARS)
+
+    # Set date parsing to handle file type (convention is to keep the native
+    # date stamps as data as well as being used to build the index)
+    if len(REQ_TIME_VARS) == 1:
+        date_parse_arg = REQ_TIME_VARS
+        drop_index_vars = False
+    else:
+        date_parse_arg = {'TIMESTAMP': REQ_TIME_VARS}
+        drop_index_vars = True
 
     # Usecols MUST include time variables and at least ONE additional column;
     # if this condition is not satisifed, do not subset the columns on import.
@@ -670,22 +783,13 @@ def get_data(file, file_type, usecols=None):
     if usecols and not usecols == REQ_TIME_VARS:
         thecols = list(set(REQ_TIME_VARS + usecols))
 
-    # The eddypro output date and time are in separate columns, so we make a
-    # TIMESTAMP variable by combining them; we DON'T want to keep TIMESTAMP as
-    # an original variable because it isn't one - we just want the date and time
-    # columns; in the case of the TOA5 data, we DO want to keep the TIMESTAMP
-    # column as data, because it IS part of the dataset
-    drop_index_vars = True
-    if len(REQ_TIME_VARS):
-        drop_index_vars = False
-
     # Now import data
     return (
         pd.read_csv(
             file,
             skiprows=rows_to_skip,
             usecols=thecols,
-            parse_dates=REQ_TIME_VARS,
+            parse_dates=date_parse_arg,
             keep_date_col=True,
             na_values=MASTER_DICT['na_values'],
             sep=MASTER_DICT['separator'],
@@ -693,7 +797,6 @@ def get_data(file, file_type, usecols=None):
             on_bad_lines='warn',
             low_memory=False
             )
-        .rename({index_col: 'TIMESTAMP'}, axis=1)
         .set_index(keys='TIMESTAMP', drop=drop_index_vars)
         .pipe(_integrity_checks, non_numeric=MASTER_DICT['non_numeric_cols'])
         )
@@ -900,4 +1003,12 @@ def get_index_interval(idx):
     common_val = diff_mins.value_counts().idxmax()
     if minimum_val == common_val:
         return common_val
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _write_text_to_file(line_list, abs_file_path):
+
+    with open(abs_file_path, 'w') as f:
+        for line in line_list:
+            f.write(f'{line}\n')
 #------------------------------------------------------------------------------
