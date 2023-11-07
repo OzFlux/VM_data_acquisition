@@ -9,11 +9,11 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+import pathlib
 
-
-#------------------------------------------------------------------------------
+###############################################################################
 ### CONSTANTS ###
-#------------------------------------------------------------------------------
+###############################################################################
 
 FILE_CONFIGS = {
     'TOA5': {
@@ -41,11 +41,13 @@ UNIT_ALIASES = {
     'samples': ['arb', 'n']
     }
 
-#------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
+
+###############################################################################
 ### CLASSES ###
-#------------------------------------------------------------------------------
+###############################################################################
+
+
 
 #------------------------------------------------------------------------------
 class GenericDataHandler():
@@ -57,16 +59,13 @@ class GenericDataHandler():
 
         Parameters
         ----------
-        data : pd.core.frame.DataFrame
-            Data for which to create the handler.
-        headers : pd.core.frame.DataFrame
-            Dataframe containing variables as index and units as column. Index
-            must have same elements in same order as columns of data.
+        file : str or pathlib.Path
+            Absolute path to file for which to create the handler.
+        file_type : str
+            The type of file (must be either "TOA5" or "EddyPro")
         concat_list : list, optional
             The list of additional files concatenated with the main file.
             The default is None.
-        concat_report : TYPE, optional
-            DESCRIPTION. The default is None.
 
         Returns
         -------
@@ -74,17 +73,19 @@ class GenericDataHandler():
 
         """
 
-        elems = _get_handler_elements(
-            file=file, file_type=file_type, concat_list=concat_list
+        data, headers, concat_list, concat_report = _get_handler_elements(
+            file=file, file_type=file_type
             )
         self.file = file
         self.file_type = file_type
-        self.data = elems['data']
-        self.headers = elems['headers']
-        self.interval_as_num = get_index_interval(idx=self.data.index)
+        self.data = data
+        self.headers = headers
+        self.interval_as_num = get_datearray_interval(
+            datearray=np.array(data.index.to_pydatetime())
+            )
         self.interval_as_offset = f'{self.interval_as_num}T'
         self.concat_list = concat_list
-        self.concat_report = elems['concat_report']
+        self.concat_report = concat_report
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
@@ -242,12 +243,15 @@ class GenericDataHandler():
         """
 
         dupes = self.get_duplicate_indices() | self.get_duplicate_records()
-        local_data = self.data[~dupes]
+        to_drop = list(FILE_CONFIGS[self.file_type]['time_variables'].keys())
+        local_data = (
+            self.data[~dupes]
+            .drop(to_drop, axis=1)
+            .reset_index()
+            ['TIMESTAMP']
+            )
         gap_series = (
-            (
-                local_data.reset_index()['TIMESTAMP'] -
-                local_data.reset_index()['TIMESTAMP'].shift()
-                )
+            (local_data - local_data.shift())
             .astype('timedelta64[m]')
             .replace(self.interval_as_num, np.nan)
             .dropna()
@@ -261,7 +265,36 @@ class GenericDataHandler():
                 columns=['n_records', 'count']
                 )
             .set_index(keys='n_records')
+            .sort_index()
             )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_missing_records(self):
+        """
+        Get simple statistics for missing records
+
+        Returns
+        -------
+        dict
+            Dictionary containing the number of missing cases, the % of missing
+            cases and the distribution of gap sizes.
+
+        """
+
+        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
+        local_data = self.data[~dupes]
+        complete_index = pd.date_range(
+            start=local_data.index[0],
+            end=local_data.index[-1],
+            freq=self.interval_as_offset
+            )
+        n_missing = len(complete_index) - len(local_data)
+        return {
+            'n_missing': n_missing,
+            '%_missing': round(n_missing / len(complete_index) * 100, 2),
+            'gap_distribution': self._get_gap_distribution()
+            }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -365,13 +398,8 @@ class GenericDataHandler():
                 'Cannot write a concatenation report if there are no '
                 'concatenated files!'
                 )
-        flat_list = [
-            f'Merge report for {self.file_type} master file {self.file}\n'
-            ]
-        for file in self.concat_report:
-            flat_list.extend(self.concat_report[file] + ['\n'])
         _write_text_to_file(
-            line_list=flat_list,
+            line_list=self.concat_report,
             abs_file_path=abs_file_path
             )
     #--------------------------------------------------------------------------
@@ -409,19 +437,24 @@ class FileConcatenator():
         self.master_file = master_file
         self.concat_list = concat_list
         self.file_type = file_type
-        self._all_merge_reports = [
+        reports = [
             FileMergeAnalyser(
                 master_file=master_file,
                 merge_file=file,
                 file_type=file_type
                 )
-            .get_merge_results()
-            for file in concat_list
+            .get_merge_report()
+            for file in self.concat_list
             ]
-        self._legal_merge_reports = [
-            report for report in self._all_merge_reports if
-            report.file_merge_legal
+        self.legal_list = [
+            report['merge_file'] for report in reports if
+            report['file_merge_legal']
             ]
+        self.concat_reports = reports
+        self.alias_maps = {
+            report['merge_file']: report['aliased_units'] for report in
+                reports
+                }
 
     #--------------------------------------------------------------------------
     def get_concatenated_data(self):
@@ -437,10 +470,10 @@ class FileConcatenator():
         """
 
         df_list = [get_data(file=self.master_file, file_type=self.file_type)]
-        for report in self._legal_merge_reports:
+        for file in self.legal_list:
             df_list.append(
-                get_data(file=report.merge_file, file_type=self.file_type)
-                .rename(report.aliased_units, axis=1)
+                get_data(file=file, file_type=self.file_type)
+                .rename(self.alias_maps[file], axis=1)
                 )
         ordered_vars = self.get_concatenated_header().index.tolist()
         return (
@@ -463,42 +496,24 @@ class FileConcatenator():
         """
 
         df_list = [get_header_df(file=self.master_file, file_type=self.file_type)]
-        for report in self._legal_merge_reports:
+        for file in self.legal_list:
             df_list.append(
-                get_header_df(file=report.merge_file, file_type=self.file_type)
-                .rename(report.aliased_units)
+                get_header_df(file=file, file_type=self.file_type)
+                .rename(self.alias_maps[file])
                 )
         df = pd.concat(df_list)
         return df[~df.index.duplicated()]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_concatenation_report(self):
+    def get_concatenation_report(self, as_text=False):
         """
-        Gather the concatenation reports for all files in the concatenation list.
-
-        Returns
-        -------
-        dict
-            Key is file, value is report (list of strings).
-
-        """
-
-        return {
-            report.merge_file: report.get_report_text()
-            for report in self._all_merge_reports
-            }
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_concatenation_report(self, abs_file_path=None):
-        """
-        Write the concatenation report to file.
+        Get the concatenation report.
 
         Parameters
         ----------
-        write_to_file : TYPE, optional
-            DESCRIPTION. The default is None.
+        as_text : bool
+            Return the reports as a list of strings ready for output to file.
 
         Returns
         -------
@@ -506,14 +521,41 @@ class FileConcatenator():
 
         """
 
-        result = self.get_concatenation_report()
-        flat_list = [
-            f'Merge report for {self.file_type} master file {self.master_file}\n'
+        if not as_text:
+            return self.concat_reports
+
+        line_list = [
+            f'Merge report for {self.file_type} master file '
+            f'{self.master_file}\n'
             ]
-        for file in result.keys():
-            flat_list.extend(result[file] + ['\n'])
+
+        for report in self.concat_reports:
+            line_list.extend(
+                _get_results_as_txt(report) + ['\n']
+                )
+
+        if as_text:
+            return line_list
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def write_concatenation_report(self, abs_file_path):
+        """
+        Write the concatenation report.
+
+        Parameters
+        ----------
+        abs_file_path : str or pathlib.Path
+            The file (including absolute path) to the file to write the report to.
+
+        Returns
+        -------
+        None.
+
+        """
+
         _write_text_to_file(
-            line_list=flat_list,
+            line_list=self.get_concatenation_report(as_text=True),
             abs_file_path=abs_file_path
             )
     #--------------------------------------------------------------------------
@@ -543,6 +585,8 @@ class FileMergeAnalyser():
 
         """
 
+        if master_file == merge_file:
+            raise RuntimeError('Master and merge file are the same!')
         self.master_file = master_file
         self.merge_file = merge_file
         self.file_type = file_type
@@ -686,87 +730,64 @@ class FileMergeAnalyser():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_merge_results(self):
+    def get_merge_report(self, as_text=False, abs_file_path=None):
         """
-        Do full assessment of merge - dates are deemed illegal if there is no
+        Get the merge report.
+
+        Parameters
+        ----------
+        as_text : bool
+            Return the reports as a list of strings ready for output to file.
+        abs_file_path : str or pathlib.Path, optional
+            Absolute file path to which to output the data. The default is None.
 
         Returns
         -------
-        dict
-            Dictionary containing results of merge assessment.
+        None.
 
         """
 
-        return _MergeReportHandler(
-            {'master_file': str(self.master_file),
-             'merge_file': str(self.merge_file)} |
+        results = (
+            {
+                'master_file': str(self.master_file),
+                'merge_file': str(self.merge_file)
+                } |
             self.compare_dates() |
+            self.compare_interval() |
             self.compare_variables() |
-            self.compare_units() |
-            self.compare_interval()
+            self.compare_units()
             )
-    #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class _MergeReportHandler():
-
-    def __init__(self, merge_results):
-
-        self.merge_results = merge_results
-        self.master_file = merge_results['master_file']
-        self.merge_file = merge_results['merge_file']
-        self.date_merge_legal = merge_results['date_merge_legal']
-        self.variable_merge_legal = merge_results['variable_merge_legal']
-        self.units_merge_legal = merge_results['units_merge_legal']
-        self.interval_merge_legal = merge_results['interval_merge_legal']
-        self.file_merge_legal = all(
-            merge_results[key] for key in merge_results.keys() if 'legal' in key
+        results['file_merge_legal'] = all(
+            results[key] for key in results.keys() if 'legal' in key
             )
-        self.common_variables = merge_results['common_variables']
-        self.master_variables = merge_results['master_only']
-        self.merge_variables = merge_results['merge_only']
-        self.aliased_units = merge_results['aliased_units']
-        self.mismatched_unit_variables = merge_results['units_mismatch']
 
-    #--------------------------------------------------------------------------
-    def get_report_text(self):
+        if not any([as_text, abs_file_path]):
+            return results
 
-        return [
-            f'Merge file: {self.merge_file}',
-            f'Merge legal? -> {str(self.file_merge_legal)}',
-            f'  - Date merge legal? -> {str(self.date_merge_legal)}',
-            f'  - Variable merge legal? -> {str(self.variable_merge_legal)}',
-            f'    * Variables contained only in master file -> {self.master_variables}',
-            f'    * Variables contained only in merge file -> {self.merge_variables}',
-            f'  - Units merge legal? -> {str(self.units_merge_legal)}',
-            f'    * Variables with aliased units -> {self.aliased_units}',
-            f'    * Variables with mismatched units -> {self.mismatched_unit_variables}',
-            f'  - Interval merge legal? -> {str(self.interval_merge_legal)}'
-            ]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_report(self, abs_file_path=None):
-
-        _write_text_to_file(
-            line_list=(
-                [f'Merge report for {self.file_type} '
-                 'master file {self.master_file}\n'] +
-                self.get_report_text()
-                ),
-            abs_file_path=abs_file_path
+        line_list = (
+            [f'Merge report for {self.file_type} master file '
+             f'{self.master_file}\n'] +
+            _get_results_as_txt(results=results)
             )
+
+        if as_text:
+            return line_list
+
+        if abs_file_path:
+
+            _write_text_to_file(
+                line_list=line_list,
+                abs_file_path=abs_file_path
+                )
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
 
 
-#------------------------------------------------------------------------------
+###############################################################################
 ### FUNCTIONS ###
-#------------------------------------------------------------------------------
+###############################################################################
 
 
 
@@ -774,10 +795,58 @@ class _MergeReportHandler():
 # Handler retrieval #
 #-------------------#
 
+
+
+# #------------------------------------------------------------------------------
+# def _get_handler_elements(file, file_type, concat_list=None):
+#     """
+#     Parameterise and return file handler for either single file or
+#     multi-file concatenated data.
+
+#     Parameters
+#     ----------
+#     file : str or pathlib.Path
+#         Absolute path to master file.
+#     file_type : str
+#         The type of file (must be either "TOA5" or "EddyPro")
+#     concat_list : list, optional
+#         A list of files to merge with the master (master file variables and
+#                                                   units are king).
+#         The default is None.
+
+#     Returns
+#     -------
+#     dict
+#         Contains data (key 'data'), headers (key 'headers') and concatenation
+#         report (key 'concat_report').
+
+#     """
+
+#     # Configure and return a file handler with data from single
+#     if not concat_list:
+#         data = get_data(file=file, file_type=file_type)
+#         headers = get_header_df(file=file, file_type=file_type)
+#         concat_report = None
+
+#     # Get the concatenator
+#     if concat_list:
+#         concatenator = FileConcatenator(
+#             master_file=file,
+#             file_type=file_type,
+#             concat_list=concat_list
+#             )
+#         data=concatenator.get_concatenated_data()
+#         headers=concatenator.get_concatenated_header()
+#         concat_report=concatenator.get_concatenation_report(as_text=True)
+
+#     # Configure and return the file handler
+#     return data, headers, concat_report
+# #------------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
-def _get_handler_elements(file, file_type, concat_list=None):
+def _get_handler_elements(file, file_type):
     """
-    Parameterise and return file handler for either single file or
+    Get elements required to populate file handler for either single file or
     multi-file concatenated data.
 
     Parameters
@@ -786,10 +855,6 @@ def _get_handler_elements(file, file_type, concat_list=None):
         Absolute path to master file.
     file_type : str
         The type of file (must be either "TOA5" or "EddyPro")
-    concat_list : list, optional
-        A list of files to merge with the master (master file variables and
-                                                  units are king).
-        The default is None.
 
     Returns
     -------
@@ -799,13 +864,19 @@ def _get_handler_elements(file, file_type, concat_list=None):
 
     """
 
-    # Configure and return a file handler with data from single
+    # Try to grab the concatenation list
+    if file_type == 'TOA5':
+        concat_list = get_TOA5_backups(file=file)
+    if file_type == 'EddyPro':
+        concat_list = get_EddyPro_files(file=file)
+
+    # Get data from single file
     if not concat_list:
         data = get_data(file=file, file_type=file_type)
         headers = get_header_df(file=file, file_type=file_type)
         concat_report = None
 
-    # Get the concatenator
+    # Get data from multiple files
     if concat_list:
         concatenator = FileConcatenator(
             master_file=file,
@@ -814,15 +885,19 @@ def _get_handler_elements(file, file_type, concat_list=None):
             )
         data=concatenator.get_concatenated_data()
         headers=concatenator.get_concatenated_header()
-        concat_report=concatenator.get_concatenation_report()
+        concat_report=concatenator.get_concatenation_report(as_text=True)
 
-    # Configure and return the file handler
-    return {'data': data, 'headers': headers, 'concat_report': concat_report}
+    # Return data
+    return data, headers, concat_list, concat_report
 #------------------------------------------------------------------------------
+
+
 
 #---------------#
 # File handling #
 #---------------#
+
+
 
 #------------------------------------------------------------------------------
 def get_data(file, file_type, usecols=None):
@@ -992,9 +1067,13 @@ def get_header_df(file, file_type):
         )
 #------------------------------------------------------------------------------
 
+
+
 #-----------------#
 # Line formatting #
 #-----------------#
+
+
 
 #------------------------------------------------------------------------------
 def get_line_formatter(file_type):
@@ -1034,12 +1113,32 @@ def _TOA5_line_formatter(line):
     return [x.replace('"', '') for x in line.strip().split(sep)]
 #------------------------------------------------------------------------------
 
+
+
 #---------------#
 # Date handling #
 #---------------#
 
+
+
 #------------------------------------------------------------------------------
 def get_dates(file, file_type):
+    """
+    Line-by-line date parser.
+
+    Parameters
+    ----------
+    file : str or Pathlib.Path
+        The file to parse.
+    file_type : str
+        The type of file (must be either "TOA5" or "EddyPro")
+
+    Returns
+    -------
+    date_list : list
+        The dates.
+
+    """
 
     line_formatter = get_line_formatter(file_type=file_type)
     with open(file, 'r') as f:
@@ -1056,6 +1155,22 @@ def get_dates(file, file_type):
 
 #------------------------------------------------------------------------------
 def _date_extractor(fmt_line, file_type):
+    """
+    Convert line to date.
+
+    Parameters
+    ----------
+    fmt_line : list.
+        Line elements.
+    file_type : str
+        The type of file (must be either "TOA5" or "EddyPro")
+
+    Returns
+    -------
+    pydatetime
+        The date and time.
+
+    """
 
     locs = FILE_CONFIGS[file_type]['time_variables'].values()
     return dt.datetime.strptime(
@@ -1064,32 +1179,121 @@ def _date_extractor(fmt_line, file_type):
         )
 #------------------------------------------------------------------------------
 
+
+
+#------------------------------#
+# Concatenation file retrieval #
+#------------------------------#
+
+
+
+#------------------------------------------------------------------------------
+def get_TOA5_backups(file, return_abs_path=True):
+
+    file_to_parse = _check_file_exists(file=file)
+    return list(file_to_parse.parent.glob(f'{file_to_parse.stem}*.backup'))
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_EddyPro_files(file, return_abs_path=True):
+
+    file_to_parse = _check_file_exists(file=file)
+    search_str = '_'.join(file_to_parse.stem.split('_')[1:])
+    file_list = list(file_to_parse.parent.glob(f'*{search_str}.txt'))
+    file_list.sort()
+    if not file_list[-1] == file_to_parse:
+        raise RuntimeError('Master concatenation file should be the most recent!')
+    if file_list:
+        file_list.remove(file_to_parse)
+    return file_list
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _check_file_exists(file):
+
+    file_to_parse = pathlib.Path(file)
+    if not file_to_parse.exists():
+        raise FileNotFoundError('Passed file does not exist!')
+    return file_to_parse
+#------------------------------------------------------------------------------
+
+
+
+#---------------#
+# File interval #
+#---------------#
+
+
+
+#------------------------------------------------------------------------------
+def get_file_interval(file, file_type):
+    """
+    Find the file interval (i.e. time step)
+
+    Parameters
+    ----------
+    file : str or Pathlib.Path
+        The file to parse.
+    file_type : str
+        The type of file (must be either "TOA5" or "EddyPro")
+
+    Raises
+    ------
+    RuntimeError
+        Raised if the most common value is not the minimum value.
+
+    Returns
+    -------
+    minimum_val : int
+        The interval.
+
+    """
+
+    return get_datearray_interval(
+        datearray=np.unique(np.array(get_dates(file=file, file_type=file_type)))
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_datearray_interval(datearray):
+
+    datearray = np.unique(datearray)
+    deltas, counts = np.unique(datearray[1:] - datearray[:-1], return_counts=True)
+    minimum_val = deltas[0].seconds / 60
+    common_val = (deltas[np.where(counts==counts.max())][0]).seconds / 60
+    if minimum_val == common_val:
+        return int(minimum_val)
+    raise RuntimeError('Minimum and most common values do not coincide!')
+#------------------------------------------------------------------------------
+
+
+
 #---------------#
 # Miscellaneous #
 #---------------#
 
-#------------------------------------------------------------------------------
-def get_file_interval(file, file_type):
 
-    dates = np.unique(np.array(get_dates(file=file, file_type=file_type)))
-    deltas, counts = np.unique(dates[1:] - dates[:-1], return_counts=True)
-    minimum_val = deltas[0].seconds / 60
-    common_val = (deltas[np.where(counts==counts.max())][0]).seconds / 60
-    if minimum_val == common_val:
-        return minimum_val
-    raise RuntimeError('Minimum and most common values do not coincide!')
-#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_index_interval(idx):
+def _get_results_as_txt(results):
 
-    diffs = (idx.drop_duplicates()[1:] - idx.drop_duplicates()[:-1]).components
-    diff_mins = diffs.days * 1440 + diffs.hours * 60 + diffs.minutes
-    minimum_val = diff_mins.min()
-    common_val = diff_mins.value_counts().idxmax()
-    if minimum_val == common_val:
-        return common_val
-    return None
+    return [
+        f'Merge file: {results["merge_file"]}',
+        f'Merge legal? -> {str(results["file_merge_legal"])}',
+        f'  - Date merge legal? -> {str(results["date_merge_legal"])}',
+        '  - Interval merge legal? -> '
+        f'{str(results["interval_merge_legal"])}',
+        '  - Variable merge legal? -> '
+        f'{str(results["variable_merge_legal"])}',
+        '    * Variables contained only in master file -> '
+        f'{results["master_only"]}',
+        '    * Variables contained only in merge file -> '
+        f'{results["merge_only"]}',
+        f'  - Units merge legal? -> {str(results["units_merge_legal"])}',
+        f'    * Variables with aliased units -> {results["aliased_units"]}',
+        '     * Variables with mismatched units -> '
+        f'{results["units_mismatch"]}',
+        ]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
