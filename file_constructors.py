@@ -193,7 +193,7 @@ class TableMerger():
             freq=f'{self.time_step}T'
             )
         date_idx.name = 'TIMESTAMP'
-        df =  pd.concat(
+        df = pd.concat(
             [this_df.reindex(date_idx) for this_df in df_list],
             axis=1
             )
