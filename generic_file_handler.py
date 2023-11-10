@@ -2,9 +2,14 @@
 """
 Created on Thu Oct 12 13:37:33 2023
 
+To do:
+    - add file write to file handler
+    - add file type check to file concatenator
+
 @author: jcutern-imchugh
 """
 
+import csv
 import datetime as dt
 
 import numpy as np
@@ -22,7 +27,13 @@ FILE_CONFIGS = {
         'separator': ',',
         'non_numeric_cols': ['TIMESTAMP'],
         'time_variables': {'TIMESTAMP': 0},
-        'na_values': 'NAN'
+        'na_values': 'NAN',
+        'unique_file_id': 'TOA5',
+        'quoting': csv.QUOTE_NONNUMERIC,
+        'dummy_info': [
+            'TOA5', 'NoStation', 'CR1000', '9999', 'cr1000.std.99.99',
+            'CPU:noprogram.cr1', '9999', 'default_table'
+            ]
         },
     'EddyPro': {
         'info_line': None,
@@ -30,9 +41,22 @@ FILE_CONFIGS = {
         'separator': '\t',
         'non_numeric_cols': ['date', 'time',  'DATAH', 'filename'],
         'time_variables': {'date': 2, 'time': 3},
-        'na_values': 'NaN'
+        'na_values': 'NaN',
+        'unique_file_id': 'DATAH',
+        'quoting': csv.QUOTE_MINIMAL,
+        'dummy_info': [
+            'TOA5', 'SmartFlux', 'SmartFlux', '9999', 'OS', 'CPU:noprogram',
+            '9999', 'default_table'
+            ]
         }
     }
+
+INFO_FIELDS = [
+    'format', 'station_name', 'logger_type', 'serial_num', 'OS_version',
+    'program_name', 'program_sig', 'table_name'
+    ]
+
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 UNIT_ALIASES = {
     'degC': ['C'],
@@ -53,7 +77,7 @@ UNIT_ALIASES = {
 class GenericDataHandler():
 
     #--------------------------------------------------------------------------
-    def __init__(self, file, file_type, concat_list=None):
+    def __init__(self, file, concat_files=False):
         """
         Set attributes of handler.
 
@@ -61,11 +85,13 @@ class GenericDataHandler():
         ----------
         file : str or pathlib.Path
             Absolute path to file for which to create the handler.
-        file_type : str
-            The type of file (must be either "TOA5" or "EddyPro")
-        concat_list : list, optional
-            The list of additional files concatenated with the main file.
-            The default is None.
+        concat_files : Boolean or list, optional
+            If False, the content of the passed file is parsed in isolation.
+            If True, any available backup (TOA5) or string-matched EddyPro
+            files stored in the same directory are concatenated.
+            If list, the files contained therein will be concatenated with the
+            main file.
+            The default is False.
 
         Returns
         -------
@@ -73,19 +99,15 @@ class GenericDataHandler():
 
         """
 
-        data, headers, concat_list, concat_report = _get_handler_elements(
-            file=file, file_type=file_type
-            )
-        self.file = file
-        self.file_type = file_type
-        self.data = data
-        self.headers = headers
+        rslt = _get_handler_elements(file=file, concat_files=concat_files)
+        for key, value in rslt.items():
+            setattr(self, key, value)
         self.interval_as_num = get_datearray_interval(
-            datearray=np.array(data.index.to_pydatetime())
+            datearray=np.array(self.data.index.to_pydatetime())
             )
         self.interval_as_offset = f'{self.interval_as_num}T'
-        self.concat_list = concat_list
-        self.concat_report = concat_report
+        self.concat_list = rslt['concat_list']
+        self.concat_report = rslt['concat_report']
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
@@ -797,54 +819,8 @@ class FileMergeAnalyser():
 
 
 
-# #------------------------------------------------------------------------------
-# def _get_handler_elements(file, file_type, concat_list=None):
-#     """
-#     Parameterise and return file handler for either single file or
-#     multi-file concatenated data.
-
-#     Parameters
-#     ----------
-#     file : str or pathlib.Path
-#         Absolute path to master file.
-#     file_type : str
-#         The type of file (must be either "TOA5" or "EddyPro")
-#     concat_list : list, optional
-#         A list of files to merge with the master (master file variables and
-#                                                   units are king).
-#         The default is None.
-
-#     Returns
-#     -------
-#     dict
-#         Contains data (key 'data'), headers (key 'headers') and concatenation
-#         report (key 'concat_report').
-
-#     """
-
-#     # Configure and return a file handler with data from single
-#     if not concat_list:
-#         data = get_data(file=file, file_type=file_type)
-#         headers = get_header_df(file=file, file_type=file_type)
-#         concat_report = None
-
-#     # Get the concatenator
-#     if concat_list:
-#         concatenator = FileConcatenator(
-#             master_file=file,
-#             file_type=file_type,
-#             concat_list=concat_list
-#             )
-#         data=concatenator.get_concatenated_data()
-#         headers=concatenator.get_concatenated_header()
-#         concat_report=concatenator.get_concatenation_report(as_text=True)
-
-#     # Configure and return the file handler
-#     return data, headers, concat_report
-# #------------------------------------------------------------------------------
-
 #------------------------------------------------------------------------------
-def _get_handler_elements(file, file_type):
+def _get_handler_elements(file, concat_files=False):
     """
     Get elements required to populate file handler for either single file or
     multi-file concatenated data.
@@ -853,8 +829,7 @@ def _get_handler_elements(file, file_type):
     ----------
     file : str or pathlib.Path
         Absolute path to master file.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
+    concat_files : boolean or list
 
     Returns
     -------
@@ -864,31 +839,61 @@ def _get_handler_elements(file, file_type):
 
     """
 
-    # Try to grab the concatenation list
-    if file_type == 'TOA5':
-        concat_list = get_TOA5_backups(file=file)
-    if file_type == 'EddyPro':
-        concat_list = get_EddyPro_files(file=file)
+    dict_keys = [
+        'file_type', 'data', 'headers', 'concat_list', 'concat_report'
+        ]
+
+    # Get the file type
+    file_type = get_file_type(file=file)
+
+    # Set list empty if no concat requested
+    if concat_files == False:
+        concat_list = []
+        concat_report = []
+
+    # Generate list if concat requested
+    if concat_files == True:
+        if file_type == 'TOA5':
+            concat_list = get_TOA5_backups(file=file)
+        if file_type == 'EddyPro':
+            concat_list = get_EddyPro_files(file=file)
+        if not concat_files:
+            concat_list == []
+            concat_report = ['No eligible files found!']
+
+    # Populate list if file list passed
+    if isinstance(concat_files, list) and len(concat_files) > 0:
+        concat_list == concat_files
 
     # Get data from single file
     if not concat_list:
-        data = get_data(file=file, file_type=file_type)
-        headers = get_header_df(file=file, file_type=file_type)
-        concat_report = None
+        return dict(zip(
+        dict_keys,
+        [
+            file_type,
+            get_data(file=file, file_type=file_type),
+            get_header_df(file=file, file_type=file_type),
+            concat_list,
+            concat_report
+            ]
+        ))
 
     # Get data from multiple files
-    if concat_list:
-        concatenator = FileConcatenator(
-            master_file=file,
-            file_type=file_type,
-            concat_list=concat_list
-            )
-        data=concatenator.get_concatenated_data()
-        headers=concatenator.get_concatenated_header()
-        concat_report=concatenator.get_concatenation_report(as_text=True)
-
-    # Return data
-    return data, headers, concat_list, concat_report
+    concatenator = FileConcatenator(
+        master_file=file,
+        file_type=file_type,
+        concat_list=concat_list
+        )
+    return dict(zip(
+        dict_keys,
+        [
+            file_type,
+            concatenator.get_concatenated_data(),
+            concatenator.get_concatenated_header(),
+            concat_list,
+            concatenator.get_concatenation_report(as_text=True),
+            ]
+        ))
 #------------------------------------------------------------------------------
 
 
@@ -900,7 +905,7 @@ def _get_handler_elements(file, file_type):
 
 
 #------------------------------------------------------------------------------
-def get_data(file, file_type, usecols=None):
+def get_data(file, file_type=None, usecols=None):
     """
     Read the data from the TOA5 file
 
@@ -908,10 +913,12 @@ def get_data(file, file_type, usecols=None):
     ----------
     file : str or Pathlib.Path
         The file to parse.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
+    file_type : str, optional
+        The type of file (must be either "TOA5" or "EddyPro").
+        The default is None.
     usecols : list, optional
-        The subset of columns to keep. The default is None (all columns retained).
+        The subset of columns to keep.
+        The default is None (all columns retained).
 
     Returns
     -------
@@ -919,6 +926,10 @@ def get_data(file, file_type, usecols=None):
         Data.
 
     """
+
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
 
     # Get dictionary containing file configurations
     MASTER_DICT = FILE_CONFIGS[file_type]
@@ -1029,7 +1040,7 @@ def get_file_headers(file, begin, end):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_header_df(file, file_type):
+def get_header_df(file, file_type=None):
     """
     Get a dataframe with variables as index and units and statistical
     sampling type as columns.
@@ -1038,8 +1049,9 @@ def get_header_df(file, file_type):
     ----------
     file : str or Pathlib.Path
         The file to parse.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
+    file_type : str, optional
+        The type of file (must be either "TOA5" or "EddyPro").
+        The default is None.
 
     Returns
     -------
@@ -1047,6 +1059,10 @@ def get_header_df(file, file_type):
         Dataframe as per above.
 
     """
+
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
 
     HEADERS_DICT = FILE_CONFIGS[file_type]['header_lines']
     formatter = get_line_formatter(file_type=file_type)
@@ -1065,6 +1081,35 @@ def get_header_df(file, file_type):
             )
         .set_index(keys='variable')
         )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_info(file, file_type=None):
+
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
+    if file_type == 'EddyPro':
+        info = FILE_CONFIGS[file_type]['dummy_info']
+    if file_type == 'TOA5':
+        line_num = FILE_CONFIGS[file_type]['info_line']
+        formatter = get_line_formatter(file_type='TOA5')
+        info = formatter(
+            get_file_headers(file=file, begin=line_num, end=line_num)[0]
+            )
+    return dict(zip(INFO_FIELDS, info))
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_type(file):
+
+    header = get_file_headers(file=file, begin=0, end=0)[0]
+    for file_type in FILE_CONFIGS.keys():
+        formatter = get_line_formatter(file_type=file_type)
+        uniq_id = FILE_CONFIGS[file_type]['unique_file_id']
+        if formatter(header)[0] == uniq_id:
+            return file_type
+    raise TypeError('Unknown file type!')
 #------------------------------------------------------------------------------
 
 
@@ -1122,7 +1167,7 @@ def _TOA5_line_formatter(line):
 
 
 #------------------------------------------------------------------------------
-def get_dates(file, file_type):
+def get_dates(file, file_type=None):
     """
     Line-by-line date parser.
 
@@ -1130,9 +1175,9 @@ def get_dates(file, file_type):
     ----------
     file : str or Pathlib.Path
         The file to parse.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
-
+    file_type : str, optional
+        The type of file (must be either "TOA5" or "EddyPro").
+        The default is None.
     Returns
     -------
     date_list : list
@@ -1140,14 +1185,19 @@ def get_dates(file, file_type):
 
     """
 
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
+
     line_formatter = get_line_formatter(file_type=file_type)
+    date_list = []
     with open(file, 'r') as f:
         for line in f:
             try:
-                date_list = [
+                date_list.append(
                     _date_extractor(line_formatter(line), file_type=file_type)
-                    for line in f
-                    ]
+                    )
+
             except (TypeError, ValueError):
                 continue
     return date_list
@@ -1175,7 +1225,7 @@ def _date_extractor(fmt_line, file_type):
     locs = FILE_CONFIGS[file_type]['time_variables'].values()
     return dt.datetime.strptime(
         ' '.join([fmt_line[loc] for loc in locs]),
-        '%Y-%m-%d %H:%M:%S'
+        DATE_FORMAT
         )
 #------------------------------------------------------------------------------
 
@@ -1188,14 +1238,14 @@ def _date_extractor(fmt_line, file_type):
 
 
 #------------------------------------------------------------------------------
-def get_TOA5_backups(file, return_abs_path=True):
+def get_TOA5_backups(file):
 
     file_to_parse = _check_file_exists(file=file)
     return list(file_to_parse.parent.glob(f'{file_to_parse.stem}*.backup'))
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_EddyPro_files(file, return_abs_path=True):
+def get_EddyPro_files(file):
 
     file_to_parse = _check_file_exists(file=file)
     search_str = '_'.join(file_to_parse.stem.split('_')[1:])
@@ -1226,7 +1276,7 @@ def _check_file_exists(file):
 
 
 #------------------------------------------------------------------------------
-def get_file_interval(file, file_type):
+def get_file_interval(file, file_type=None):
     """
     Find the file interval (i.e. time step)
 
@@ -1234,8 +1284,9 @@ def get_file_interval(file, file_type):
     ----------
     file : str or Pathlib.Path
         The file to parse.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
+    file_type : str, optional
+        The type of file (must be either "TOA5" or "EddyPro").
+        The default is None.
 
     Raises
     ------
@@ -1248,6 +1299,10 @@ def get_file_interval(file, file_type):
         The interval.
 
     """
+
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
 
     return get_datearray_interval(
         datearray=np.unique(np.array(get_dates(file=file, file_type=file_type)))
@@ -1291,7 +1346,7 @@ def _get_results_as_txt(results):
         f'{results["merge_only"]}',
         f'  - Units merge legal? -> {str(results["units_merge_legal"])}',
         f'    * Variables with aliased units -> {results["aliased_units"]}',
-        '     * Variables with mismatched units -> '
+        '    * Variables with mismatched units -> '
         f'{results["units_mismatch"]}',
         ]
 #------------------------------------------------------------------------------
@@ -1303,3 +1358,24 @@ def _write_text_to_file(line_list, abs_file_path):
         for line in line_list:
             f.write(f'{line}\n')
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _write_data_to_file(header_lines, data, file_type, abs_file_path):
+
+    # Get required formatting
+    sep = FILE_CONFIGS[file_type]['separator']
+    na = FILE_CONFIGS[file_type]['na_values']
+    quoting = FILE_CONFIGS[file_type]['quoting']
+
+    # Write to file
+    with open(abs_file_path, 'w', newline='\n') as f:
+        for line in header_lines:
+            f.write(line)
+        data.to_csv(
+            f, header=False, index=False, na_rep=na,
+            quoting=quoting, sep=sep
+            )
+
+
+#------------------------------------------------------------------------------
+
