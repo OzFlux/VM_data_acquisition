@@ -2,10 +2,6 @@
 """
 Created on Thu Nov  9 11:52:46 2023
 
-To fix:
-    * Outputting an EddyPro file as TOA5 doesn't print double quotes if empty
-    dummy characters are in the sampling slots
-
 @author: jcutern-imchugh
 """
 
@@ -16,8 +12,12 @@ import pandas as pd
 import file_functions as ff
 import file_concatenators as fc
 
+###############################################################################
+### CLASSES ###
+###############################################################################
+
 #------------------------------------------------------------------------------
-class GenericDataHandler():
+class DataHandler():
 
     #--------------------------------------------------------------------------
     def __init__(self, file, concat_files=False):
@@ -48,11 +48,11 @@ class GenericDataHandler():
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
-            usecols=None, monotonic_index=False, drop_duplicates=False,
-            raise_if_dupe_index=False, resample_intvl=None
+            usecols=None, monotonic_index=False, raise_if_dupe_index=False,
+            resample_intvl=None
             ):
         """
-        Generate an altered version of the data.
+        Generate a conditioned version of the data. Duplicate data are dropped.
 
         Parameters
         ----------
@@ -63,8 +63,6 @@ class GenericDataHandler():
             The default is None.
         monotonic_index : bool, optional
             Align the data to a monotonic index. The default is False.
-        drop_duplicates : bool, optional
-            Remove any duplicate records or indices. The default is False.
         raise_if_dupe_index : bool, optional
             Raise an error if duplicate indices are found with non-duplicate
             data. The default is False.
@@ -85,59 +83,31 @@ class GenericDataHandler():
 
         """
 
-        # Initialise the column subset and dictionaries (for renaming variables)
-        # if passed, or set to existing
-        rename_dict = {}
-        thecols = self.data.columns
-        if usecols:
-            if isinstance(usecols, dict):
-                rename_dict = usecols.copy()
-                thecols = list(rename_dict.keys())
-            elif isinstance(usecols, list):
-                thecols = usecols.copy()
-
-        # Initialise the new datetime index (or set to existing); note that
-        # reindexing is required if resampling is requested, so user choice to
-        # NOT have a monotonic index must be overriden in this case.
-        must_reindex = monotonic_index or resample_intvl
-        new_index = self.data.index
-        if must_reindex:
-            dates = self.get_date_span()
-            new_index = pd.date_range(
-                start=dates['start_date'],
-                end=dates['end_date'],
-                freq=f'{self.interval}T'
-                )
-            new_index.name = self.data.index.name
-
-        # Check for duplicate indices (ie. where records aren't duplicated)
+        # Check for duplicate indices (ie. where records aren't duplicated
+        # but index is) and create duplicates mask
+        dupe_records = self.get_duplicate_records()
         dupe_indices = self.get_duplicate_indices()
         if any(dupe_indices) and raise_if_dupe_index:
             raise RuntimeError(
                 'Duplicate indices with non-duplicate data!'
                 )
+        dupes_mask = dupe_indices | dupe_records
 
-        # Initialise the duplicate_mask - note that a monotonic index by def
-        # requires the duplicate index labels to be dropped, so user choice
-        # to NOT drop duplicates must be overriden if monotonic index
-        # is required.
-        dupe_records = self.get_duplicate_records()
-        dupes_mask = pd.Series(data=False, index=self.data.index)
-        if drop_duplicates or must_reindex:
-            dupes_mask = dupe_records | dupe_indices
-
-        # Set the resampling interval if not set
-        if not resample_intvl:
-            resample_intvl = f'{self.interval}T'
-
-        # Apply duplicate mask, column subset, new index, new column names
-        # and resampling to existing data (which remains unchanged), and return
-        return (
-            self.data.loc[~dupes_mask, thecols]
-            .reindex(new_index)
-            .resample(resample_intvl).interpolate(limit=1)
-            .rename(rename_dict, axis=1)
+        # Apply duplicate mask, column subset and rename
+        output_data = (
+            self._rename_data_or_headers(
+                usecols=usecols,
+                which='data')
+            .loc[~dupes_mask]
             )
+
+        # Resample (use the existing interval for monotonic index)
+        if monotonic_index and not resample_intvl:
+            resample_intvl = f'{self.interval}T'
+        if resample_intvl:
+            return output_data.resample(resample_intvl).interpolate(limit=1)
+
+        return output_data
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -158,7 +128,7 @@ class GenericDataHandler():
 
         """
 
-        records = self.data.duplicated()
+        records = self.data.reset_index().duplicated().set_axis(self.data.index)
         if as_dates:
             return self.data[records].index.to_pydatetime().tolist()
         return records
@@ -360,6 +330,24 @@ class GenericDataHandler():
 
     #--------------------------------------------------------------------------
     def write_concatenation_report(self, abs_file_path):
+        """
+        Write the concatenation report to file.
+
+        Parameters
+        ----------
+        abs_file_path : str or pathlib.Path
+            Absolute path to the file.
+
+        Raises
+        ------
+        TypeError
+            Raised if no concatenated files.
+
+        Returns
+        -------
+        None.
+
+        """
 
         if not self.concat_report:
             raise TypeError(
@@ -373,43 +361,105 @@ class GenericDataHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_concatenated_data(self, abs_file_path, output_format='TOA5'):
+    def write_conditioned_data(self, abs_file_path, output_format, **kwargs):
+
+        # Get data and headers
+        data = self.get_conditioned_data(**kwargs)
+        headers = self._rename_data_or_headers(which='headers', **kwargs)
 
         # Configure the output headers and data
-        data = self.data
+        # ... for TOA5
         if self.file_type == 'TOA5':
+
+            # ... to TOA5
             if output_format == 'TOA5':
                 header_lines = _format_TOA5_output_headers(
                     info=self.file_info,
-                    headers=self.headers
+                    headers=headers
                     )
+
+            # ... to EddyPro (Why?)
             if output_format == 'EddyPro':
-                raise NotImplementedError('AAAAAAAARRRRRRRGGGGGHHHHHHHH')
+                raise NotImplementedError('No!')
+
+        # ... for EddyPro
         if self.file_type == 'EddyPro':
+
+            # ... to EddyPro
             if output_format == 'EddyPro':
                 header_lines = _format_EddyPro_output_headers(
                     info=self.file_info,
-                    headers=self.headers
+                    headers=headers
                     )
+
+            # ... to TOA5
             if output_format == 'TOA5':
                 header_lines = _convert_EddyPro_to_TOA5_headers(
                     info=self.file_info,
-                    headers=self.headers
+                    headers=headers
                     )
                 data = data.reset_index()
 
-        # Write to file
-        file_configs = ff.get_file_type_configs(file_type=output_format)
-        with open(abs_file_path, 'w', newline='\n') as f:
-            for line in header_lines:
-                f.write(line)
-            data.to_csv(
-                f, header=False, index=False, na_rep=file_configs['na_values'],
-                quoting=file_configs['quoting']
+        # Write everything to file
+        _write_data_to_file(
+            data=data,
+            header_lines=header_lines,
+            output_format=output_format,
+            abs_file_path=abs_file_path
+            )
+
+        pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _rename_data_or_headers(self, which, usecols=None):
+
+        # Set the subsetting list and rename dict, depending on type
+        if not usecols:
+            subset_list, rename_dict = self.data.columns, {}
+        elif isinstance(usecols, dict):
+            subset_list, rename_dict = list(usecols.keys()), usecols.copy()
+        elif isinstance(usecols, list):
+            subset_list, rename_dict = usecols.copy(), {}
+        else:
+            raise TypeError('usecols arg must be None, list or dict')
+
+        # Get the file-specific time variables and make sure they are in the
+        # subset list, but at the start and only once; and remove them from the
+        # rename dictionary.
+        dt_names = [
+            x for x in
+            ff.get_file_type_configs(file_type=self.file_type)
+            ['time_variables'].keys()
+            ]
+        subset_list = (
+            dt_names +
+            list(filter(lambda x: not x in dt_names, subset_list))
+            )
+        for key in dt_names:
+            rename_dict.pop(key, None)
+
+        # Return the subsetted / renamed data
+        if which == 'data':
+            return self.data[subset_list].rename(rename_dict, axis=1)
+        if which == 'headers':
+            return (
+                self.headers
+                .T
+                [subset_list]
+                .rename(rename_dict, axis=1)
+                .T
                 )
+
+        # Raise if you made it this far
+        raise KeyError('which arg must be either "data" or "headers"!')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+
+###############################################################################
+### FUNCTIONS ###
+###############################################################################
 
 #------------------------------------------------------------------------------
 def _convert_EddyPro_to_TOA5_headers(info, headers):
@@ -434,7 +484,7 @@ def _convert_EddyPro_to_TOA5_headers(info, headers):
 def _format_EddyPro_output_headers(info, headers):
 
     headers_no_idx = headers.reset_index()
-    formatter = ff.get_write_formatter(file_type='EddyPro')
+    formatter = ff.get_formatter(file_type='EddyPro', which='write')
     lists = []
     for var in headers_no_idx.columns:
         lists.append(formatter(headers_no_idx[var]))
@@ -445,7 +495,7 @@ def _format_EddyPro_output_headers(info, headers):
 def _format_TOA5_output_headers(info, headers):
 
     headers_no_idx = headers.reset_index()
-    formatter = ff.get_write_formatter(file_type='TOA5')
+    formatter = ff.get_formatter(file_type='TOA5', which='write')
     lists = [formatter(list(info.values()))]
     for var in headers_no_idx.columns:
         lists.append(formatter(headers_no_idx[var]))
@@ -453,16 +503,16 @@ def _format_TOA5_output_headers(info, headers):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _write_data_to_file(data, header_lines, file_configs, abs_file_path):
+def _write_data_to_file(data, header_lines, output_format, abs_file_path):
 
+    file_configs = ff.get_file_type_configs(file_type=output_format)
     with open(abs_file_path, 'w', newline='\n') as f:
         for line in header_lines:
             f.write(line)
         data.to_csv(
             f, header=False, index=False, na_rep=file_configs['na_values'],
-            quoting=file_configs['quoting']
+            sep=file_configs['separator'], quoting=file_configs['quoting']
             )
-
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -489,23 +539,23 @@ def _get_handler_elements(file, concat_files=False):
     file_type = ff.get_file_type(file=file)
 
     # Set list empty if no concat requested
-    if concat_files == False:
+    if concat_files is False:
         concat_list = []
         concat_report = []
 
     # Generate list if concat requested
-    if concat_files == True:
+    if concat_files is True:
         if file_type == 'TOA5':
             concat_list = ff.get_TOA5_backups(file=file)
         if file_type == 'EddyPro':
             concat_list = ff.get_EddyPro_files(file=file)
         if not concat_files:
-            concat_list == []
+            concat_list = []
             concat_report = ['No eligible files found!']
 
     # Populate list if (non-empty) file list passed
     if isinstance(concat_files, list) and len(concat_files) > 0:
-        concat_list == concat_files
+        concat_list = concat_files
 
     # Get data from single or concatenated file(s)
     if not concat_list:

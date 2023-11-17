@@ -12,6 +12,7 @@ To do:
 
 import csv
 import datetime as dt
+import os
 
 import numpy as np
 import pandas as pd
@@ -96,6 +97,7 @@ def get_data(file, file_type=None, usecols=None):
 
     """
 
+
     # If file type not supplied, detect it.
     if not file_type:
         file_type = get_file_type(file)
@@ -107,15 +109,6 @@ def get_data(file, file_type=None, usecols=None):
     REQ_TIME_VARS = list(MASTER_DICT['time_variables'].keys())
     rows_to_skip = list(set([0] + list(MASTER_DICT['header_lines'].values())))
     rows_to_skip.remove(MASTER_DICT['header_lines']['variable'])
-
-    # Set date parsing to handle file type (convention is to keep the native
-    # date stamps as data as well as being used to build the index)
-    if len(REQ_TIME_VARS) == 1:
-        date_parse_arg = REQ_TIME_VARS
-        drop_index_vars = False
-    else:
-        date_parse_arg = {'TIMESTAMP': REQ_TIME_VARS}
-        drop_index_vars = True
 
     # Usecols MUST include time variables and at least ONE additional column;
     # if this condition is not satisifed, do not subset the columns on import.
@@ -129,7 +122,7 @@ def get_data(file, file_type=None, usecols=None):
             file,
             skiprows=rows_to_skip,
             usecols=thecols,
-            parse_dates=date_parse_arg,
+            parse_dates={'DATETIME': REQ_TIME_VARS},
             keep_date_col=True,
             na_values=MASTER_DICT['na_values'],
             sep=MASTER_DICT['separator'],
@@ -137,7 +130,8 @@ def get_data(file, file_type=None, usecols=None):
             on_bad_lines='warn',
             low_memory=False
             )
-        .set_index(keys='TIMESTAMP', drop=drop_index_vars)
+        .set_index(keys='DATETIME')
+        .astype({x: object for x in REQ_TIME_VARS})
         .pipe(_integrity_checks, non_numeric=MASTER_DICT['non_numeric_cols'])
         )
 #------------------------------------------------------------------------------
@@ -234,7 +228,7 @@ def get_header_df(file, file_type=None):
         file_type = get_file_type(file)
 
     HEADERS_DICT = FILE_CONFIGS[file_type]['header_lines']
-    formatter = get_read_formatter(file_type=file_type)
+    formatter = get_formatter(file_type=file_type, which='read')
     return (
         pd.DataFrame(
             dict(zip(
@@ -266,7 +260,7 @@ def get_file_info(file, file_type=None, dummy_override=False):
 
     # Otherwise get the TOA5 file info from the file
     line_num = FILE_CONFIGS['TOA5']['info_line']
-    formatter = get_read_formatter(file_type='TOA5')
+    formatter = get_formatter(file_type='TOA5', which='read')
     info = formatter(
         get_file_headers(file=file, begin=line_num, end=line_num)[0]
             )
@@ -278,7 +272,7 @@ def get_file_type(file):
 
     header = get_file_headers(file=file, begin=0, end=0)[0]
     for file_type in FILE_CONFIGS.keys():
-        formatter = get_read_formatter(file_type=file_type)
+        formatter = get_formatter(file_type=file_type, which='read')
         uniq_id = FILE_CONFIGS[file_type]['unique_file_id']
         if formatter(header)[0] == uniq_id:
             return file_type
@@ -293,34 +287,28 @@ def get_file_type_configs(file_type):
 
 
 
-#-----------------#
-# Line formatting #
-#-----------------#
+#------------#
+# Formatting #
+#------------#
 
 
 
 #------------------------------------------------------------------------------
-def get_read_formatter(file_type):
-    """
-    Get the function to format the input file lines
+def get_formatter(file_type, which):
 
-    Parameters
-    ----------
-    file_type : str
-        The type of file for which to return the formatter.
-
-    Returns
-    -------
-    function
-        Formatting function.
-
-    """
-
-    if file_type == 'TOA5':
-        return _TOA5_read_formatter
-    if file_type == 'EddyPro':
-        return _EddyPro_read_formatter
-    raise NotImplementedError(f'File type {file_type} not implemented!')
+    formatter_dict = {
+        'TOA5': {
+            'read': _TOA5_read_formatter,
+            'write': _TOA5_write_formatter,
+            'date': _TOA5_date_formatter
+            },
+        'EddyPro': {
+            'read': _EddyPro_read_formatter,
+            'write': _EddyPro_write_formatter,
+            'date': _EddyPro_date_formatter
+            }
+        }
+    return formatter_dict[file_type][which]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -331,41 +319,26 @@ def _EddyPro_read_formatter(line):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _TOA5_read_formatter(line):
-
-    sep = FILE_CONFIGS['TOA5']['separator']
-    return [x.replace('"', '') for x in line.strip().split(sep)]
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def get_write_formatter(file_type):
-    """
-    Get the function to format the output file lines
-
-    Parameters
-    ----------
-    file_type : str
-        The type of file for which to return the formatter.
-
-    Returns
-    -------
-    function
-        Formatting function.
-
-    """
-
-    if file_type == 'TOA5':
-        return _TOA5_write_formatter
-    if file_type == 'EddyPro':
-        return _EddyPro_write_formatter
-    raise NotImplementedError(f'File type {file_type} not implemented!')
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
 def _EddyPro_write_formatter(line_list):
 
     joiner = lambda x: FILE_CONFIGS['EddyPro']['separator'].join(x) + '\n'
     return joiner(line_list)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _EddyPro_date_formatter(line_list):
+
+    locs = FILE_CONFIGS['EddyPro']['time_variables'].values()
+    return _generic_date_constructor(
+        date_elems=[line_list[loc] for loc in locs]
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _TOA5_read_formatter(line):
+
+    sep = FILE_CONFIGS['TOA5']['separator']
+    return [x.replace('"', '') for x in line.strip().split(sep)]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -375,6 +348,23 @@ def _TOA5_write_formatter(line_list):
     joiner = lambda x: FILE_CONFIGS['TOA5']['separator'].join(x) + '\n'
     return joiner(formatter(x) for x in line_list)
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _TOA5_date_formatter(line_list):
+
+    locs = FILE_CONFIGS['TOA5']['time_variables'].values()
+    return _generic_date_constructor(
+        date_elems=[line_list[loc] for loc in locs]
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _generic_date_constructor(date_elems):
+
+    return dt.datetime.strptime(' '.join(date_elems), DATE_FORMAT)
+#------------------------------------------------------------------------------
+
+
 
 #---------------#
 # Date handling #
@@ -405,44 +395,99 @@ def get_dates(file, file_type=None):
     if not file_type:
         file_type = get_file_type(file)
 
-    line_formatter = get_read_formatter(file_type=file_type)
+    # Get the formatters
+    line_formatter = get_formatter(file_type=file_type, which='read')
+    date_formatter = get_formatter(file_type=file_type, which='date')
     date_list = []
     with open(file, 'r') as f:
         for line in f:
             try:
-                date_list.append(
-                    _date_extractor(line_formatter(line), file_type=file_type)
-                    )
-
+                date_list.append(date_formatter(line_formatter(line)))
             except (TypeError, ValueError):
                 continue
     return date_list
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _date_extractor(fmt_line, file_type):
-    """
-    Convert line to date.
+def get_start_end_dates(file, file_type=None):
 
-    Parameters
-    ----------
-    fmt_line : list.
-        Line elements.
-    file_type : str
-        The type of file (must be either "TOA5" or "EddyPro")
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
 
-    Returns
-    -------
-    pydatetime
-        The date and time.
+    # Get the formatters
+    line_formatter = get_formatter(file_type=file_type, which='read')
+    date_formatter = get_formatter(file_type=file_type, which='date')
 
-    """
+    # Open file in binary
+    with open(file, 'rb') as f:
 
-    locs = FILE_CONFIGS[file_type]['time_variables'].values()
-    return dt.datetime.strptime(
-        ' '.join([fmt_line[loc] for loc in locs]),
-        DATE_FORMAT
-        )
+        # Iterate forward to find first valid start date
+        start_date = None
+        for i, line in enumerate(f):
+            try:
+                start_date = date_formatter(line_formatter(line.decode()))
+                break
+            except ValueError:
+                continue
+
+        # Iterate backwards to find last valid end date
+        end_date = None
+        f.seek(2, os.SEEK_END)
+        while True:
+            try:
+                if f.read(1) == b'\n':
+                    pos = f.tell()
+                    try:
+                        end_date = (
+                            date_formatter(
+                                line_formatter(f.readline().decode())
+                                )
+                            )
+                        break
+                    except ValueError:
+                        f.seek(pos - f.tell(), os.SEEK_CUR)
+                f.seek(-2, os.SEEK_CUR)
+            except OSError:
+                break
+
+    return {'start_date': start_date, 'end_date': end_date}
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_record_from_date(file, pydt, from_end=False):
+
+    with open(file, 'rb') as file_obj:
+        return _file_date_backwards_parser(file_obj, pydt, file_type='TOA5')
+
+    pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _file_date_backwards_parser(file_obj, pydt, file_type):
+
+    # Get the formatters
+    line_formatter = get_formatter(file_type=file_type, which='read')
+    date_formatter = get_formatter(file_type=file_type, which='write')
+
+    file_obj.seek(2, os.SEEK_END)
+    while True:
+        try:
+            if file_obj.read(1) == b'\n':
+                pos = file_obj.tell()
+                try:
+                    line = line_formatter(file_obj.readline().decode())
+                    date = date_formatter(line)
+                    if date == pydt:
+                        return(file_obj.read().decode())
+                except ValueError:
+                    pass
+                file_obj.seek(pos - file_obj.tell(), os.SEEK_CUR)
+            file_obj.seek(-2, os.SEEK_CUR)
+        except OSError:
+            break
+
+    pass
 #------------------------------------------------------------------------------
 
 
