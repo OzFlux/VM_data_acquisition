@@ -2,11 +2,6 @@
 """
 Created on Thu Oct 12 13:37:33 2023
 
-To do:
-    - add file write to file handler
-    - add file type check to file concatenator
-    - fix path formatting of master versus merge file in the concatenator
-
 @author: jcutern-imchugh
 """
 
@@ -41,7 +36,7 @@ FILE_CONFIGS = {
         'info_line': None,
         'header_lines': {'variable': 0, 'units': 1},
         'separator': '\t',
-        'non_numeric_cols': ['date', 'time',  'DATAH', 'filename'],
+        'non_numeric_cols': ['DATAH', 'filename', 'date', 'time'],
         'time_variables': {'date': 2, 'time': 3},
         'na_values': 'NaN',
         'unique_file_id': 'DATAH',
@@ -107,14 +102,19 @@ def get_data(file, file_type=None, usecols=None):
 
     # Set rows to skip
     REQ_TIME_VARS = list(MASTER_DICT['time_variables'].keys())
+    CRITICAL_FILE_VARS = MASTER_DICT['non_numeric_cols']
     rows_to_skip = list(set([0] + list(MASTER_DICT['header_lines'].values())))
     rows_to_skip.remove(MASTER_DICT['header_lines']['variable'])
 
-    # Usecols MUST include time variables and at least ONE additional column;
-    # if this condition is not satisifed, do not subset the columns on import.
+    # Usecols MUST include critical non-numeric variables (including date vars)
+    # and at least ONE additional column; if this condition is not satisifed,
+    # do not subset the columns on import.
     thecols = None
-    if usecols and not usecols == REQ_TIME_VARS:
-        thecols = list(set(REQ_TIME_VARS + usecols))
+    if usecols and not usecols == CRITICAL_FILE_VARS:
+        thecols = (
+            CRITICAL_FILE_VARS +
+            [col for col in usecols if not col in CRITICAL_FILE_VARS]
+            )
 
     # Now import data
     return (
@@ -132,7 +132,7 @@ def get_data(file, file_type=None, usecols=None):
             )
         .set_index(keys='DATETIME')
         .astype({x: object for x in REQ_TIME_VARS})
-        .pipe(_integrity_checks, non_numeric=MASTER_DICT['non_numeric_cols'])
+        .pipe(_integrity_checks, non_numeric=CRITICAL_FILE_VARS)
         )
 #------------------------------------------------------------------------------
 
@@ -454,41 +454,41 @@ def get_start_end_dates(file, file_type=None):
     return {'start_date': start_date, 'end_date': end_date}
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def get_record_from_date(file, pydt, from_end=False):
+# #------------------------------------------------------------------------------
+# def get_record_from_date(file, pydt, from_end=False):
 
-    with open(file, 'rb') as file_obj:
-        return _file_date_backwards_parser(file_obj, pydt, file_type='TOA5')
+#     with open(file, 'rb') as file_obj:
+#         return _file_date_backwards_parser(file_obj, pydt, file_type='TOA5')
 
-    pass
-#------------------------------------------------------------------------------
+#     pass
+# #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _file_date_backwards_parser(file_obj, pydt, file_type):
+# #------------------------------------------------------------------------------
+# def _file_date_backwards_parser(file_obj, pydt, file_type):
 
-    # Get the formatters
-    line_formatter = get_formatter(file_type=file_type, which='read')
-    date_formatter = get_formatter(file_type=file_type, which='write')
+#     # Get the formatters
+#     line_formatter = get_formatter(file_type=file_type, which='read')
+#     date_formatter = get_formatter(file_type=file_type, which='write')
 
-    file_obj.seek(2, os.SEEK_END)
-    while True:
-        try:
-            if file_obj.read(1) == b'\n':
-                pos = file_obj.tell()
-                try:
-                    line = line_formatter(file_obj.readline().decode())
-                    date = date_formatter(line)
-                    if date == pydt:
-                        return(file_obj.read().decode())
-                except ValueError:
-                    pass
-                file_obj.seek(pos - file_obj.tell(), os.SEEK_CUR)
-            file_obj.seek(-2, os.SEEK_CUR)
-        except OSError:
-            break
+#     file_obj.seek(2, os.SEEK_END)
+#     while True:
+#         try:
+#             if file_obj.read(1) == b'\n':
+#                 pos = file_obj.tell()
+#                 try:
+#                     line = line_formatter(file_obj.readline().decode())
+#                     date = date_formatter(line)
+#                     if date == pydt:
+#                         return(file_obj.read().decode())
+#                 except ValueError:
+#                     pass
+#                 file_obj.seek(pos - file_obj.tell(), os.SEEK_CUR)
+#             file_obj.seek(-2, os.SEEK_CUR)
+#         except OSError:
+#             break
 
-    pass
-#------------------------------------------------------------------------------
+#     pass
+# #------------------------------------------------------------------------------
 
 
 
@@ -497,6 +497,22 @@ def _file_date_backwards_parser(file_obj, pydt, file_type):
 #------------------------------#
 
 
+
+#------------------------------------------------------------------------------
+def get_eligible_concat_files(file, file_type=None):
+
+    funcs_dict = {
+        'TOA5': get_TOA5_backups,
+        'EddyPro': get_EddyPro_files
+        }
+
+    # If file type not supplied, detect it.
+    if not file_type:
+        file_type = get_file_type(file)
+
+    # Return the files
+    return funcs_dict[file_type](file=file)
+#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def get_TOA5_backups(file):
@@ -584,26 +600,26 @@ def get_datearray_interval(datearray):
 
 
 
-#---------------#
-# Miscellaneous #
-#---------------#
+# #---------------#
+# # Miscellaneous #
+# #---------------#
 
 
 
-#------------------------------------------------------------------------------
-def _write_data_to_file(header_lines, data, file_type, abs_file_path):
+# #------------------------------------------------------------------------------
+# def _write_data_to_file(header_lines, data, file_type, abs_file_path):
 
-    # Get required formatting
-    sep = FILE_CONFIGS[file_type]['separator']
-    na = FILE_CONFIGS[file_type]['na_values']
-    quoting = FILE_CONFIGS[file_type]['quoting']
+#     # Get required formatting
+#     sep = FILE_CONFIGS[file_type]['separator']
+#     na = FILE_CONFIGS[file_type]['na_values']
+#     quoting = FILE_CONFIGS[file_type]['quoting']
 
-    # Write to file
-    with open(abs_file_path, 'w', newline='\n') as f:
-        for line in header_lines:
-            f.write(line)
-        data.to_csv(
-            f, header=False, index=False, na_rep=na,
-            quoting=quoting, sep=sep
-            )
-#------------------------------------------------------------------------------
+#     # Write to file
+#     with open(abs_file_path, 'w', newline='\n') as f:
+#         for line in header_lines:
+#             f.write(line)
+#         data.to_csv(
+#             f, header=False, index=False, na_rep=na,
+#             quoting=quoting, sep=sep
+#             )
+# #------------------------------------------------------------------------------

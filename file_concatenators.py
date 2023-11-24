@@ -2,6 +2,10 @@
 """
 Created on Thu Nov  9 13:14:17 2023
 
+To do:
+    - add file type check to file concatenator
+    - fix path formatting of master versus merge file in the concatenator
+
 @author: jcutern-imchugh
 """
 

@@ -361,11 +361,17 @@ class DataHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def write_conditioned_data(self, abs_file_path, output_format, **kwargs):
+    def write_conditioned_data(
+            self, abs_file_path, output_format=None, **kwargs
+            ):
 
         # Get data and headers
         data = self.get_conditioned_data(**kwargs)
         headers = self._rename_data_or_headers(which='headers', **kwargs)
+
+        # If no output format specified, write with native format
+        if output_format is None:
+            output_format = self.file_type
 
         # Configure the output headers and data
         # ... for TOA5
@@ -383,7 +389,7 @@ class DataHandler():
                 raise NotImplementedError('No!')
 
         # ... for EddyPro
-        if self.file_type == 'EddyPro':
+        elif self.file_type == 'EddyPro':
 
             # ... to EddyPro
             if output_format == 'EddyPro':
@@ -399,6 +405,11 @@ class DataHandler():
                     headers=headers
                     )
                 data = data.reset_index()
+
+        # If a nonsensical argument passed for file_TYPE
+        else:
+
+            raise KeyError('File type must be either TOA5 or EddyPro!')
 
         # Write everything to file
         _write_data_to_file(
@@ -424,19 +435,15 @@ class DataHandler():
         else:
             raise TypeError('usecols arg must be None, list or dict')
 
-        # Get the file-specific time variables and make sure they are in the
+        # Get the file-specific critical variables and make sure they are in the
         # subset list, but at the start and only once; and remove them from the
         # rename dictionary.
-        dt_names = [
-            x for x in
-            ff.get_file_type_configs(file_type=self.file_type)
-            ['time_variables'].keys()
-            ]
+        critical_cols = self._configs['non_numeric_cols']
         subset_list = (
-            dt_names +
-            list(filter(lambda x: not x in dt_names, subset_list))
+            critical_cols +
+            [x for x in subset_list if not x in critical_cols]
             )
-        for key in dt_names:
+        for key in subset_list:
             rename_dict.pop(key, None)
 
         # Return the subsetted / renamed data
@@ -535,59 +542,76 @@ def _get_handler_elements(file, concat_files=False):
 
     """
 
-    # Get the file type
-    file_type = ff.get_file_type(file=file)
+    # Set an emptry concatenation list
+    concat_list = []
 
-    # Set list empty if no concat requested
-    if concat_files is False:
-        concat_list = []
-        concat_report = []
-
-    # Generate list if concat requested
+    # If boolean passed...
     if concat_files is True:
-        if file_type == 'TOA5':
-            concat_list = ff.get_TOA5_backups(file=file)
-        if file_type == 'EddyPro':
-            concat_list = ff.get_EddyPro_files(file=file)
-        if not concat_files:
-            concat_list = []
-            concat_report = ['No eligible files found!']
+        concat_list = ff.get_eligible_concat_files(file=file)
 
-    # Populate list if (non-empty) file list passed
-    if isinstance(concat_files, list) and len(concat_files) > 0:
+    # If list passed...
+    if isinstance(concat_files, list):
         concat_list = concat_files
 
-    # Get data from single or concatenated file(s)
-    if not concat_list:
-        data = ff.get_data(file=file, file_type=file_type)
-        headers = ff.get_header_df(file=file, file_type=file_type)
-        file_info = ff.get_file_info(file=file, file_type=file_type)
-    else:
-        concatenator = fc.FileConcatenator(
-            master_file=file,
-            file_type=file_type,
-            concat_list=concat_list
-            )
-        data = concatenator.get_concatenated_data()
-        headers = concatenator.get_concatenated_header()
-        concat_report = concatenator.get_concatenation_report(as_text=True)
-        file_info = ff.get_file_info(
-            file=file, file_type=file_type, dummy_override=True
+    # If concat_list has no elements, get single file data
+    if len(concat_list) == 0:
+        fallback = False if concat_files == False else True
+        data_dict = _get_single_file_data(file=file, fallback=fallback)
+
+    # If concat_list has elements, use the concatenator
+    if len(concat_list) > 0:
+        data_dict = _get_concatenated_file_data(
+            file=file,
+            concat_files=concat_files
             )
 
     # Get file interval regardless of provenance (single or concatenated)
-    interval = ff.get_datearray_interval(
-        datearray=np.array(data.index.to_pydatetime())
+    data_dict.update(
+        {'interval': ff.get_datearray_interval(
+            datearray=np.array(data_dict['data'].index.to_pydatetime())
+            )
+            }
         )
 
     # Return the dictionary
+    return data_dict
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _get_concatenated_file_data(file, concat_files):
+
+    file_type = ff.get_file_type(file=file)
+    configs = ff.get_file_type_configs(file_type=file_type)
+    concatenator = fc.FileConcatenator(
+        master_file=file,
+        file_type=file_type,
+        concat_list=concat_files
+        )
     return {
         'file_type': file_type,
-        'file_info': file_info,
-        'data': data,
-        'headers': headers,
-        'interval': interval,
-        'concat_list': concat_list,
-        'concat_report': concat_report
+        'file_info': ff.get_file_info(
+            file=file, file_type=file_type, dummy_override=True
+            ),
+        'data': concatenator.get_concatenated_data(),
+        'headers': concatenator.get_concatenated_header(),
+        'concat_list': concat_files,
+        'concat_report': concatenator.get_concatenation_report(as_text=True),
+        '_configs': configs
+        }
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _get_single_file_data(file, fallback=False):
+
+    file_type = ff.get_file_type(file=file)
+    configs = ff.get_file_type_configs(file_type=file_type)
+    return {
+        'file_type': file_type,
+        'file_info': ff.get_file_info(file=file, file_type=file_type),
+        'data': ff.get_data(file=file, file_type=file_type),
+        'headers': ff.get_header_df(file=file, file_type=file_type),
+        'concat_list': [],
+        'concat_report': [] if not fallback else ['No eligible files found!'],
+        '_configs': configs
         }
 #------------------------------------------------------------------------------
