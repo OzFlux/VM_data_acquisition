@@ -449,7 +449,7 @@ class L1Constructor():
 def get_latest_10Hz_file(site):
 
     data_path = PATHS.get_local_path(
-        resource='data', stream='flux_fast', site=site, subdirs=['TOB3']
+        resource='data', stream='flux_fast', site=site
         )
     try:
         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
