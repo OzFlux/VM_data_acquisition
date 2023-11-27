@@ -707,7 +707,10 @@ def main(site, system, overwrite_ccf=True):
     # Make the ccf file
     logging.info('Writing CardConvert configuration file...')
     write_ccf_file(
-        site=site, time_step=raw_handler.time_step, overwrite=overwrite_ccf
+        site=site,
+        time_step=raw_handler.time_step,
+        system=system,
+        overwrite=overwrite_ccf
         )
     logging.info('Done!')
 
