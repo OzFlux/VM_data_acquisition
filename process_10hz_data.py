@@ -6,9 +6,9 @@ Created on Thu Apr 15 09:16:49 2021
 @author: imchugh
 
 To do:
-    - implement flexible file naming patterns
-    - check works for TOB1 AND for different intervals (TOB1 at daily interval
-      needs fixing)
+    - implement aliasing so that shorter names can be used on the loggers
+    (GWW understorey currently can't print the final letter, so the file
+     extension is '.da')
 """
 
 import datetime as dt
