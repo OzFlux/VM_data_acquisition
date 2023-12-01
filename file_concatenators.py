@@ -11,7 +11,7 @@ To do:
 
 import pandas as pd
 
-import file_functions as ff
+import file_io as io
 
 UNIT_ALIASES = {
     'degC': ['C'],
@@ -52,7 +52,7 @@ class FileConcatenator():
         self.master_file = master_file
         self.concat_list = concat_list
         self.file_type = file_type
-        self.file_info = ff.get_file_type_configs(file_type=file_type)
+        self.file_info = io.get_file_type_configs(file_type=file_type)
         reports = [
             FileMergeAnalyser(
                 master_file=master_file,
@@ -85,10 +85,10 @@ class FileConcatenator():
 
         """
 
-        df_list = [ff.get_data(file=self.master_file, file_type=self.file_type)]
+        df_list = [io.get_data(file=self.master_file, file_type=self.file_type)]
         for file in self.legal_list:
             df_list.append(
-                ff.get_data(file=file, file_type=self.file_type)
+                io.get_data(file=file, file_type=self.file_type)
                 .rename(self.alias_maps[file], axis=1)
                 )
         ordered_vars = self.get_concatenated_header().index.tolist()
@@ -112,11 +112,11 @@ class FileConcatenator():
         """
 
         df_list = [
-            ff.get_header_df(file=self.master_file, file_type=self.file_type)
+            io.get_header_df(file=self.master_file, file_type=self.file_type)
             ]
         for file in self.legal_list:
             df_list.append(
-                ff.get_header_df(file=file, file_type=self.file_type)
+                io.get_header_df(file=file, file_type=self.file_type)
                 .rename(self.alias_maps[file])
                 )
         df = pd.concat(df_list)
@@ -222,10 +222,10 @@ class FileMergeAnalyser():
 
         """
 
-        master_df = ff.get_header_df(
+        master_df = io.get_header_df(
             file=self.master_file, file_type=self.file_type
             )
-        merge_df = ff.get_header_df(
+        merge_df = io.get_header_df(
             file=self.merge_file, file_type=self.file_type
             )
         common = list(set(master_df.index).intersection(merge_df.index))
@@ -261,11 +261,11 @@ class FileMergeAnalyser():
             self.compare_variables()['common_variables']
             )
         compare_df = pd.concat(
-            [(ff.get_header_df(file=self.master_file, file_type=self.file_type)
+            [(io.get_header_df(file=self.master_file, file_type=self.file_type)
               .rename({'units': 'master'}, axis=1)
               .loc[common_vars, 'master']
               ),
-              (ff.get_header_df(file=self.merge_file, file_type=self.file_type)
+              (io.get_header_df(file=self.merge_file, file_type=self.file_type)
               .rename({'units': 'merge'}, axis=1)
               .loc[common_vars, 'merge']
               )], axis=1
@@ -310,10 +310,10 @@ class FileMergeAnalyser():
 
         return {
             'interval_merge_legal':
-                ff.get_file_interval(
+                io.get_file_interval(
                     file=self.master_file, file_type=self.file_type
                     ) ==
-                ff.get_file_interval(
+                io.get_file_interval(
                     file=self.merge_file, file_type=self.file_type
                     )
                 }
@@ -336,10 +336,10 @@ class FileMergeAnalyser():
         return {
             'date_merge_legal':
                 len(
-                    set(ff.get_dates(
+                    set(io.get_dates(
                         file=self.master_file, file_type=self.file_type
                         )) -
-                    set(ff.get_dates(
+                    set(io.get_dates(
                         file=self.merge_file, file_type=self.file_type
                         ))
                     ) > 0

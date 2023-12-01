@@ -9,7 +9,7 @@ Created on Thu Nov  9 11:52:46 2023
 import numpy as np
 import pandas as pd
 
-import file_functions as ff
+import file_io as io
 import file_concatenators as fc
 
 ###############################################################################
@@ -49,7 +49,7 @@ class DataHandler():
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
             usecols=None, monotonic_index=False, raise_if_dupe_index=False,
-            resample_intvl=None
+            drop_non_numeric=False, resample_intvl=None
             ):
         """
         Generate a conditioned version of the data. Duplicate data are dropped.
@@ -66,6 +66,11 @@ class DataHandler():
         raise_if_dupe_index : bool, optional
             Raise an error if duplicate indices are found with non-duplicate
             data. The default is False.
+        drop_non_numeric : bool, optional
+            Purge the non-numeric columns from the conditioned data. If false,
+            the non-numeric columns will be included even if excluded from
+            usecols. If true they will be dropped even if included in usecols.
+            The default is False.
         resample_intvl : date_offset, optional
             The time interval to which the data should be resampled.
             The default is None.
@@ -95,9 +100,10 @@ class DataHandler():
 
         # Apply duplicate mask, column subset and rename
         output_data = (
-            self._rename_data_or_headers(
+            self.subset_or_translate_data(
                 usecols=usecols,
-                which='data')
+                drop_non_numeric=drop_non_numeric,
+                )
             .loc[~dupes_mask]
             )
 
@@ -254,6 +260,21 @@ class DataHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_non_numeric_variables(self):
+
+        return self._configs['non_numeric_cols']
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_numeric_variables(self):
+
+        return [
+            col for col in self.data.columns if not col in
+            self.get_non_numeric_variables()
+            ]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_variable_list(self):
         """
         Gets the list of variables in the TOA5 header line
@@ -367,7 +388,7 @@ class DataHandler():
 
         # Get data and headers
         data = self.get_conditioned_data(**kwargs)
-        headers = self._rename_data_or_headers(which='headers', **kwargs)
+        headers = self.subset_or_translate_headers(**kwargs)
 
         # If no output format specified, write with native format
         if output_format is None:
@@ -406,7 +427,7 @@ class DataHandler():
                     )
                 data = data.reset_index()
 
-        # If a nonsensical argument passed for file_TYPE
+        # If a nonsensical argument passed for file_TYPE, raise error
         else:
 
             raise KeyError('File type must be either TOA5 or EddyPro!')
@@ -418,15 +439,61 @@ class DataHandler():
             output_format=output_format,
             abs_file_path=abs_file_path
             )
-
-        pass
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _rename_data_or_headers(self, which, usecols=None):
+    def write_conditioned_data_2(
+            self, abs_file_path, output_format=None, **kwargs
+            ):
+
+        # Get data and headers
+        data = self.get_conditioned_data(**kwargs)
+        headers = self.subset_or_translate_headers(**kwargs)
+
+        # If no output format specified, write with native format
+        if output_format is None:
+            output_format = self.file_type
+
+        io.write_it(
+            data=data,
+            headers=headers,
+            output_format=output_format,
+            abs_file_path=abs_file_path,
+            info=self.file_info
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def subset_or_translate_data(self, usecols=None, drop_non_numeric=False):
+
+        subset_list, rename_dict = self._parse_usecols(
+            usecols=usecols,
+            drop_non_numeric=drop_non_numeric
+            )
+        return self.data[subset_list].rename(rename_dict, axis=1)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def subset_or_translate_headers(self, usecols=None, drop_non_numeric=False):
+
+        subset_list, rename_dict = self._parse_usecols(
+            usecols=usecols,
+            drop_non_numeric=drop_non_numeric
+            )
+        return (
+            self.headers
+            .T
+            [subset_list]
+            .rename(rename_dict, axis=1)
+            .T
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _parse_usecols(self, usecols, drop_non_numeric):
 
         # Set the subsetting list and rename dict, depending on type
-        if not usecols:
+        if usecols is None:
             subset_list, rename_dict = self.data.columns, {}
         elif isinstance(usecols, dict):
             subset_list, rename_dict = list(usecols.keys()), usecols.copy()
@@ -435,31 +502,23 @@ class DataHandler():
         else:
             raise TypeError('usecols arg must be None, list or dict')
 
-        # Get the file-specific critical variables and make sure they are in the
-        # subset list, but at the start and only once; and remove them from the
-        # rename dictionary.
+        # Get the file-specific critical variables and purge from the subset
+        # list and rename dictionary.
         critical_cols = self._configs['non_numeric_cols']
-        subset_list = (
-            critical_cols +
-            [x for x in subset_list if not x in critical_cols]
-            )
-        for key in subset_list:
-            rename_dict.pop(key, None)
+        subset_list = [x for x in subset_list if not x in critical_cols]
+        for key in critical_cols:
+            try:
+                rename_dict.pop(key, None)
+            except KeyError:
+                next
 
-        # Return the subsetted / renamed data
-        if which == 'data':
-            return self.data[subset_list].rename(rename_dict, axis=1)
-        if which == 'headers':
-            return (
-                self.headers
-                .T
-                [subset_list]
-                .rename(rename_dict, axis=1)
-                .T
-                )
+        # If not dropping non-numeric data, put it at the start (even if not
+        # in usecols)
+        if drop_non_numeric is False:
+            subset_list = critical_cols + subset_list
 
-        # Raise if you made it this far
-        raise KeyError('which arg must be either "data" or "headers"!')
+        # Return the subset list and the renaming dictionary
+        return subset_list, rename_dict
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -491,7 +550,7 @@ def _convert_EddyPro_to_TOA5_headers(info, headers):
 def _format_EddyPro_output_headers(info, headers):
 
     headers_no_idx = headers.reset_index()
-    formatter = ff.get_formatter(file_type='EddyPro', which='write')
+    formatter = io.get_formatter(file_type='EddyPro', which='write')
     lists = []
     for var in headers_no_idx.columns:
         lists.append(formatter(headers_no_idx[var]))
@@ -502,7 +561,7 @@ def _format_EddyPro_output_headers(info, headers):
 def _format_TOA5_output_headers(info, headers):
 
     headers_no_idx = headers.reset_index()
-    formatter = ff.get_formatter(file_type='TOA5', which='write')
+    formatter = io.get_formatter(file_type='TOA5', which='write')
     lists = [formatter(list(info.values()))]
     for var in headers_no_idx.columns:
         lists.append(formatter(headers_no_idx[var]))
@@ -512,7 +571,7 @@ def _format_TOA5_output_headers(info, headers):
 #------------------------------------------------------------------------------
 def _write_data_to_file(data, header_lines, output_format, abs_file_path):
 
-    file_configs = ff.get_file_type_configs(file_type=output_format)
+    file_configs = io.get_file_type_configs(file_type=output_format)
     with open(abs_file_path, 'w', newline='\n') as f:
         for line in header_lines:
             f.write(line)
@@ -547,7 +606,7 @@ def _get_handler_elements(file, concat_files=False):
 
     # If boolean passed...
     if concat_files is True:
-        concat_list = ff.get_eligible_concat_files(file=file)
+        concat_list = io.get_eligible_concat_files(file=file)
 
     # If list passed...
     if isinstance(concat_files, list):
@@ -562,12 +621,12 @@ def _get_handler_elements(file, concat_files=False):
     if len(concat_list) > 0:
         data_dict = _get_concatenated_file_data(
             file=file,
-            concat_files=concat_files
+            concat_list=concat_list
             )
 
     # Get file interval regardless of provenance (single or concatenated)
     data_dict.update(
-        {'interval': ff.get_datearray_interval(
+        {'interval': io.get_datearray_interval(
             datearray=np.array(data_dict['data'].index.to_pydatetime())
             )
             }
@@ -578,23 +637,23 @@ def _get_handler_elements(file, concat_files=False):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _get_concatenated_file_data(file, concat_files):
+def _get_concatenated_file_data(file, concat_list):
 
-    file_type = ff.get_file_type(file=file)
-    configs = ff.get_file_type_configs(file_type=file_type)
+    file_type = io.get_file_type(file=file)
+    configs = io.get_file_type_configs(file_type=file_type)
     concatenator = fc.FileConcatenator(
         master_file=file,
         file_type=file_type,
-        concat_list=concat_files
+        concat_list=concat_list
         )
     return {
         'file_type': file_type,
-        'file_info': ff.get_file_info(
+        'file_info': io.get_file_info(
             file=file, file_type=file_type, dummy_override=True
             ),
         'data': concatenator.get_concatenated_data(),
         'headers': concatenator.get_concatenated_header(),
-        'concat_list': concat_files,
+        'concat_list': concat_list,
         'concat_report': concatenator.get_concatenation_report(as_text=True),
         '_configs': configs
         }
@@ -603,13 +662,13 @@ def _get_concatenated_file_data(file, concat_files):
 #------------------------------------------------------------------------------
 def _get_single_file_data(file, fallback=False):
 
-    file_type = ff.get_file_type(file=file)
-    configs = ff.get_file_type_configs(file_type=file_type)
+    file_type = io.get_file_type(file=file)
+    configs = io.get_file_type_configs(file_type=file_type)
     return {
         'file_type': file_type,
-        'file_info': ff.get_file_info(file=file, file_type=file_type),
-        'data': ff.get_data(file=file, file_type=file_type),
-        'headers': ff.get_header_df(file=file, file_type=file_type),
+        'file_info': io.get_file_info(file=file, file_type=file_type),
+        'data': io.get_data(file=file, file_type=file_type),
+        'headers': io.get_header_df(file=file, file_type=file_type),
         'concat_list': [],
         'concat_report': [] if not fallback else ['No eligible files found!'],
         '_configs': configs

@@ -2,6 +2,9 @@
 """
 Created on Thu Oct 12 13:37:33 2023
 
+Todo:
+    - might want some more file checks
+
 @author: jcutern-imchugh
 """
 
@@ -454,42 +457,6 @@ def get_start_end_dates(file, file_type=None):
     return {'start_date': start_date, 'end_date': end_date}
 #------------------------------------------------------------------------------
 
-# #------------------------------------------------------------------------------
-# def get_record_from_date(file, pydt, from_end=False):
-
-#     with open(file, 'rb') as file_obj:
-#         return _file_date_backwards_parser(file_obj, pydt, file_type='TOA5')
-
-#     pass
-# #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def _file_date_backwards_parser(file_obj, pydt, file_type):
-
-#     # Get the formatters
-#     line_formatter = get_formatter(file_type=file_type, which='read')
-#     date_formatter = get_formatter(file_type=file_type, which='write')
-
-#     file_obj.seek(2, os.SEEK_END)
-#     while True:
-#         try:
-#             if file_obj.read(1) == b'\n':
-#                 pos = file_obj.tell()
-#                 try:
-#                     line = line_formatter(file_obj.readline().decode())
-#                     date = date_formatter(line)
-#                     if date == pydt:
-#                         return(file_obj.read().decode())
-#                 except ValueError:
-#                     pass
-#                 file_obj.seek(pos - file_obj.tell(), os.SEEK_CUR)
-#             file_obj.seek(-2, os.SEEK_CUR)
-#         except OSError:
-#             break
-
-#     pass
-# #------------------------------------------------------------------------------
-
 
 
 #------------------------------#
@@ -597,29 +564,3 @@ def get_datearray_interval(datearray):
         return int(minimum_val)
     raise RuntimeError('Minimum and most common values do not coincide!')
 #------------------------------------------------------------------------------
-
-
-
-# #---------------#
-# # Miscellaneous #
-# #---------------#
-
-
-
-# #------------------------------------------------------------------------------
-# def _write_data_to_file(header_lines, data, file_type, abs_file_path):
-
-#     # Get required formatting
-#     sep = FILE_CONFIGS[file_type]['separator']
-#     na = FILE_CONFIGS[file_type]['na_values']
-#     quoting = FILE_CONFIGS[file_type]['quoting']
-
-#     # Write to file
-#     with open(abs_file_path, 'w', newline='\n') as f:
-#         for line in header_lines:
-#             f.write(line)
-#         data.to_csv(
-#             f, header=False, index=False, na_rep=na,
-#             quoting=quoting, sep=sep
-#             )
-# #------------------------------------------------------------------------------
