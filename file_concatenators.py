@@ -5,6 +5,9 @@ Created on Thu Nov  9 13:14:17 2023
 To do:
     - add file type check to file concatenator
     - fix path formatting of master versus merge file in the concatenator
+    - create a report subclass to be embedded in the concatenator, which can be
+      handed off to the merger so an independent call to the file write is not
+      required
 
 @author: jcutern-imchugh
 """
@@ -401,14 +404,32 @@ class FileMergeAnalyser():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class RecordChecker():
+class ConcatenationReporter():
 
-    def __init__(self, master_file, concat_list):
+    #--------------------------------------------------------------------------
+    def __init__(self, master_file, concat_list, file_type=None):
 
-
+        reports = [
+            FileMergeAnalyser(
+                master_file=master_file,
+                merge_file=file,
+                file_type=file_type
+                )
+            .get_merge_report()
+            for file in self.concat_list
+            ]
+        self.legal_list = [
+            report['merge_file'] for report in reports if
+            report['file_merge_legal']
+            ]
+        self.illegal_list = []
         pass
+    #--------------------------------------------------------------------------
 
-    pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

@@ -26,7 +26,8 @@ UNIT_ALIAS_DICT = {
     'degC': ['C'],
     'n': ['arb', 'samples'],
     'arb': ['n', 'samples'],
-    'samples': ['arb', 'n']
+    'samples': ['arb', 'n'],
+    'm^3/m^3': ['fraction']
     }
 VALID_MEAS_INTERVALS = {1, 2, 15, 30, 60}
 

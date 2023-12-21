@@ -714,7 +714,6 @@ def make_table_df(site=None):
 
     # If user-supplied sitename, drop all except that
     if site: df = df.loc[df.site==site.replace(' ','')]
-
     # Create and write full file paths
     parent_path = PATHS.get_local_path(
         resource='data', stream='flux_slow', as_str=True

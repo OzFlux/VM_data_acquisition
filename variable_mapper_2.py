@@ -29,7 +29,7 @@ import pandas as pd
 #------------------------------------------------------------------------------
 
 import paths_manager as pm
-import toa5_handler as toa5
+import file_io as io
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -118,7 +118,8 @@ class mapper():
     #--------------------------------------------------------------------------
     def get_missing_variables(self, source_field='site_name'):
 
-        return self.site_df[self.site_df.Missing].index.tolist()
+        local_df = self._get_indexed_df(field=source_field)
+        return local_df[local_df.Missing].index.tolist()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -128,18 +129,34 @@ class mapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variables_for_conversion(
-            self, source_field='site_name', file=None
+    def get_variable_conversion(self, variable, source_field='site_name'):
+
+        df = self.get_variables_to_convert(source_field=source_field)
+        return df.loc[variable, ['site_units', 'standard_units']].to_dict()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_variables_to_convert(
+            self, source_field='site_name', file=None, return_fmt='frame'
             ):
 
         local_df = self._get_indexed_df(field=source_field)
+        local_df = local_df[local_df.conversion]
         if file:
             local_df = local_df.loc[local_df.file_name == file]
-        local_df = (
-            local_df.loc[local_df.conversion]
-            [['site_units', 'standard_units']]
-            )
-        return {var: local_df.loc[var].to_dict() for var in local_df.index}
+        if return_fmt == 'list':
+            return local_df[local_df.conversion].index.tolist()
+        if return_fmt == 'dict':
+            return {
+                variable: self.get_variable_conversion(
+                    variable=variable,
+                    source_field=source_field
+                    )
+                for variable in local_df.index
+                }
+        if return_fmt == 'frame':
+            return local_df.loc[local_df.conversion]
+        raise TypeError('return_fmt must be one of "list", "dict" or "frame"')
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -350,7 +367,16 @@ def make_table_df(site=None):
     return (
         df
         .join(pd.DataFrame(
-            data=[toa5.get_file_info(file=file) for file in df.full_path],
+            data=[
+                io.get_file_info(file=file) |
+                io.get_start_end_dates(file=file) |
+                {'backups':
+                 ','.join(
+                     f.name for f in io.get_eligible_concat_files(file=file)
+                     )
+                 }
+                for file in df.full_path
+                ],
             index=df.index
             ))
         .set_index(keys='file_name')

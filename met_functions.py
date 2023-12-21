@@ -2,6 +2,8 @@
 """
 Created on Fri Feb 24 14:05:44 2023
 
+Add a way to fill unknown variables with NaN to the function getter
+
 @author: jcutern-imchugh
 """
 
@@ -79,11 +81,19 @@ class TimeFunctions():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class UnitConverter():
+
+    def __init__(self, data):
+
+        pass
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def convert_co2(data, from_units='mg/m^2/s'):
+def convert_CO2(data, from_units='mg/m^2/s'):
 
     if from_units == 'mg/m^2/s':
         return data * 1000 / CO2_MOL_MASS
@@ -97,6 +107,13 @@ def convert_CO2_density(data, from_units='mmol/m^3'):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def convert_CO2_signal(data, from_units='frac'):
+
+    if from_units == 'frac':
+        return data * 100
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def convert_H2O_density(data, from_units='mmol/m^3'):
 
     if from_units == 'mmol/m^3':
@@ -106,10 +123,21 @@ def convert_H2O_density(data, from_units='mmol/m^3'):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def convert_precipitation(data, from_units='pulse_0.2mm'):
+
+    if from_units == 'pulse_0.2mm':
+        return data * 0.2
+    if from_units == 'pulse_0.5mm':
+        return data * 0.5
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def convert_pressure(data, from_units='Pa'):
 
     if from_units == 'Pa':
         return data / 10**3
+    if from_units == 'hPa':
+        return data / 10
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -117,6 +145,13 @@ def convert_RH(data, from_units='frac'):
 
     if from_units == 'frac':
         return data * 100
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def convert_Sws(data, from_units='%'):
+
+    if from_units == '%':
+        return data / 100
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -129,13 +164,19 @@ def convert_temperature(data, from_units='K'):
 #------------------------------------------------------------------------------
 def convert_variable(variable):
 
-    conversions_dict = {'Fco2': convert_co2,
-                        'RH': convert_RH,
-                        'CO2': convert_CO2_density,
-                        'AH_IRGA': convert_H2O_density,
-                        'AH_sensor': convert_H2O_density,
-                        'Ta': convert_temperature,
-                        'ps': convert_pressure}
+    conversions_dict = {
+        'Fco2': convert_CO2,
+        'Sig_7500': convert_CO2_signal,
+        'RH': convert_RH,
+        'CO2': convert_CO2_density,
+        'AH_IRGA': convert_H2O_density,
+        'AH_sensor': convert_H2O_density,
+        'Ta': convert_temperature,
+        'ps': convert_pressure,
+        'Sws': convert_Sws,
+        'VPD': convert_pressure,
+        'Rain': convert_precipitation
+        }
     return conversions_dict[variable]
 #------------------------------------------------------------------------------
 
@@ -259,6 +300,9 @@ def calculate_variable_from_std_frame(variable, df):
         }
 
     func = func_dict[variable]
-    args = {arg: df[arg] for arg in args_dict[variable]}
+    try:
+        args = {arg: df[arg] for arg in args_dict[variable]}
+    except KeyError:
+        breakpoint()
     return func(**args)
 #------------------------------------------------------------------------------

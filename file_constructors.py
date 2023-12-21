@@ -140,7 +140,10 @@ class TableMerger():
             units = converts_df.loc[
                 converts_df.translation_name==variable, 'site_units'
                 ].item()
-            func = mf.convert_variable(variable=variable)
+            std_name = converts_df.loc[
+                converts_df.translation_name==variable, 'standard_name'
+                ].item()
+            func = mf.convert_variable(variable=std_name)
             df[variable] = data.apply(func, from_units=units)
     #--------------------------------------------------------------------------
 
@@ -164,9 +167,12 @@ class TableMerger():
             limits = self.var_map.get_variable_limits(variable=var)
             if not len(limits):
                 continue
-            filter_bool = (
-                (df[var]<limits.Min.item())|(df[var]>limits.Max.item())
-                )
+            try:
+                filter_bool = (
+                    (df[var]<limits.Min.item())|(df[var]>limits.Max.item())
+                    )
+            except ValueError:
+                breakpoint()
             df.loc[filter_bool, var] = np.nan
     #--------------------------------------------------------------------------
 

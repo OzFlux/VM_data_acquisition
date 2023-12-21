@@ -45,11 +45,13 @@ class DataHandler():
         rslt = _get_handler_elements(file=file, concat_files=concat_files)
         for key, value in rslt.items():
             setattr(self, key, value)
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_conditioned_data(self,
-            usecols=None, monotonic_index=False, raise_if_dupe_index=False,
-            drop_non_numeric=False, resample_intvl=None
+            usecols=None, output_format=None, drop_non_numeric=False,
+            monotonic_index=False, resample_intvl=None,
+            raise_if_dupe_index=False
             ):
         """
         Generate a conditioned version of the data. Duplicate data are dropped.
@@ -61,19 +63,22 @@ class DataHandler():
             the columns are renamed, with the mapping from existing to new
             defined by the key (old name): value (new_name) pairs.
             The default is None.
-        monotonic_index : bool, optional
-            Align the data to a monotonic index. The default is False.
-        raise_if_dupe_index : bool, optional
-            Raise an error if duplicate indices are found with non-duplicate
-            data. The default is False.
+        output_format : str, optional
+            The format for data output (None, TOA5 or EddyPro).
+            The default is None.
         drop_non_numeric : bool, optional
             Purge the non-numeric columns from the conditioned data. If false,
             the non-numeric columns will be included even if excluded from
             usecols. If true they will be dropped even if included in usecols.
             The default is False.
+        monotonic_index : bool, optional
+            Align the data to a monotonic index. The default is False.
         resample_intvl : date_offset, optional
             The time interval to which the data should be resampled.
             The default is None.
+        raise_if_dupe_index : bool, optional
+            Raise an error if duplicate indices are found with non-duplicate
+            data. The default is False.
 
         Raises
         ------
@@ -83,13 +88,15 @@ class DataHandler():
         Returns
         -------
         pd.core.frame.DataFrame
-            Dataframe with altered data (returns the existing data if all
-                                         options are default).
+            Dataframe with altered data.
 
         """
 
-        # Check for duplicate indices (ie. where records aren't duplicated
-        # but index is) and create duplicates mask
+        # Apply column subset and rename
+        subset_list, rename_dict = self._subset_or_translate(usecols=usecols)
+        output_data = self.data[subset_list].rename(rename_dict, axis=1)
+
+        # Apply duplicate mask
         dupe_records = self.get_duplicate_records()
         dupe_indices = self.get_duplicate_indices()
         if any(dupe_indices) and raise_if_dupe_index:
@@ -97,23 +104,166 @@ class DataHandler():
                 'Duplicate indices with non-duplicate data!'
                 )
         dupes_mask = dupe_indices | dupe_records
+        output_data = output_data.loc[~dupes_mask]
 
-        # Apply duplicate mask, column subset and rename
-        output_data = (
-            self.subset_or_translate_data(
-                usecols=usecols,
-                drop_non_numeric=drop_non_numeric,
-                )
-            .loc[~dupes_mask]
-            )
-
-        # Resample (use the existing interval for monotonic index)
+        # Do the resampling
         if monotonic_index and not resample_intvl:
             resample_intvl = f'{self.interval}T'
         if resample_intvl:
-            return output_data.resample(resample_intvl).interpolate(limit=1)
+            output_data = output_data.resample(resample_intvl).asfreq()
 
+        # Convert the file format (just fill date fields if no change in format)
+        self._format_data_as(data=output_data, file_type=output_format)
+
+        # Drop non-numeric cols
+        if drop_non_numeric:
+            for var in self._configs['non_numeric_cols']:
+                try:
+                    output_data.drop(var, axis=1, inplace=True)
+                except KeyError:
+                    pass
+
+        # Return data
         return output_data
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _format_data_as(self, data, file_type):
+        """
+        Reformat the data depending on type and fill all dates
+        (regardless of type)
+
+        Parameters
+        ----------
+        data : pd.core.frame.DataFrame
+            The data.
+        file_type : str
+            The type of file (must be either "TOA5" or "EddyPro").
+
+        Returns
+        -------
+        None.
+
+
+        """
+
+        # If file type is None, set to self.file_type
+        if file_type is None:
+            file_type = self.file_type
+
+        # Get the output format date variables
+        dt_vars = (
+            io.get_file_type_configs(file_type=file_type)
+            ['time_variables']
+            )
+
+        # If file type not changing, remove the time variables;
+        # If it is changing, drop all file format-specific variables
+        if file_type == self.file_type:
+            drop_vars = self._configs['time_variables'].keys()
+        else:
+            drop_vars = self._configs['non_numeric_cols']
+        data.drop(
+            drop_vars,
+            axis=1,
+            inplace=True
+            )
+
+        # Get the date output formatter and drop new dates into file
+        formatter = io.get_formatter(file_type=file_type, which='write_date')
+        date_series = pd.Series(data.index.to_pydatetime(), index=data.index)
+        for dt_var in dt_vars.keys():
+            series = date_series.apply(formatter, which=dt_var)
+            data.insert(dt_vars[dt_var], dt_var, series)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_conditioned_headers(
+            self, usecols=None, output_format=None, drop_non_numeric=False
+            ):
+        """
+
+
+        Parameters
+        ----------
+        usecols : list or dict, optional
+            The columns to include in the output. If a dict is passed, then
+            the columns are renamed, with the mapping from existing to new
+            defined by the key (old name): value (new_name) pairs.
+            The default is None.
+        output_format : str, optional
+            The format for header output (None, TOA5 or EddyPro).
+            The default is None.
+        drop_non_numeric : bool, optional
+            Purge the non-numeric headers from the conditioned data. If false,
+            the non-numeric headers will be included even if excluded from
+            usecols. If true they will be dropped even if included in usecols.
+            The default is False.
+
+        Returns
+        -------
+        output_headers : pd.core.frame.DataFrame
+            Dataframe with altered headers.
+
+        """
+
+        # Apply column subset and rename
+        subset_list, rename_dict = self._subset_or_translate(usecols=usecols)
+        output_headers = self.headers.loc[subset_list].rename(rename_dict)
+
+        # Convert the date fields (leave them if no change in format)
+        output_headers = self._format_headers_as(
+            headers=output_headers, file_type=output_format
+            )
+
+        # Drop non-numeric cols
+        if drop_non_numeric:
+            for var in self._configs['non_numeric_cols']:
+                try:
+                    output_headers.drop(var, inplace=True)
+                except KeyError:
+                    pass
+
+        return output_headers
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _format_headers_as(self, headers, file_type):
+        """
+        Returns the unaltered headers unless the input format is EddyPro and the
+        output format is TOA5.
+
+        Parameters
+        ----------
+        headers : pd.core.frame.DataFrame
+            The file headers.
+        file_type : str
+            The type of file (must be either "TOA5" or "EddyPro").
+
+        Returns
+        -------
+        pd.core.frame.DataFrame
+            The file headers, either unchanged or formatted to look like TOA5.
+
+        """
+
+        if file_type is None:
+            file_type = self.file_type
+        if file_type == self.file_type:
+            return headers
+        if file_type == 'TOA5':
+            return (
+                pd.concat([
+                    pd.DataFrame(
+                        data='TS',
+                        index=pd.Index(['TIMESTAMP'], name='variable'),
+                        columns=['units']
+                        ),
+                        headers
+                        ])
+                    .assign(sampling='')
+                    .drop(self._configs['non_numeric_cols'])
+                    )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -383,114 +533,33 @@ class DataHandler():
 
     #--------------------------------------------------------------------------
     def write_conditioned_data(
-            self, abs_file_path, output_format=None, **kwargs
+            self, abs_file_path, usecols=None, output_format=None,
+            drop_non_numeric=False, **kwargs
             ):
 
-        # Get data and headers
-        data = self.get_conditioned_data(**kwargs)
-        headers = self.subset_or_translate_headers(**kwargs)
-
-        # If no output format specified, write with native format
         if output_format is None:
             output_format = self.file_type
 
-        # Configure the output headers and data
-        # ... for TOA5
-        if self.file_type == 'TOA5':
-
-            # ... to TOA5
-            if output_format == 'TOA5':
-                header_lines = _format_TOA5_output_headers(
-                    info=self.file_info,
-                    headers=headers
-                    )
-
-            # ... to EddyPro (Why?)
-            if output_format == 'EddyPro':
-                raise NotImplementedError('No!')
-
-        # ... for EddyPro
-        elif self.file_type == 'EddyPro':
-
-            # ... to EddyPro
-            if output_format == 'EddyPro':
-                header_lines = _format_EddyPro_output_headers(
-                    info=self.file_info,
-                    headers=headers
-                    )
-
-            # ... to TOA5
-            if output_format == 'TOA5':
-                header_lines = _convert_EddyPro_to_TOA5_headers(
-                    info=self.file_info,
-                    headers=headers
-                    )
-                data = data.reset_index()
-
-        # If a nonsensical argument passed for file_TYPE, raise error
-        else:
-
-            raise KeyError('File type must be either TOA5 or EddyPro!')
-
-        # Write everything to file
-        _write_data_to_file(
-            data=data,
-            header_lines=header_lines,
-            output_format=output_format,
-            abs_file_path=abs_file_path
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_conditioned_data_2(
-            self, abs_file_path, output_format=None, **kwargs
-            ):
-
-        # Get data and headers
-        data = self.get_conditioned_data(**kwargs)
-        headers = self.subset_or_translate_headers(**kwargs)
-
-        # If no output format specified, write with native format
-        if output_format is None:
-            output_format = self.file_type
-
-        io.write_it(
-            data=data,
-            headers=headers,
-            output_format=output_format,
+        io.write_data_to_file(
+            headers=self.get_conditioned_headers(
+                usecols=usecols,
+                output_format=output_format,
+                drop_non_numeric=drop_non_numeric,
+                ),
+            data=self.get_conditioned_data(
+                usecols=usecols,
+                output_format=output_format,
+                drop_non_numeric=drop_non_numeric,
+                **kwargs
+                ),
             abs_file_path=abs_file_path,
+            output_format=output_format,
             info=self.file_info
             )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def subset_or_translate_data(self, usecols=None, drop_non_numeric=False):
-
-        subset_list, rename_dict = self._parse_usecols(
-            usecols=usecols,
-            drop_non_numeric=drop_non_numeric
-            )
-        return self.data[subset_list].rename(rename_dict, axis=1)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def subset_or_translate_headers(self, usecols=None, drop_non_numeric=False):
-
-        subset_list, rename_dict = self._parse_usecols(
-            usecols=usecols,
-            drop_non_numeric=drop_non_numeric
-            )
-        return (
-            self.headers
-            .T
-            [subset_list]
-            .rename(rename_dict, axis=1)
-            .T
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _parse_usecols(self, usecols, drop_non_numeric):
+    def _subset_or_translate(self, usecols):
 
         # Set the subsetting list and rename dict, depending on type
         if usecols is None:
@@ -502,20 +571,18 @@ class DataHandler():
         else:
             raise TypeError('usecols arg must be None, list or dict')
 
-        # Get the file-specific critical variables and purge from the subset
-        # list and rename dictionary.
+        # Get the file-specific critical variables, keep them in the column
+        # list and purge from the rename dictionary!
         critical_cols = self._configs['non_numeric_cols']
-        subset_list = [x for x in subset_list if not x in critical_cols]
+        subset_list = (
+            self._configs['non_numeric_cols'] +
+            [col for col in subset_list if not col in critical_cols]
+            )
         for key in critical_cols:
             try:
                 rename_dict.pop(key, None)
             except KeyError:
-                next
-
-        # If not dropping non-numeric data, put it at the start (even if not
-        # in usecols)
-        if drop_non_numeric is False:
-            subset_list = critical_cols + subset_list
+                pass
 
         # Return the subset list and the renaming dictionary
         return subset_list, rename_dict
@@ -526,60 +593,6 @@ class DataHandler():
 ###############################################################################
 ### FUNCTIONS ###
 ###############################################################################
-
-#------------------------------------------------------------------------------
-def _convert_EddyPro_to_TOA5_headers(info, headers):
-
-    new_headers = (
-        pd.concat([
-            pd.DataFrame(
-                data='TS',
-                index=pd.Index(['TIMESTAMP'], name='variable'),
-                columns=['units']
-                ),
-            headers
-            ])
-        )
-    new_headers['sampling'] = ''
-    return _format_TOA5_output_headers(
-        info=info, headers=new_headers
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _format_EddyPro_output_headers(info, headers):
-
-    headers_no_idx = headers.reset_index()
-    formatter = io.get_formatter(file_type='EddyPro', which='write')
-    lists = []
-    for var in headers_no_idx.columns:
-        lists.append(formatter(headers_no_idx[var]))
-    return lists
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _format_TOA5_output_headers(info, headers):
-
-    headers_no_idx = headers.reset_index()
-    formatter = io.get_formatter(file_type='TOA5', which='write')
-    lists = [formatter(list(info.values()))]
-    for var in headers_no_idx.columns:
-        lists.append(formatter(headers_no_idx[var]))
-    return lists
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _write_data_to_file(data, header_lines, output_format, abs_file_path):
-
-    file_configs = io.get_file_type_configs(file_type=output_format)
-    with open(abs_file_path, 'w', newline='\n') as f:
-        for line in header_lines:
-            f.write(line)
-        data.to_csv(
-            f, header=False, index=False, na_rep=file_configs['na_values'],
-            sep=file_configs['separator'], quoting=file_configs['quoting']
-            )
-#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def _get_handler_elements(file, concat_files=False):
@@ -614,7 +627,7 @@ def _get_handler_elements(file, concat_files=False):
 
     # If concat_list has no elements, get single file data
     if len(concat_list) == 0:
-        fallback = False if concat_files == False else True
+        fallback = False if not concat_files else True
         data_dict = _get_single_file_data(file=file, fallback=fallback)
 
     # If concat_list has elements, use the concatenator
@@ -673,4 +686,26 @@ def _get_single_file_data(file, fallback=False):
         'concat_report': [] if not fallback else ['No eligible files found!'],
         '_configs': configs
         }
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _check_io_implemented(input_format, output_format=None):
+
+    configs = io.get_file_type_configs()
+    if not input_format in configs:
+        raise NotImplementedError(
+            f'Input format {input_format} is not supported!'
+            )
+
+    if not output_format:
+        return
+
+    if not output_format in configs:
+        raise NotImplementedError(
+            f'Output format {output_format} is not supported!'
+            )
+
+    if input_format == 'TOA5':
+        if output_format == 'EddyPro':
+            raise NotImplementedError('No!')
 #------------------------------------------------------------------------------

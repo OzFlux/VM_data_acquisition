@@ -32,6 +32,7 @@ import pandas as pd
 sys.path.append(
     str(pathlib.Path(__file__).parent.parent.resolve() / 'profile')
     )
+import eddy_pro_concatenator as epc
 import file_constructors as fc
 import paths_manager as pm
 import process_10hz_data as ptd
@@ -148,6 +149,11 @@ class TasksManager():
 
         tasks_dict = {
 
+            'concat_EddyPro_data': {
+                'func': concat_EddyPro_data,
+                'args': site_only
+                },
+
             'generate_L1_excel': {
                 'func': generate_L1_excel,
                 'args': site_only
@@ -226,6 +232,22 @@ class TasksManager():
 
 #------------------------------------------------------------------------------
 ### FUNCTIONS ###
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def concat_EddyPro_data(site):
+
+    slave_path = PathsManager.get_local_path(
+        resource='data', site='CumberlandPlain', stream='flux_slow'
+        )
+    master_file = slave_path / 'EP_MASTER.txt'
+    try:
+        epc.main(master_file=master_file, slave_path=slave_path)
+    except FileNotFoundError:
+        epc.main(slave_path=slave_path)
+    finally:
+        pass
+
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

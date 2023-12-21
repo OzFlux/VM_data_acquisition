@@ -5,9 +5,6 @@ Created on Thu Oct 21 20:13:00 2021
 
 @author: imchugh
 
-Note - the merge function needs to be checked to ensure that the mergin of data
-and headers is being done safely! It probably needs refactoring, since is is
-not clear how this is happening!
 """
 
 ### Standard modules ###
@@ -21,6 +18,7 @@ import sys
 
 ### Custom modules ###
 import file_handler as fh
+import file_io as io
 import met_functions as mf
 import paths_manager as pm
 import toa5_handler as toa5
@@ -39,275 +37,275 @@ SITE_DETAILS = sd.site_details()
 ### CLASSES ###
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-class TableMerger():
+# #------------------------------------------------------------------------------
+# class TableMerger():
 
-    def __init__(self, site, concat_backups=True):
-        """
-        Class to generate a standardised dataset from source tables; note -
-        currently contains a hack to stop Tumbarumba being processed in
-        60-minute blocks (but it should be - seems raw data from the Campbell
-                          system is only running at 30)
+#     def __init__(self, site, concat_backups=True):
+#         """
+#         Class to generate a standardised dataset from source tables; note -
+#         currently contains a hack to stop Tumbarumba being processed in
+#         60-minute blocks (but it should be - seems raw data from the Campbell
+#                           system is only running at 30)
 
-        Parameters
-        ----------
-        site : str
-            Name of site for which to merge tables.
+#         Parameters
+#         ----------
+#         site : str
+#             Name of site for which to merge tables.
 
-        Returns
-        -------
-        None.
+#         Returns
+#         -------
+#         None.
 
-        """
+#         """
 
-        self.site = site
-        self.path = PATHS.get_local_path(
-            resource='data', stream='flux_slow', site=site
-            )
-        if not site == 'Tumbarumba':
-            self.time_step = int(SITE_DETAILS.get_single_site_details(
-                site=site, field='time_step'
-                ))
-        else:
-            self.time_step = 30
-        self.concat_backups = concat_backups
-        self.var_map = vm.mapper(site=site)
+#         self.site = site
+#         self.path = PATHS.get_local_path(
+#             resource='data', stream='flux_slow', site=site
+#             )
+#         if not site == 'Tumbarumba':
+#             self.time_step = int(SITE_DETAILS.get_single_site_details(
+#                 site=site, field='time_step'
+#                 ))
+#         else:
+#             self.time_step = 30
+#         self.concat_backups = concat_backups
+#         self.var_map = vm.mapper(site=site)
 
-    #--------------------------------------------------------------------------
-    def get_table_data(self, file):
-        """
-        Get the data for a particular table
+#     #--------------------------------------------------------------------------
+#     def get_table_data(self, file):
+#         """
+#         Get the data for a particular table
 
-        Parameters
-        ----------
-        file : str
-            Name of file for which to get data.
+#         Parameters
+#         ----------
+#         file : str
+#             Name of file for which to get data.
 
-        Returns
-        -------
-        df : pd.core.frame.DataFrame
-            Dataframe containing data with names converted to standard names,
-            units converted to standard units and broad range limits applied
-            (NOT a substitute for QC, just an aid for plotting).
+#         Returns
+#         -------
+#         df : pd.core.frame.DataFrame
+#             Dataframe containing data with names converted to standard names,
+#             units converted to standard units and broad range limits applied
+#             (NOT a substitute for QC, just an aid for plotting).
 
-        """
+#         """
 
-        # Get the handler and the name conversion scheme (as dict)
-        handler = fh.DataHandler(
-            file=self.path / file, concat_files=self.concat_backups
-            )
+#         # Get the handler and the name conversion scheme (as dict)
+#         handler = fh.DataHandler(
+#             file=self.path / file, concat_files=self.concat_backups
+#             )
 
-        # Pull in the data and rename it (passing the dictionary containing the
-        # name mapping will automatically rename it - see toa5_handler)
-        df = (
-            handler.get_conditioned_data(
-                usecols=self.var_map.map_variable_translation(file=file),
-                monotonic_index=True,
-                drop_non_numeric=True,
-                resample_intvl=f'{self.time_step}T'
-                )
-            )
+#         # Pull in the data and rename it (passing the dictionary containing the
+#         # name mapping will automatically rename it - see toa5_handler)
+#         df = (
+#             handler.get_conditioned_data(
+#                 usecols=self.var_map.map_variable_translation(file=file),
+#                 monotonic_index=True,
+#                 drop_non_numeric=True,
+#                 resample_intvl=f'{self.time_step}T'
+#                 )
+#             )
 
-        # Apply unit conversion and range limits, and return
-        self._do_unit_conversions(df=df)
-        self._apply_limits(df=df)
-        return df
-    #--------------------------------------------------------------------------
+#         # Apply unit conversion and range limits, and return
+#         self._do_unit_conversions(df=df)
+#         self._apply_limits(df=df)
+#         return df
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _do_unit_conversions(self, df):
-        """
-        Convert from site-specific measurement units to network standard.
+#     #--------------------------------------------------------------------------
+#     def _do_unit_conversions(self, df):
+#         """
+#         Convert from site-specific measurement units to network standard.
 
-        Parameters
-        ----------
-        df : pd.core.frame.DataFrame
-            Dataframe to which to apply conversions.
+#         Parameters
+#         ----------
+#         df : pd.core.frame.DataFrame
+#             Dataframe to which to apply conversions.
 
-        Returns
-        -------
-        None.
+#         Returns
+#         -------
+#         None.
 
-        """
+#         """
 
-        # Get the list of variables requiring conversion for iteration
-        convert_list = self.var_map.get_variables_for_conversion()
+#         # Get the list of variables requiring conversion for iteration
+#         convert_list = self.var_map.get_variables_for_conversion()
 
-        # Do the conversions if any (get conversion functions from met_functions.py)
-        for variable in convert_list:
-            if not variable in df.columns:
-                continue
-            data = df[variable]
-            attrs = self.var_map.get_variable_attributes(variable=variable)
-            units = attrs.site_units
-            func = mf.convert_variable(variable=attrs.standard_name)
-            df[variable] = data.apply(func, from_units=units)
-    #--------------------------------------------------------------------------
+#         # Do the conversions if any (get conversion functions from met_functions.py)
+#         for variable in convert_list:
+#             if not variable in df.columns:
+#                 continue
+#             data = df[variable]
+#             attrs = self.var_map.get_variable_attributes(variable=variable)
+#             units = attrs.site_units
+#             func = mf.convert_variable(variable=attrs.standard_name)
+#             df[variable] = data.apply(func, from_units=units)
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _apply_limits(self, df):
-        """
-        Apply range limits based on those specified in the mapping spreadsheet.
+#     #--------------------------------------------------------------------------
+#     def _apply_limits(self, df):
+#         """
+#         Apply range limits based on those specified in the mapping spreadsheet.
 
-        Parameters
-        ----------
-        df : pd.core.frame.DataFrame
-            Dataframe to which to apply limits.
+#         Parameters
+#         ----------
+#         df : pd.core.frame.DataFrame
+#             Dataframe to which to apply limits.
 
-        Returns
-        -------
-        None.
+#         Returns
+#         -------
+#         None.
 
-        """
+#         """
 
-        for variable in df.columns:
-            attrs = self.var_map.get_variable_attributes(
-                variable=variable,
-                source_field='translation_name'
-                )
-            if np.isnan(attrs.Min) or np.isnan(attrs.Max):
-                continue
-            filter_bool = (
-                (df[variable] < attrs.Min.item()) |
-                (df[variable] > attrs.Max.item())
-                )
-            df.loc[filter_bool, variable] = np.nan
-    #--------------------------------------------------------------------------
+#         for variable in df.columns:
+#             attrs = self.var_map.get_variable_attributes(
+#                 variable=variable,
+#                 source_field='translation_name'
+#                 )
+#             if np.isnan(attrs.Min) or np.isnan(attrs.Max):
+#                 continue
+#             filter_bool = (
+#                 (df[variable] < attrs.Min.item()) |
+#                 (df[variable] > attrs.Max.item())
+#                 )
+#             df.loc[filter_bool, variable] = np.nan
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def merge_tables(self):
-        """
-        Pull together variables from different tables, align to encapsulating
-        datetimeindex (empty data is NaN) and add requisite variables that are
-        missing.
+#     #--------------------------------------------------------------------------
+#     def merge_tables(self):
+#         """
+#         Pull together variables from different tables, align to encapsulating
+#         datetimeindex (empty data is NaN) and add requisite variables that are
+#         missing.
 
-        Returns
-        -------
-        df : pd.core.frame.DataFrame
-            Dataframe containing merged files.
+#         Returns
+#         -------
+#         df : pd.core.frame.DataFrame
+#             Dataframe containing merged files.
 
-        """
+#         """
 
-        df_list = []
-        for file in self.var_map.get_file_list():
-            df_list.append(self.get_table_data(file=file))
-        date_idx = pd.date_range(
-            start = np.array([x.index[0].to_pydatetime() for x in df_list]).min(),
-            end = np.array([x.index[-1].to_pydatetime() for x in df_list]).max(),
-            freq=f'{self.time_step}T'
-            )
-        date_idx.name = 'TIMESTAMP'
-        df = pd.concat(
-            [this_df.reindex(date_idx) for this_df in df_list],
-            axis=1
-            )
-        self._make_missing_variables(df=df)
-        return df
-    #--------------------------------------------------------------------------
+#         df_list = []
+#         for file in self.var_map.get_file_list():
+#             df_list.append(self.get_table_data(file=file))
+#         date_idx = pd.date_range(
+#             start = np.array([x.index[0].to_pydatetime() for x in df_list]).min(),
+#             end = np.array([x.index[-1].to_pydatetime() for x in df_list]).max(),
+#             freq=f'{self.time_step}T'
+#             )
+#         date_idx.name = 'TIMESTAMP'
+#         df = pd.concat(
+#             [this_df.reindex(date_idx) for this_df in df_list],
+#             axis=1
+#             )
+#         self._make_missing_variables(df=df)
+#         return df
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def _make_missing_variables(self, df):
-        """
-        Use externally-called meteorological functions to create missing
-        variables.
+#     #--------------------------------------------------------------------------
+#     def _make_missing_variables(self, df):
+#         """
+#         Use externally-called meteorological functions to create missing
+#         variables.
 
-        Parameters
-        ----------
-        df : pd.core.frame.DataFrame
-            Dataframe containing the required variables to generate those missing.
+#         Parameters
+#         ----------
+#         df : pd.core.frame.DataFrame
+#             Dataframe containing the required variables to generate those missing.
 
-        Returns
-        -------
-        None.
+#         Returns
+#         -------
+#         None.
 
-        """
+#         """
 
-        missing_vars = self.var_map.get_missing_variables()
-        for variable in missing_vars:
-            df[variable] = (
-                mf.calculate_variable_from_std_frame(variable=variable, df=df)
-                )
-    #--------------------------------------------------------------------------
+#         missing_vars = self.var_map.get_missing_variables()
+#         for variable in missing_vars:
+#             df[variable] = (
+#                 mf.calculate_variable_from_std_frame(variable=variable, df=df)
+#                 )
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def merge_headers(self):
-        """
-        Merge the headers of the separate data tables.
+#     #--------------------------------------------------------------------------
+#     def merge_headers(self):
+#         """
+#         Merge the headers of the separate data tables.
 
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            A dataframe of headers, units and sampling.
+#         Returns
+#         -------
+#         pd.core.frame.DataFrame
+#             A dataframe of headers, units and sampling.
 
-        """
+#         """
 
-        df_list = [
-            self.translate_header(file)
-            for file in self.var_map.get_file_list()
-            ]
-        missing_df = self.var_map.get_missing_variables()
-        breakpoint()
-        df_list.append(
-            missing_df[['translation_name', 'standard_units']]
-            .assign(sampling='')
-            .reset_index(drop=True)
-            .set_index(keys='translation_name')
-            .rename({'standard_units': 'units'}, axis=1)
-            )
-        return pd.concat(df_list)
-    #--------------------------------------------------------------------------
+#         df_list = [
+#             self.translate_header(file)
+#             for file in self.var_map.get_file_list()
+#             ]
+#         missing_df = self.var_map.get_missing_variables()
+#         breakpoint()
+#         df_list.append(
+#             missing_df[['translation_name', 'standard_units']]
+#             .assign(sampling='')
+#             .reset_index(drop=True)
+#             .set_index(keys='translation_name')
+#             .rename({'standard_units': 'units'}, axis=1)
+#             )
+#         return pd.concat(df_list)
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def translate_header(self, file):
-        """
-        Translate the header variable names from what is in the raw files to
-        converted names and units.
+#     #--------------------------------------------------------------------------
+#     def translate_header(self, file):
+#         """
+#         Translate the header variable names from what is in the raw files to
+#         converted names and units.
 
-        Parameters
-        ----------
-        file : str
-            Name of file for which to retrieve translated header.
+#         Parameters
+#         ----------
+#         file : str
+#             Name of file for which to retrieve translated header.
 
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            DESCRIPTION.
+#         Returns
+#         -------
+#         pd.core.frame.DataFrame
+#             DESCRIPTION.
 
-        """
+#         """
 
-        handler = fh.DataHandler(
-            file=self.path / file, concat_files=self.concat_backups
-            )
-        return handler.subset_or_translate_headers(
-            usecols=self.var_map.map_variable_translation(file=file),
-            drop_non_numeric=True
-            )
-    #--------------------------------------------------------------------------
+#         handler = fh.DataHandler(
+#             file=self.path / file, concat_files=self.concat_backups
+#             )
+#         return handler.subset_or_translate_headers(
+#             usecols=self.var_map.map_variable_translation(file=file),
+#             drop_non_numeric=True
+#             )
+#     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def make_output_file(self):
-        """
-        Create an output file that looks like a TOA5 file.
+#     #--------------------------------------------------------------------------
+#     def make_output_file(self):
+#         """
+#         Create an output file that looks like a TOA5 file.
 
-        Returns
-        -------
-        None.
+#         Returns
+#         -------
+#         None.
 
-        """
+#         """
 
-        info_header = [
-            'TOA5', self.site, 'CR1000', '9999', 'cr1000.std.99.99',
-            'CPU:noprogram.cr1', '9999', 'merged']
-        data = self.merge_tables()
-        header = self.merge_headers()
-        constructor = toa5.TOA5_file_constructor(
-            data=data, info_header=info_header, units=header.units.tolist(),
-            samples=header.sampling.tolist()
-            )
-        constructor.write_output_file(dest=self.path / f'{self.site}_merged_std.dat')
-    #--------------------------------------------------------------------------
+#         info_header = [
+#             'TOA5', self.site, 'CR1000', '9999', 'cr1000.std.99.99',
+#             'CPU:noprogram.cr1', '9999', 'merged']
+#         data = self.merge_tables()
+#         header = self.merge_headers()
+#         constructor = toa5.TOA5_file_constructor(
+#             data=data, info_header=info_header, units=header.units.tolist(),
+#             samples=header.sampling.tolist()
+#             )
+#         constructor.write_output_file(dest=self.path / f'{self.site}_merged_std.dat')
+#     #--------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
+# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class L1Constructor():
@@ -446,111 +444,322 @@ class L1Constructor():
 ### BEGIN FILE MERGER FUNCTIONS ###
 ###############################################################################
 
-#------------------------------------------------------------------------------
-def merge_main(site):
 
-    # Get all the things
-    variable_map = vm.mapper(site=site)
-    data_list, headers_list = [], []
+class FileMerger():
 
-    # Iterate through files...
-    for file in variable_map.get_file_list(abs_path=True):
+    #--------------------------------------------------------------------------
+    def __init__(self, site):
 
-        # Get the file handler, concatenate files and write report
-        handler = fh.DataHandler(file=file, concat_files=True)
-        try:
-            handler.write_concatenation_report(
-                abs_file_path=variable_map.path /
-                f'merge_report_{file.stem}.txt'
-                )
-        except KeyError:
-            pass # Put logging in here
+        self.var_map = vm.mapper(site=site)
+    #--------------------------------------------------------------------------
 
-        # Get the variable translation map
-        translation_dict = (
-            variable_map.map_variable_translation(file=file.name)
+    #--------------------------------------------------------------------------
+    def get_data_and_headers(self, file, write_concatenation_report=False):
+
+        # Check the file exists, and get the handler
+        if not file in self.var_map.get_file_list():
+            raise FileNotFoundError('File not listed!')
+        handler = fh.DataHandler(
+            file=self.var_map.path / file, concat_files=True
             )
+        if write_concatenation_report:
+            self._write_concatenation_report(handler=handler)
 
-        # Get the data with the translated columns and do requisite conversions
-        data_list.append(
+
+        # Get the dictionary to map site anmes to standard names
+        translation_dict = self.var_map.map_variable_translation(file=file)
+
+        # Use handler, variable map and met functions to translate
+        # data and apply conversions
+        data = (
             handler.get_conditioned_data(
                 usecols=translation_dict,
                 monotonic_index=True,
                 drop_non_numeric=True,
+                resample_intvl='30T'
                 )
             .pipe(
-                _do_unit_conversions,
-                conversion_variables=
-                variable_map.get_variables_for_conversion(
-                    source_field='translation_name',
-                    file=file.name
+                self._do_unit_conversions,
+                conversion_frame=self.var_map.get_variables_to_convert(
+                    source_field='translation_name', file=file
                     )
-                 )
-            )
-
-        # Get the headers with the translated rows
-        headers_list.append(
-            handler.subset_or_translate_headers(
-                usecols=translation_dict,
-                drop_non_numeric=True
                 )
             )
 
-    # Finally, concatenate the data and header lists,
-    # construct_missing variables and apply limits
-    return _construct_missing_variables(
-        df=pd.concat(data_list, axis=1),
-        headers=pd.concat(headers_list),
-        variable_map=variable_map
-        )
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _apply_limits(df, variable_map):
-
-    for variable in df.columns:
-        attrs = variable_map.get_variable_attributes(
-            variable=variable,
-            source_field='translation_name'
+        # Use handler to translate headers
+        headers = handler.get_conditioned_headers(
+            usecols=translation_dict,
+            drop_non_numeric=True
             )
-        filter_bool = (
-            (df[variable] < attrs.Min.item()) |
-            (df[variable] > attrs.Max.item())
+
+        return data, headers
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_all(self):
+
+        # Iterate through the file list and get data and headers
+        data_list, headers_list = [], []
+        for file in self.var_map.get_file_list():
+
+            data, headers = self.get_data_and_headers(file=file)
+            data_list.append(data)
+            headers_list.append(headers)
+
+        # Concatenate the data and header lists, then construct_missing
+        # variables
+        data, headers = self._construct_missing_variables(
+            data=pd.concat(data_list, axis=1),
+            headers=pd.concat(headers_list),
             )
-        df.loc[filter_bool, variable] = np.nan
-    return df
-#------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def _do_unit_conversions(df, conversion_variables):
+        # Apply limits
+        self._apply_limits(data)
 
-    if not conversion_variables:
-        return df
-    for variable in conversion_variables.keys():
-        df[variable] = (
-            df[variable].apply(
-                mf.convert_variable(variable=variable),
-                from_units=conversion_variables[variable]['site_units']
+        # Set output formatting
+        return (
+            self._convert_table_index(data=data),
+            self._convert_headers(headers=headers)
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def merge_all_and_write(self, abs_file_path=None):
+
+        data, headers = self.merge_all()
+        if abs_file_path is None:
+            abs_file_path = (
+                self.var_map.path / f'{self.var_map.site}_merged_test.dat'
                 )
+            io.write_data_to_file(
+                headers=headers,
+                data=data,
+                abs_file_path=abs_file_path
+                )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _write_concatenation_report(self, handler):
+
+        # Write the concatenation report if requested
+        handler.write_concatenation_report(
+            abs_file_path=self.var_map.path /
+            f'merge_report_{self.var_map.path}.txt'
             )
-    return df
-#------------------------------------------------------------------------------
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _do_unit_conversions(self, data, conversion_frame):
+
+        for variable in conversion_frame.index:
+            from_units=conversion_frame.loc[variable, 'site_units']
+            conversion_var = conversion_frame.loc[variable, 'standard_name']
+            conversion_func = mf.convert_variable(conversion_var)
+            data[variable] = data[variable].apply(
+                conversion_func, from_units=from_units
+                )
+        return data
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _construct_missing_variables(self, data, headers):
+
+        missing_variables = self.var_map.get_missing_variables()
+        for variable in missing_variables:
+            data[variable] = (
+                mf.calculate_variable_from_std_frame(variable=variable, df=data)
+                )
+            headers.loc[variable] = {
+                'units':
+                    self.var_map.get_variable_attributes(
+                        variable=variable, source_field='translation_name'
+                        ).standard_units
+                    }
+        return data, headers
+    #--------------------------------------------------------------------------
+
+    #------------------------------------------------------------------------------
+    def _convert_headers(self, headers):
+
+        return pd.concat([
+            pd.DataFrame(
+                data=[['TS', '']],
+                index=pd.Index(['TIMESTAMP'], name='variable'),
+                columns=['units', 'sampling']
+                ),
+            headers
+            ])
+    #------------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _convert_table_index(self, data):
+
+        return data.reset_index().rename({'DATETIME': 'TIMESTAMP'}, axis=1)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _apply_limits(self, data):
+
+        for variable in data.columns:
+            attrs = self.var_map.get_variable_attributes(
+                variable=variable,
+                source_field='translation_name'
+                )
+            filter_bool = (
+                (data[variable] < attrs.Min.item()) |
+                (data[variable] > attrs.Max.item())
+                )
+            data.loc[filter_bool, variable] = np.nan
+    #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _construct_missing_variables(df, headers, variable_map):
 
-    missing_variables = variable_map.get_missing_variables()
-    for variable in missing_variables:
-        df[variable] = (
-            mf.calculate_variable_from_std_frame(variable=variable, df=df)
-            )
-        headers.loc[variable] = {
-            'units':
-                variable_map.get_variable_attributes(
-                    variable=variable, source_field='translation_name'
-                    ).standard_units
-                }
-    return _apply_limits(df=df, variable_map=variable_map), headers
+# #------------------------------------------------------------------------------
+# def merge_main(site, abs_file_path=None, write_concatenation_report=False):
+
+#     # Get all the things
+#     variable_map = vm.mapper(site=site)
+#     data_list, headers_list = [], []
+
+#     # Iterate through files...
+#     for file in variable_map.get_file_list(abs_path=True):
+
+#         # Get the file handler, concatenate files and write report
+#         handler = fh.DataHandler(file=file, concat_files=True)
+
+
+#         # Write concatenation reports if requested
+#         if write_concatenation_report:
+#             try:
+#                 handler.write_concatenation_report(
+#                     abs_file_path=variable_map.path /
+#                     f'merge_report_{file.stem}.txt'
+#                     )
+#             except KeyError:
+#                 pass # Put logging in here
+
+#         # Get the variable translation map
+#         translation_dict = (
+#             variable_map.map_variable_translation(file=file.name)
+#             )
+
+#         # Get the data with the translated columns and do requisite conversions
+#         data_list.append(
+#             handler.get_conditioned_data(
+#                 usecols=translation_dict,
+#                 monotonic_index=True,
+#                 drop_non_numeric=True,
+#                 resample_intvl='30T'
+#                 )
+#             .pipe(
+#                 _do_unit_conversions,
+#                 vars_to_convert=variable_map.get_variables_to_convert(
+#                     source_field='translation_name',
+#                     file=file.name,
+#                     )
+#                  )
+#             )
+
+#         # Get the headers with the translated rows
+#         headers_list.append(
+#             handler.get_conditioned_headers(
+#                 usecols=translation_dict,
+#                 drop_non_numeric=True
+#                 )
+#             )
+
+#     # Finally, concatenate the data and header lists,
+#     # construct_missing variables and apply limits
+#     data, headers = _construct_missing_variables(
+#         df=pd.concat(data_list, axis=1),
+#         headers=pd.concat(headers_list),
+#         variable_map=variable_map
+#         )
+
+#     data = _convert_data(data)
+#     headers = _convert_headers(headers)
+
+#     if not abs_file_path:
+
+#         return data, headers
+
+#     data = data.reset_index().rename({'DATETIME': 'TIMESTAMP'}, axis=1)
+#     io.write_data_to_file(
+#         headers=headers,
+#         data=data.reset_index().rename({'DATETIME': 'TIMESTAMP'}, axis=1),
+#         output_format='TOA5',
+#         abs_file_path=abs_file_path,
+#         )
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def _apply_limits(df, variable_map):
+
+#     for variable in df.columns:
+#         attrs = variable_map.get_variable_attributes(
+#             variable=variable,
+#             source_field='translation_name'
+#             )
+#         filter_bool = (
+#             (df[variable] < attrs.Min.item()) |
+#             (df[variable] > attrs.Max.item())
+#             )
+#         df.loc[filter_bool, variable] = np.nan
+#     return df
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def _do_unit_conversions(df, vars_to_convert):
+
+#     if len(vars_to_convert) == 0:
+#         return df
+#     for variable in vars_to_convert.index:
+#         func = mf.convert_variable(
+#             variable=vars_to_convert.loc[variable, 'standard_name']
+#             )
+#         from_units=vars_to_convert.loc[variable, 'site_units']
+#         df[variable] = df[variable].apply(func, from_units=from_units)
+#     return df
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def _construct_missing_variables(df, headers, variable_map):
+
+#     missing_variables = variable_map.get_missing_variables()
+#     for variable in missing_variables:
+#         df[variable] = (
+#             mf.calculate_variable_from_std_frame(variable=variable, df=df)
+#             )
+#         headers.loc[variable] = {
+#             'units':
+#                 variable_map.get_variable_attributes(
+#                     variable=variable, source_field='translation_name'
+#                     ).standard_units
+#                 }
+#     return _apply_limits(df=df, variable_map=variable_map), headers
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def _convert_data(data):
+
+#     return data.reset_index().rename({'DATETIME': 'TIMESTAMP'}, axis=1)
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+# def _convert_headers(headers):
+
+#     return pd.concat([
+#         pd.DataFrame(
+#             data='TS',
+#             index=pd.Index(['TIMESTAMP'], name='variable'),
+#             columns=['units']
+#             ),
+#         headers
+#         ])
+# #------------------------------------------------------------------------------
+
+# #------------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 
 ###############################################################################
@@ -680,16 +889,17 @@ class SiteStatusConstructor():
         """
 
         local_date_time = self._get_site_time(site=site)
-        merger = TableMerger(site=site)
-        df = merger.merge_tables()
+        var_map = vm.mapper(site=site)
+        file_merger = FileMerger(site=site)
+        df, headers = file_merger.merge_all()
         rslt_list = []
         for variable in df.columns:
             series = df[variable].dropna()
-            var_details = merger.var_map.get_field_from_variable(
-                variable=variable, from_field='translation_name'
+            var_details = var_map.get_variable_attributes(
+                variable=variable, source_field='translation_name'
                 )
-            logger = var_details.logger_name.item()
-            table = var_details.table_name.item()
+            logger = var_details.logger_name
+            table = var_details.table_name
             try:
                 np.isnan(logger)
                 logger = 'Calculated'
