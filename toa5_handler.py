@@ -248,12 +248,12 @@ class single_file_data_handler():
                 local_data.reset_index()['TIMESTAMP'] -
                 local_data.reset_index()['TIMESTAMP'].shift()
                 )
-            .astype('timedelta64[m]')
+            .astype('timedelta64[s]')
             .replace(self.interval_as_num, np.nan)
             .dropna()
             )
         gap_series /= self.interval_as_num
-        unique_gaps = gap_series.unique().astype(int)
+        unique_gaps = gap_series.unique().astype('int64')
         counts = [len(gap_series[gap_series==x]) for x in unique_gaps]
         return (
             pd.DataFrame(

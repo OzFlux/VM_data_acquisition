@@ -340,18 +340,18 @@ class DataHandler():
         local_data = (
             local_data[~dupes]
             .reset_index()
-            ['TIMESTAMP']
+            ['DATETIME']
             )
 
         # Get gaps
         gap_series = (
             (local_data - local_data.shift())
-            .astype('timedelta64[m]')
-            .replace(self.interval_as_num, np.nan)
+            .astype('timedelta64[s]')
+            .replace(self.interval, np.nan)
             .dropna()
             )
-        gap_series /= self.interval_as_num
-        unique_gaps = gap_series.unique().astype(int)
+        gap_series /= self.interval
+        unique_gaps = gap_series.unique().astype('int64')
         counts = [len(gap_series[gap_series==x]) for x in unique_gaps]
         return (
             pd.DataFrame(
@@ -364,7 +364,7 @@ class DataHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_missing_records(self):
+    def get_missing_records(self, raise_if_single_record=False):
         """
         Get simple statistics for missing records
 
@@ -376,6 +376,14 @@ class DataHandler():
 
         """
 
+        if self.interval is None:
+            if raise_if_single_record:
+                raise TypeError('Analysis not applicable to single record!')
+            return {
+                'n_missing': np.nan,
+                '%_missing': np.nan,
+                'gap_distribution': np.nan
+                }
         dupes = self.get_duplicate_indices() | self.get_duplicate_records()
         local_data = self.data[~dupes]
         complete_index = pd.date_range(
@@ -605,6 +613,7 @@ def _get_handler_elements(file, concat_files=False):
     file : str or pathlib.Path
         Absolute path to master file.
     concat_files : boolean or list
+        See concat_files description in __init__ docstring for DataHandler.
 
     Returns
     -------

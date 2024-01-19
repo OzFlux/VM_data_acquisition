@@ -177,9 +177,7 @@ def _integrity_checks(df, non_numeric):
         df = df[~pd.isnull(df.index)]
 
     # Sort the index
-    df.sort_index(inplace=True)
-
-    return df
+    return df.sort_index()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -329,7 +327,7 @@ def get_file_type(file):
                 sep=FILE_CONFIGS[file_type]['separator']
                 )
             [0][0]
-            )
+            ).strip('\"')
         if id_field == FILE_CONFIGS[file_type]['unique_file_id']:
             return file_type
     raise TypeError('Unknown file type!')
@@ -619,6 +617,7 @@ def get_dates(file, file_type=None):
     if not file_type:
         file_type = get_file_type(file)
 
+    # Get the time variables and rows to skip
     time_vars = list(FILE_CONFIGS[file_type]['time_variables'].keys())
     rows_to_skip = list(set(
         [0] +
@@ -627,18 +626,23 @@ def get_dates(file, file_type=None):
     rows_to_skip.remove(FILE_CONFIGS[file_type]['header_lines']['variable'])
     separator = FILE_CONFIGS[file_type]['separator']
 
-    return (
-        pd.read_csv(
-            file,
-            usecols=time_vars,
-            skiprows=rows_to_skip,
-            parse_dates={'DATETIME': time_vars},
-            sep=separator,
-            )
-        .set_index('DATETIME')
-        .index
-        .to_pydatetime()
+    # Get the data
+    df = pd.read_csv(
+        file,
+        usecols=time_vars,
+        skiprows=rows_to_skip,
+        parse_dates={'DATETIME': time_vars},
+        sep=separator,
         )
+
+    # Check the date parser worked - if not, fix it
+    if df.DATETIME.dtype == 'object':
+        df.DATETIME = pd.to_datetime(df.DATETIME, errors='coerce')
+        df.dropna(inplace=True)
+
+    # Return the dates
+    return pd.DatetimeIndex(df.DATETIME).to_pydatetime()
+    # return df.DATETIME.dt.to_pydatetime()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -798,9 +802,10 @@ def get_EddyPro_files(file):
     file_to_parse = _check_file_exists(file=file)
     file_list = list(file_to_parse.parent.glob(f'*{EDDYPRO_SEARCH_STR}.txt'))
     file_list.sort()
-    if not file_list[-1] == file_to_parse:
-        raise RuntimeError('Master concatenation file should be the most recent!')
-    if file_list:
+    # if not file_list[-1] == file_to_parse:
+    #     breakpoint()
+    #     raise RuntimeError('Master concatenation file should be the most recent!')
+    if file in file_list:
         file_list.remove(file_to_parse)
     return file_list
 #------------------------------------------------------------------------------
@@ -847,7 +852,6 @@ def get_file_interval(file, file_type=None):
     # If file type not supplied, detect it.
     if not file_type:
         file_type = get_file_type(file)
-
     return get_datearray_interval(
         datearray=np.unique(np.array(get_dates(file=file, file_type=file_type)))
         )
@@ -875,6 +879,8 @@ def get_datearray_interval(datearray):
 
     """
 
+    if len(datearray) == 1:
+        return None
     datearray = np.unique(datearray)
     deltas, counts = np.unique(datearray[1:] - datearray[:-1], return_counts=True)
     minimum_val = deltas[0].seconds / 60

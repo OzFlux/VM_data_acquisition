@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+max# -*- coding: utf-8 -*-
 """
 Created on Fri Feb 24 14:05:44 2023
 
@@ -9,6 +9,7 @@ Add a way to fill unknown variables with NaN to the function getter
 
 import ephem
 import numpy as np
+import pandas as pd
 from pytz import timezone
 from timezonefinder import TimezoneFinder
 
@@ -20,6 +21,21 @@ CO2_MOL_MASS = 44
 H2O_MOL_MASS = 18
 K = 273.15
 R = 8.3143
+
+#------------------------------------------------------------------------------
+### OTHER STUFF ###
+#------------------------------------------------------------------------------
+
+input_vars = {
+    'es': ['Ta'],
+    'e': ['Ta', 'RH'],
+    'AH_sensor': ['Ta', 'RH', 'ps'],
+    'molar_density': ['Ta', 'ps'],
+    'CO2_mole_fraction': ['CO2_density', 'Ta', 'ps'],
+    'RH': ['Ta', 'AH_sensor', 'ps'],
+    'CO2_density': ['Ta', 'ps', 'CO2'],
+    'ustar': ['Tau', 'rho']
+    }
 
 #------------------------------------------------------------------------------
 ### CLASSES ###
@@ -93,7 +109,17 @@ class UnitConverter():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def convert_CO2(data, from_units='mg/m^2/s'):
+def apply_limits(data, data_min, data_max, inplace=False):
+
+    filter_bool = (data < data_min) | (data > data_max)
+    if inplace:
+        data.loc[filter_bool] = np.nan
+    else:
+        return data.where(~filter_bool, np.nan)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def convert_CO2_flux(data, from_units='mg/m^2/s'):
 
     if from_units == 'mg/m^2/s':
         return data * 1000 / CO2_MOL_MASS
@@ -165,10 +191,11 @@ def convert_temperature(data, from_units='K'):
 def convert_variable(variable):
 
     conversions_dict = {
-        'Fco2': convert_CO2,
+        'Fco2': convert_CO2_flux,
         'Sig_7500': convert_CO2_signal,
         'RH': convert_RH,
         'CO2': convert_CO2_density,
+        'CO2_density': convert_CO2_density,
         'AH_IRGA': convert_H2O_density,
         'AH_sensor': convert_H2O_density,
         'Ta': convert_temperature,
@@ -264,31 +291,7 @@ def get_timezone_utc_offset(tz, date, dst=False):
 #------------------------------------------------------------------------------
 def get_function(variable):
 
-    calculate_dict = {'es': calculate_es,
-                      'e': calculate_e,
-                      'AH_sensor': calculate_AH_from_RH,
-                      'molar_density': calculate_molar_density,
-                      'CO2_mole_fraction': calculate_CO2_mole_fraction,
-                      'RH': calculate_RH_from_AH,
-                      'CO2_density': calculate_CO2_density}
-    return calculate_dict[variable]
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def calculate_variable_from_std_frame(variable, df):
-
-    args_dict = {
-        'es': ['Ta'],
-        'e': ['Ta', 'RH'],
-        'AH_sensor': ['Ta', 'RH', 'ps'],
-        'molar_density': ['Ta', 'ps'],
-        'CO2_mole_fraction': ['CO2_density', 'Ta', 'ps'],
-        'RH': ['Ta', 'AH_sensor', 'ps'],
-        'CO2_density': ['Ta', 'ps', 'CO2'],
-        'ustar': ['Tau', 'rho']
-        }
-
-    func_dict = {
+    calculate_dict = {
         'es': calculate_es,
         'e': calculate_e,
         'AH_sensor': calculate_AH_from_RH,
@@ -298,11 +301,17 @@ def calculate_variable_from_std_frame(variable, df):
         'CO2_density': calculate_CO2_density,
         'ustar': calculate_ustar_from_tau_rho
         }
+    return calculate_dict[variable]
+#------------------------------------------------------------------------------
 
-    func = func_dict[variable]
+#------------------------------------------------------------------------------
+def calculate_variable_from_std_frame(variable, df):
+
     try:
-        args = {arg: df[arg] for arg in args_dict[variable]}
+        func = get_function(variable)
+        args = {arg: df[arg] for arg in input_vars}
+        return func(**args)
     except KeyError:
-        breakpoint()
-    return func(**args)
+        return pd.Series(np.tile(np.nan, len(df)))
+
 #------------------------------------------------------------------------------

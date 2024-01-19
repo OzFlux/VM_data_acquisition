@@ -69,7 +69,8 @@ class mapper():
         self.path = PATHS.get_local_path(
             resource='data', stream='flux_slow', site=site
             )
-        self.site_df = make_site_df(site=site)
+        self.table_df = make_table_df(site=site).drop('site', axis=1)
+        self.site_df = make_site_df(site=site, table_df=self.table_df)
         self._check_files_exist()
 
     #--------------------------------------------------------------------------
@@ -89,6 +90,21 @@ class mapper():
 
     #--------------------------------------------------------------------------
     ### PUBLIC METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_available_variables(self, source_field='site_name', by_file=False):
+
+        local_df = self._get_indexed_df(field=source_field)
+        if not by_file:
+            return local_df[~local_df.Missing].index.tolist()
+
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_df(self):
+
+        return self.site_df.copy()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -113,6 +129,27 @@ class mapper():
         if not abs_path:
             return files
         return [self.path / file for file in files]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_flux_file_attributes(self):
+
+        return self.table_df.loc[self.get_flux_file()]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_attributes(self, file):
+
+        return self.table_df.loc[file]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_flux_file(self, abs_path=False):
+
+        file_name = get_flux_file(site=self.site)
+        if not abs_path:
+            return file_name
+        return self.path / file_name
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -232,7 +269,7 @@ def _check_index_field(field):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def make_site_df(site):
+def make_site_df(site, table_df=None):
     """
     Create the dataframe that contains the data to allow mapping from
     site variable names to standard variable names
@@ -246,7 +283,8 @@ def make_site_df(site):
 
     # Get stuff
     map_path = PATHS.get_local_path(resource='xl_variable_map')
-    table_df = make_table_df(site=site)
+    if table_df is None:
+        table_df = make_table_df(site=site).drop('site', axis=1)
 
     # Create the site dataframe and rename, then drop disabled variables
     site_renamer = {
@@ -320,6 +358,37 @@ def make_site_df(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+def get_flux_file(site):
+    """
+    Get the name of the file containing the flux data.
+
+    Parameters
+    ----------
+    site : str
+        Site for which to return the flux file.
+
+    Returns
+    -------
+    str
+        The file name.
+
+    """
+
+    rslt = (
+        pd.read_excel(
+            io=PATHS.get_local_path(resource='xl_variable_map'),
+            sheet_name='file_list'
+            )
+        .set_index('Site')
+        .loc[site, 'Flux file name']
+        )
+    try:
+        return rslt.dropna().item()
+    except AttributeError:
+        return rslt
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 def make_table_df(site=None):
     """
     Generate a dataframe that ties file names to data tables and logger info
@@ -374,11 +443,13 @@ def make_table_df(site=None):
                  ','.join(
                      f.name for f in io.get_eligible_concat_files(file=file)
                      )
-                 }
+                 } |
+                {'interval': io.get_file_interval(file=file)}
                 for file in df.full_path
                 ],
             index=df.index
             ))
         .set_index(keys='file_name')
+        .sort_index()
         )
 #------------------------------------------------------------------------------
