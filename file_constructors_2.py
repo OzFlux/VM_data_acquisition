@@ -207,7 +207,7 @@ class FileMerger():
         data, headers = self.merge_all()
         if abs_file_path is None:
             abs_file_path = (
-                self.var_map.path / f'{self.var_map.site}_merged_test.dat'
+                self.var_map.path / f'{self.var_map.site}_merged_std.dat'
                 )
             io.write_data_to_file(
                 headers=headers,
