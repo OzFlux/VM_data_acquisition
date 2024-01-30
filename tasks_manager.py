@@ -32,6 +32,7 @@ import pandas as pd
 sys.path.append(
     str(pathlib.Path(__file__).parent.parent.resolve() / 'profile')
     )
+import data_parser as dp
 import eddy_pro_concatenator as epc
 import file_constructors as fc
 import paths_manager as pm
@@ -288,8 +289,10 @@ def generate_merged_file(site):
 
     """
 
-    merger = fc.TableMerger(site=site)
-    merger.make_output_file()
+    # merger = fc.TableMerger(site=site)
+    # merger.make_output_file()
+    merger = dp.SiteDataMerger(site=site)
+    merger.merge_all_as_TOA5()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

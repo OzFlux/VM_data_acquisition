@@ -376,7 +376,7 @@ def write_data_to_file(
         The default is None.
     info : dict, optional
         The file info. Only required if outputting TOA5, and retrieves
-        file type-specific dummy input if not supllied. The default is None.
+        file type-specific dummy input if not supplied. The default is None.
 
     Returns
     -------
@@ -802,9 +802,6 @@ def get_EddyPro_files(file):
     file_to_parse = _check_file_exists(file=file)
     file_list = list(file_to_parse.parent.glob(f'*{EDDYPRO_SEARCH_STR}.txt'))
     file_list.sort()
-    # if not file_list[-1] == file_to_parse:
-    #     breakpoint()
-    #     raise RuntimeError('Master concatenation file should be the most recent!')
     if file in file_list:
         file_list.remove(file_to_parse)
     return file_list
