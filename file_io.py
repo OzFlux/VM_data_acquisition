@@ -580,7 +580,81 @@ def _generic_date_constructor(date_elems):
     return dt.datetime.strptime(' '.join(date_elems), DATE_FORMAT)
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def TOA5ify_data(data, deindex=True):
+    """
 
+
+    Parameters
+    ----------
+    data : TYPE
+        DESCRIPTION.
+    deindex : TYPE, optional
+        DESCRIPTION. The default is True.
+
+    Raises
+    ------
+    TypeError
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
+    if not isinstance(data.index, pd.core.indexes.datetimes.DatetimeIndex):
+        raise TypeError('Passed data must have a DatetimeIndex!')
+    df = data.copy()
+    if 'TIMESTAMP' in data.columns:
+        df.drop('TIMESTAMP', axis=1, inplace=True)
+    df.index.name = 'TIMESTAMP'
+    if not deindex:
+        return df
+    return (
+        pd.concat(
+            [pd.Series(df.index.format(), index=df.index, name=df.index.name),
+             df
+             ],
+            axis=1
+            )
+        .reset_index(drop=True)
+        )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def TOA5ify_headers(headers):
+    """
+
+
+    Parameters
+    ----------
+    headers : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
+    df = headers.copy()
+    if 'sampling' in df.columns:
+        df.sampling.fillna('', inplace=True)
+    else:
+        df = df.assign(sampling='')
+    return (
+        pd.concat([
+            pd.DataFrame(
+                data={'units': 'TS', 'sampling': ''},
+                index=pd.Index(['TIMESTAMP'], name='variable'),
+                ),
+            df
+            ])
+        )
+#------------------------------------------------------------------------------
 
 ###############################################################################
 ### END FILE FORMATTING FUNCTIONS ###

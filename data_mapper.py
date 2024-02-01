@@ -22,7 +22,7 @@ import sys
 import paths_manager as pm
 import file_io as io
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
-import sparql_site_details as sd
+from sparql_site_details import site_details as sd
 
 #------------------------------------------------------------------------------
 ### CONSTANTS ###
@@ -65,7 +65,7 @@ class SiteDataMapper():
         self.table_df = make_table_df(site=site).drop('site', axis=1)
         self.site_df = make_site_df(site=site, table_df=self.table_df)
         self.site_details = (
-            sd.site_details().get_single_site_details('Calperum')
+            sd().get_single_site_details('Calperum')
             )
         self._check_files_exist()
 
@@ -156,9 +156,14 @@ class SiteDataMapper():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_variable_attributes(self, variable, source_field='site_name'):
+    def get_variable_attributes(
+            self, variable, source_field='site_name', return_field=None
+            ):
 
-        return self._get_indexed_df(field=source_field).loc[variable]
+        df = self._get_indexed_df(field=source_field)
+        if not return_field:
+            return df.loc[variable]
+        return df.loc[variable, return_field]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -448,4 +453,12 @@ def make_table_df(site=None):
         .set_index(keys='file_name')
         .sort_index()
         )
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_mapped_site_list():
+
+    xl = pd.ExcelFile(PATHS.get_local_path(resource='xl_variable_map'))
+    op_sites = sd().get_operational_sites(site_name_only=True)
+    return [x for x in xl.sheet_names if x in op_sites]
 #------------------------------------------------------------------------------

@@ -289,10 +289,8 @@ def generate_merged_file(site):
 
     """
 
-    # merger = fc.TableMerger(site=site)
-    # merger.make_output_file()
     merger = dp.SiteDataMerger(site=site)
-    merger.merge_all_as_TOA5()
+    merger.write_all_as_TOA5()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

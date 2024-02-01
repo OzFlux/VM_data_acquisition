@@ -52,6 +52,19 @@ class SiteDataParser():
     ###########################################################################
 
     #--------------------------------------------------------------------------
+    def get_file_list(self):
+
+        return self.data_map.get_file_list()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_attributes(self, file='flux'):
+
+        file = self._parse_file_name(file=file)
+        return self.data_map.get_file_attributes(file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_record_stats_by_file(self, file='flux'):
         """
         Get the statistics for the file records.
@@ -72,26 +85,27 @@ class SiteDataParser():
         file = self._parse_file_name(file=file)
         site_time = dt.datetime.now() - self._site_time_offset
         sub_series = self.data_map.get_file_attributes(file=file)
-        handler = fh.DataHandler(
-            sub_series.full_path, concat_files=self.concat_files
-            )
-        rslt_dict = handler.get_missing_records()
-        rslt_dict.pop('gap_distribution')
-        rslt_dict.update(
-            {'duplicate_records':
-                 len(handler.get_duplicate_records(as_dates=True)),
-             'duplicate_indices':
-                 len(handler.get_duplicate_indices(as_dates=True)),
-             'days_since_last_record': (
-                 (site_time - handler.data.index[-1].to_pydatetime())
-                 .days
-                 )
-             }
+        rslt_dict = get_file_record_stats(
+            file=self.data_map.path / file,
+            site_time=site_time
             )
         return pd.concat([
             sub_series.drop(['full_path', 'format']),
             pd.Series(rslt_dict)
             ])
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_record_stats_all_files(self):
+
+        return pd.concat(
+            [(pd.DataFrame(self.get_record_stats_by_file(file=file))
+              .T
+              .set_index(keys=['station_name', 'table_name'])
+              )
+             for file in self.get_file_list()
+             ]
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -161,7 +175,7 @@ class SiteDataParser():
 
         if file == 'flux':
             return self.data_map.get_flux_file()
-        if not file in self.data_map.site_df.file_name:
+        if not file in self.get_file_list():
             raise FileNotFoundError('File not documented in variable map!')
         return file
     #--------------------------------------------------------------------------
@@ -169,6 +183,43 @@ class SiteDataParser():
     ###########################################################################
     ### METHODS BY VARIABLE-BASED QUERY ###
     ###########################################################################
+
+    #--------------------------------------------------------------------------
+    def get_variable_list(self):
+        """
+
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+
+        return self.data_map.get_variable_list(source_field='translation_name')
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_variable_attributes(self, variable):
+        """
+
+
+        Parameters
+        ----------
+        variable : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+
+        return self.data_map.get_variable_attributes(
+            variable=variable, source_field='translation_name'
+            )
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_data_by_variable(
@@ -335,19 +386,35 @@ class SiteDataParser():
         site_time = dt.datetime.now() - self._site_time_offset
         rslt_list = []
         for variable in data.columns:
-            series = data[variable].dropna()
-            last_valid_date_time = site_time - series.index[-1]
-            last_valid_date_time = series.index[-1]
-            days = (site_time - last_valid_date_time).days
+            attrs = self.data_map.get_variable_attributes(
+                variable=variable, source_field='translation_name'
+                )
             rslt_dict = {
-                'last_valid_record': last_valid_date_time.strftime(
-                    '%Y-%m-%d %H:%M'
-                    ),
-                 'value': series.iloc[-1],
-                 'days_since_last_valid_record': int(days)
+                'variable': variable,
+                'station': attrs.logger_name,
+                'table': attrs.table_name,
                 }
+            series = data[variable].dropna()
+            if len(series) > 0:
+                last_valid_date_time = series.index[-1]
+                days = int((site_time - last_valid_date_time).days)
+                rslt_dict.update({
+                    'last_valid_record': last_valid_date_time.strftime(
+                        '%Y-%m-%d %H:%M'
+                        ),
+                    'value': series.iloc[-1],
+                    'days_since_last_valid_record': days
+                    })
+            else:
+                rslt_dict.update({
+                    'last_valid_record': 'None',
+                    'value': 'None',
+                    'days_since_last_valid_record': 'N/A'
+                    })
             rslt_list.append(rslt_dict)
-        return pd.DataFrame(rslt_list, index=data.columns)
+        return pd.DataFrame(
+            rslt_list, index=pd.Index(data.columns, name='variable')
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -456,6 +523,22 @@ class SiteDataParser():
 
     #--------------------------------------------------------------------------
     def construct_variable(self, variable, data=None):
+        """
+
+
+        Parameters
+        ----------
+        variable : TYPE
+            DESCRIPTION.
+        data : TYPE, optional
+            DESCRIPTION. The default is None.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
 
         req_vars = mf.input_vars[variable]
         if data is None:
@@ -555,4 +638,47 @@ class SiteDataMerger():
             ])
     #--------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_record_stats(file, site_time, concat_files=True):
+    """
+
+
+    Parameters
+    ----------
+    file : TYPE
+        DESCRIPTION.
+    site_time : TYPE
+        DESCRIPTION.
+    concat_files : TYPE, optional
+        DESCRIPTION. The default is True.
+
+    Returns
+    -------
+    rslt_dict : TYPE
+        DESCRIPTION.
+
+    """
+
+    handler = fh.DataHandler(file=file)
+    rslt_dict = handler.get_missing_records()
+    rslt_dict.pop('gap_distribution')
+    days_since_last_rec = (
+        site_time - handler.data.index[-1].to_pydatetime()
+        ).days
+    if days_since_last_rec < 0:
+        days_since_last_rec = 0
+    rslt_dict.update(
+        {'duplicate_records':
+             len(handler.get_duplicate_records(as_dates=True)),
+         'duplicate_indices':
+             len(handler.get_duplicate_indices(as_dates=True)),
+         'days_since_last_record': (
+             (site_time - handler.data.index[-1].to_pydatetime())
+             .days
+             )
+         }
+        )
+    return rslt_dict
 #------------------------------------------------------------------------------
