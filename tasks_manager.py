@@ -326,8 +326,7 @@ def update_site_status():
 
     """
 
-    constructor = fc.SiteStatusConstructor()
-    constructor.write_to_excel()
+    fc.DataStatusConstructor().write_to_excel()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

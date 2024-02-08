@@ -112,69 +112,22 @@ class DataHandler():
         if resample_intvl:
             output_data = output_data.resample(resample_intvl).asfreq()
 
-        # Convert the file format (just fill date fields if no change in format)
-        self._format_data_as(data=output_data, file_type=output_format)
+        # If platform-specific formatting not requested, drop non-numerics
+        # (if requested) and return
+        if output_format is None:
+            if drop_non_numeric:
+                for var in self._configs['non_numeric_cols']:
+                    try:
+                        output_data.drop(var, axis=1, inplace=True)
+                    except KeyError:
+                        pass
+            return output_data
 
-        # Drop non-numeric cols
-        if drop_non_numeric:
-            for var in self._configs['non_numeric_cols']:
-                try:
-                    output_data.drop(var, axis=1, inplace=True)
-                except KeyError:
-                    pass
-
-        # Return data
-        return output_data
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _format_data_as(self, data, file_type):
-        """
-        Reformat the data depending on type and fill all dates
-        (regardless of type)
-
-        Parameters
-        ----------
-        data : pd.core.frame.DataFrame
-            The data.
-        file_type : str
-            The type of file (must be either "TOA5" or "EddyPro").
-
-        Returns
-        -------
-        None.
-
-
-        """
-
-        # If file type is None, set to self.file_type
-        if file_type is None:
-            file_type = self.file_type
-
-        # Get the output format date variables
-        dt_vars = (
-            io.get_file_type_configs(file_type=file_type)
-            ['time_variables']
-            )
-
-        # If file type not changing, remove the time variables;
-        # If it is changing, drop all file format-specific variables
-        if file_type == self.file_type:
-            drop_vars = self._configs['time_variables'].keys()
-        else:
-            drop_vars = self._configs['non_numeric_cols']
-        data.drop(
-            drop_vars,
-            axis=1,
-            inplace=True
-            )
-
-        # Get the date output formatter and drop new dates into file
-        formatter = io.get_formatter(file_type=file_type, which='write_date')
-        date_series = pd.Series(data.index.to_pydatetime(), index=data.index)
-        for dt_var in dt_vars.keys():
-            series = date_series.apply(formatter, which=dt_var)
-            data.insert(dt_vars[dt_var], dt_var, series)
+        # Format and return data
+        return io.reformat_data(
+                data=output_data,
+                output_format=output_format
+                )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -211,59 +164,22 @@ class DataHandler():
         subset_list, rename_dict = self._subset_or_translate(usecols=usecols)
         output_headers = self.headers.loc[subset_list].rename(rename_dict)
 
-        # Convert the date fields (leave them if no change in format)
-        output_headers = self._format_headers_as(
-            headers=output_headers, file_type=output_format
+        # If platform-specific formatting not requested, drop non-numerics
+        # (if requested) and return
+        if output_format is None:
+            if drop_non_numeric:
+                for var in self._configs['non_numeric_cols']:
+                    try:
+                        output_headers.drop(var, inplace=True)
+                    except KeyError:
+                        pass
+            return output_headers
+
+        # Format and return data
+        return io.reformat_headers(
+            headers=output_headers,
+            output_format=output_format
             )
-
-        # Drop non-numeric cols
-        if drop_non_numeric:
-            for var in self._configs['non_numeric_cols']:
-                try:
-                    output_headers.drop(var, inplace=True)
-                except KeyError:
-                    pass
-
-        return output_headers
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _format_headers_as(self, headers, file_type):
-        """
-        Returns the unaltered headers unless the input format is EddyPro and the
-        output format is TOA5.
-
-        Parameters
-        ----------
-        headers : pd.core.frame.DataFrame
-            The file headers.
-        file_type : str
-            The type of file (must be either "TOA5" or "EddyPro").
-
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            The file headers, either unchanged or formatted to look like TOA5.
-
-        """
-
-        if file_type is None:
-            file_type = self.file_type
-        if file_type == self.file_type:
-            return headers
-        if file_type == 'TOA5':
-            return (
-                pd.concat([
-                    pd.DataFrame(
-                        data='TS',
-                        index=pd.Index(['TIMESTAMP'], name='variable'),
-                        columns=['units']
-                        ),
-                        headers
-                        ])
-                    .assign(sampling='')
-                    .drop(self._configs['non_numeric_cols'])
-                    )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -579,19 +495,6 @@ class DataHandler():
         else:
             raise TypeError('usecols arg must be None, list or dict')
 
-        # Get the file-specific critical variables, keep them in the column
-        # list and purge from the rename dictionary!
-        critical_cols = self._configs['non_numeric_cols']
-        subset_list = (
-            self._configs['non_numeric_cols'] +
-            [col for col in subset_list if not col in critical_cols]
-            )
-        for key in critical_cols:
-            try:
-                rename_dict.pop(key, None)
-            except KeyError:
-                pass
-
         # Return the subset list and the renaming dictionary
         return subset_list, rename_dict
     #--------------------------------------------------------------------------
@@ -695,26 +598,4 @@ def _get_single_file_data(file, fallback=False):
         'concat_report': [] if not fallback else ['No eligible files found!'],
         '_configs': configs
         }
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-def _check_io_implemented(input_format, output_format=None):
-
-    configs = io.get_file_type_configs()
-    if not input_format in configs:
-        raise NotImplementedError(
-            f'Input format {input_format} is not supported!'
-            )
-
-    if not output_format:
-        return
-
-    if not output_format in configs:
-        raise NotImplementedError(
-            f'Output format {output_format} is not supported!'
-            )
-
-    if input_format == 'TOA5':
-        if output_format == 'EddyPro':
-            raise NotImplementedError('No!')
 #------------------------------------------------------------------------------

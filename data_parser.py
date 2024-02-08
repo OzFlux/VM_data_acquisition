@@ -341,6 +341,9 @@ class SiteDataParser():
                 data_list.append(
                     handler.get_conditioned_data(
                         usecols=translation_dict,
+                        resample_intvl=(
+                            f'{int(self.data_map.site_details.time_step)}T'
+                            ),
                         drop_non_numeric=True,
                         )
                     )

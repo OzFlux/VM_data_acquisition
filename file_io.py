@@ -334,7 +334,7 @@ def get_file_type(file):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_file_type_configs(file_type=None):
+def get_file_type_configs(file_type=None, return_field=None):
     """
     Get the configuration dictionary for the file type.
 
@@ -352,7 +352,13 @@ def get_file_type_configs(file_type=None):
     """
     if not file_type:
         return FILE_CONFIGS
-    return FILE_CONFIGS[file_type]
+        if not return_field is None:
+            raise RuntimeError(
+                'Cannot return individual field if file type not set!'
+                )
+    if return_field is None:
+        return FILE_CONFIGS[file_type]
+    return FILE_CONFIGS[file_type][return_field]
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -581,7 +587,55 @@ def _generic_date_constructor(date_elems):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def TOA5ify_data(data, deindex=True):
+def reformat_data(data, output_format):
+    """
+
+
+    Parameters
+    ----------
+    data : pd.core.frame.DataFrame
+        The data.
+    output_format : str
+        The output format (must be TOA5 or EddyPro).
+
+    Raises
+    ------
+    TypeError
+        Raised if the data does not have a datetime index.
+
+    Returns
+    -------
+    pd.core.frame.DataFrame
+        The modified data.
+
+    """
+
+    # Initialisation stuff
+    if not isinstance(data.index, pd.core.indexes.datetimes.DatetimeIndex):
+        raise TypeError('Passed data must have a DatetimeIndex!')
+    _check_format(fmt=output_format)
+    funcs_dict = {'TOA5': _TOA5ify_data, 'EddyPro': _EPify_data}
+    df = data.copy()
+
+    # Remove only the date variables unless requestes to remove all, and even
+    # then only
+    # remove_str = 'time_variables'
+    # if remove_non_numeric:
+    #     if output_format == 'TOA5':
+    #         remove_str = 'non_numeric_cols'
+
+    # Remove all format-specific data columns to make data format-agnostic.
+    for fmt in FILE_CONFIGS.keys():
+        for var in FILE_CONFIGS[fmt]['time_variables']:
+            try:
+                df.drop(var, axis=1, inplace=True)
+            except KeyError:
+                continue
+    return funcs_dict[output_format](data=df)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _TOA5ify_data(data):
     """
 
 
@@ -604,27 +658,73 @@ def TOA5ify_data(data, deindex=True):
 
     """
 
-    if not isinstance(data.index, pd.core.indexes.datetimes.DatetimeIndex):
-        raise TypeError('Passed data must have a DatetimeIndex!')
-    df = data.copy()
-    if 'TIMESTAMP' in data.columns:
-        df.drop('TIMESTAMP', axis=1, inplace=True)
-    df.index.name = 'TIMESTAMP'
-    if not deindex:
-        return df
-    return (
-        pd.concat(
-            [pd.Series(df.index.format(), index=df.index, name=df.index.name),
-             df
-             ],
-            axis=1
-            )
-        .reset_index(drop=True)
-        )
+    # Create the date outputs
+    formatter = get_formatter(file_type='TOA5', which='write_date')
+    date_series = pd.Series(data.index.to_pydatetime(), index=data.index)
+    data.insert(0, 'TIMESTAMP', date_series.apply(formatter))
+    return data
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def TOA5ify_headers(headers):
+def _EPify_data(data):
+
+    # Check whether DATAH and filename columns are present - if so, leave them
+    # if not (e.g. if source file is TOA5), insert them!
+    non_num_strings = {'DATAH': 'DATA', 'filename': 'none'}
+    for i, var in enumerate(['DATAH', 'filename']):
+        if not var in data.columns:
+            data.insert(i, var, non_num_strings[var])
+
+    # Create the date outputs and put them in slots 2 and 3
+    formatter = get_formatter(file_type='EddyPro', which='write_date')
+    date_series = pd.Series(data.index.to_pydatetime(), index=data.index)
+    i = 2
+    for var in FILE_CONFIGS['EddyPro']['time_variables'].keys():
+        series = date_series.apply(formatter, which=var)
+        data.insert(i, var, series)
+        i += 1
+
+    return data
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def reformat_headers(headers, output_format):
+    """
+    Create formatted header from dataframe header.
+
+    Parameters
+    ----------
+    headers : pd.core.frame.DataFrame
+        Formatted headers returned by get_header_df call.
+    output_format : str
+        The output format (must be TOA5 or EddyPro).
+
+    Returns
+    -------
+    pd.core.frame.DataFrame
+        Headers reformatted to requested format.
+
+    """
+
+    # Initialisation stuff
+    _check_format(fmt=output_format)
+    funcs_dict = {'TOA5': _TOA5ify_headers, 'EddyPro': _EPify_headers}
+    df = headers.copy()
+
+    # Remove all format-specific header columns to make header format-agnostic.
+    for fmt in FILE_CONFIGS.keys():
+        for var in FILE_CONFIGS[fmt]['non_numeric_cols']:
+            try:
+                df.drop(var, inplace=True)
+            except KeyError:
+                continue
+
+    # Pass to function to format header as appropriate
+    return funcs_dict[output_format](headers=df)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _EPify_headers(headers):
     """
 
 
@@ -640,20 +740,50 @@ def TOA5ify_headers(headers):
 
     """
 
-    df = headers.copy()
-    if 'sampling' in df.columns:
-        df.sampling.fillna('', inplace=True)
-    else:
-        df = df.assign(sampling='')
-    return (
-        pd.concat([
-            pd.DataFrame(
-                data={'units': 'TS', 'sampling': ''},
-                index=pd.Index(['TIMESTAMP'], name='variable'),
-                ),
-            df
-            ])
+    # Create EddyPro-specific headers
+    add_df = pd.DataFrame(
+        data={'units': ['DATAU', '', '[yyyy-mm-dd]', '[HH:MM]']},
+        index=pd.Index(['DATAH', 'filename', 'date', 'time'], name='variable'),
         )
+
+    # Drop the sampling header line if it exists
+    if 'sampling' in headers.columns:
+        headers.drop('sampling', axis=1, inplace=True)
+
+    # Concatenate and return
+    return pd.concat([add_df, headers])
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def _TOA5ify_headers(headers):
+    """
+
+
+    Parameters
+    ----------
+    headers : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+
+    # Create TOA5-specific headers
+    add_df = pd.DataFrame(
+        data={'units': 'TS', 'sampling': ''},
+        index=pd.Index(['TIMESTAMP'], name='variable'),
+        )
+
+    # Add the sampling header line if it doesn't exist
+    if not 'sampling' in headers.columns:
+        headers = headers.assign(sampling='')
+    headers.sampling.fillna('', inplace=True)
+
+    # Concatenate and return
+    return pd.concat([add_df, headers])
 #------------------------------------------------------------------------------
 
 ###############################################################################
@@ -984,7 +1114,12 @@ def _check_file_exists(file):
     return file_to_parse
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def _check_format(fmt):
 
+    if not fmt in FILE_CONFIGS.keys():
+        raise NotImplementedError(f'Format {fmt} is not implemented!')
+#------------------------------------------------------------------------------
 
 ###############################################################################
 ### END FILE CHECKING FUNCTIONS ###

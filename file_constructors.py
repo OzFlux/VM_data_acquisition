@@ -19,7 +19,7 @@ import sys
 ### Custom modules ###
 import data_mapper as dm
 import data_parser as dp
-import file_handler as fh
+import file_handler_2 as fh
 import file_io as io
 import met_functions as mf
 import paths_manager as pm
@@ -167,7 +167,7 @@ class L1Constructor():
                  )
 
                 # Write header
-                (handler.headers
+                (handler.get_conditioned_headers(output_format='TOA5')
                  .reset_index()
                  .T
                  .to_excel(
@@ -179,9 +179,9 @@ class L1Constructor():
                 # Write data
                 (
                     handler.get_conditioned_data(
-                        resample_intvl=f'{int(self.time_step)}T'
+                        resample_intvl=f'{int(self.time_step)}T',
+                        output_format='TOA5'
                         )
-                    .reindex(date_idx)
                     .to_excel(
                         writer, sheet_name=sheet_name, header=False,
                         index=False, startrow=4, na_rep=na_values
