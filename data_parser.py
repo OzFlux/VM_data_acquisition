@@ -14,7 +14,8 @@ import pandas as pd
 import file_handler as fh
 import file_io as io
 import met_functions as mf
-from data_mapper import SiteDataMapper as sdm
+import data_mapper as dm
+import metadata_handler as mh
 
 #------------------------------------------------------------------------------
 class SiteDataParser():
@@ -41,7 +42,10 @@ class SiteDataParser():
         """
 
         self.site = site
-        self.data_map = sdm(site=site)
+        self.SiteManager = mh.MetaDataManager(
+            site=site, file_mngr=True,mapped_data_mngr=True
+            )
+        self.data_map = dm.SiteDataMapper(site=site)
         self._site_time_offset = dt.timedelta(
              hours=10 - self.data_map.site_details.UTC_offset
              )
@@ -563,7 +567,9 @@ class SiteDataMerger():
         self.default_output_directory = self.sdp.data_map.path
 
     #--------------------------------------------------------------------------
-    def merge_all_as_TOA5(self):
+    def merge_all_as_TOA5(
+            self, truncate_start_to='flux', truncate_end_to='flux'
+            ):
 
         data, headers = self.sdp.get_data_by_variable(
             fill_missing=True, incl_headers=True
@@ -639,6 +645,12 @@ class SiteDataMerger():
                 ),
             headers
             ])
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _truncate_dates_to(self, df, truncate_start_to, truncate_end_to):
+
+        pass
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

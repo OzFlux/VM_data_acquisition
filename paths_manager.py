@@ -6,6 +6,7 @@ Created on Mon Aug  1 16:43:45 2022
 """
 
 from configparser import ConfigParser
+import pandas as pd
 import pathlib
 
 #------------------------------------------------------------------------------
@@ -15,9 +16,86 @@ import pathlib
 REMOTE_ALIAS_DICT = {
     'AliceSpringsMulga': 'AliceMulga', 'Longreach': 'MitchellGrassRangeland'
     }
+BASE_LOCS = ['LOCAL_PATH', 'REMOTE_PATH', 'APPLICATION_PATH']
+STREAM_DICT = {
+    'LOCAL_PATH': 'LOCAL_DATA_STREAM', 'REMOTE_PATH': 'REMOTE_DATA_STREAM'
+    }
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+class GenericPaths():
+
+    def __init__(self):
+
+        self._Paths = paths()
+        self.local_resources = self._get_generic_resources()
+        self.applications = self._get_applications()
+
+        pass
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_generic_resources(self):
+
+        return (
+            pd.Series({
+                resource: self._Paths.get_local_path(resource=resource)
+                for resource in self._Paths.get_local_resource_list()
+                })
+            .drop(['data', 'logs'])
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_applications(self):
+
+        return pd.Series({
+            app: self._Paths.get_application_path(application=app) for app in
+            self._Paths._config['APPLICATIONS']}
+            )
+    #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+class SitePaths(GenericPaths):
+
+    def __init__(self, site):
+
+        super().__init__()
+        self.site = site
+        self.local_data = self._get_local_data_paths()
+        self.remote_data = self._get_remote_data_paths()
+        self.local_logs = self._get_site_log_paths()
+
+
+    def _get_local_data_paths(self):
+
+        return pd.Series({
+            stream: self._Paths.get_local_path(
+                resource='data', stream=stream, site=self.site
+                )
+            for stream in self._Paths.get_local_stream_list()
+            })
+
+    #--------------------------------------------------------------------------
+    def _get_remote_data_paths(self):
+
+        return pd.Series({
+            resource: self._Paths.get_remote_path(
+                resource=resource, site=self.site
+                )
+            for resource in self._Paths.get_remote_resource_list()
+            })
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_site_log_paths(self):
+
+        return self._Paths.get_local_path(resource='logs', site='Calperum')
+    #--------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 class paths():
@@ -35,6 +113,15 @@ class paths():
 
     #--------------------------------------------------------------------------
     ### PUBLIC METHODS ###
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_local_resource_paths(self, site, incl_all=False):
+
+        return {
+            resource: self.get_local_path(resource=resource)
+            for resource in self.get_local_resource_list()
+            }
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------

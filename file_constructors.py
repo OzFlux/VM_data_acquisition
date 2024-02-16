@@ -17,13 +17,12 @@ import pathlib
 import sys
 
 ### Custom modules ###
-import data_mapper as dm
 import data_parser as dp
-import file_handler_2 as fh
+import file_handler as fh
 import file_io as io
 import met_functions as mf
 import paths_manager as pm
-import variable_mapper_2 as vm
+import data_mapper as dm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
 import sparql_site_details as sd
 
@@ -67,7 +66,7 @@ class L1Constructor():
         self.path = PATHS.get_local_path(
             resource='data', stream='flux_slow', site=site
             )
-        self.table_df = vm.make_table_df(site=site)
+        self.table_df = dm.make_table_df(site=site)
         if not site == 'Tumbarumba':
             self.time_step = int(SITE_DETAILS.get_single_site_details(
                 site=site, field='time_step'
@@ -314,7 +313,7 @@ class DataStatusConstructor():
 
     #--------------------------------------------------------------------------
     def write_to_excel(
-            self, dest='E:/Network_documents/Status/site_to_VM_status.xlsx'
+            self, dest='E:/Network_documents/Status/site_to_vm_status.xlsx'
             ):
         """
         Write all data to excel spreadsheet
@@ -634,7 +633,7 @@ def make_site_info_TOA5(site):
     details = SITE_DETAILS.get_single_site_details(site=site).copy()
 
     # Get the name of the flux file
-    mapper = vm.mapper(site=site)
+    mapper = dm.mapper(site=site)
     flux_file = mapper.get_flux_file(abs_path=True)
 
     # Get the EC logger info

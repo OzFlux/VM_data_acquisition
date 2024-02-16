@@ -22,7 +22,8 @@ import sys
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import variable_mapper as vm
+from metadata_handler import MetaDataManager
+import data_mapper as dm
 import rtmc_xml_parser as rxp
 import paths_manager as pm
 sys.path.append('../site_details')
@@ -105,9 +106,11 @@ def colour_getter(long_name, n_col=6):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def line_plot_parser_new(site, parser, long_name, screen_name, component_name):
+def line_plot_parser(
+        site, parser, mdm, long_name, screen_name, component_name
+        ):
 
-    mapper = vm.mapper(site=site)
+    # mapper = dm.SiteDataMapper(site=site)
 
     # Get the plot editor and find the existing labels
     plot_editor = parser.get_editor_by_component_name(
@@ -120,7 +123,7 @@ def line_plot_parser_new(site, parser, long_name, screen_name, component_name):
         x for x in plot_editor.get_trace_labels()
         if plot_editor.get_axis_by_label(x)=='left'
         ]
-    new_labels = mapper.get_field_from_variable(
+    new_labels = mdm.Mapper.get_variable_by_long_name(
         variable=long_name, return_field='translation_name'
         )
     if len(old_labels) > len(new_labels):
@@ -152,42 +155,33 @@ def line_plot_parser_new(site, parser, long_name, screen_name, component_name):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def do_file_config(site, parser):
+def do_file_config(site, parser, mdm):
 
     # Get the data source editor and set the source path
     data_source_editor = parser.get_file_source_editor(source_type='data')
     data_source_editor.get_set_source_file(
-        path=str(
-            PATHS.get_local_path(
-                resource='data', stream='flux_slow', site=site, check_exists=True
-                ) / f'{site}_merged_std.dat'
-            )
+        path=str(mdm.Paths.local_data.flux_slow / f'{site}_merged_std.dat')
         )
 
     # Get the details source editor and set the source path
     details_source_editor = parser.get_file_source_editor(source_type='details')
     details_source_editor.get_set_source_file(
-        path=str(
-            PATHS.get_local_path(resource='site_details', site=site) /
-            f'{site}_details.dat'
-            )
+        path=str(mdm.Paths.local_resources.site_details / f'{site}_details.dat')
         )
 
     # Get the settings editor and change the data path for the snapshot output
     settings_editor = parser.get_basic_settings_editor()
     settings_editor.get_set_snapshot_destination(
-        text=PATHS.get_local_path(
-            resource='data', stream='rtmc', site=site, as_str=True
-            )
+        text=str(mdm.Paths.local_data.rtmc)
         )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def do_system_config(site, parser):
+def do_system_config(site, parser, mdm):
 
     # Set the screen name
     SCREEN = 'System'
-    mapper = vm.mapper(site=site)
+    # mapper = dm.SiteDataMapper(site=site)
     syntax_generator = rxp.RtmcSyntaxGenerator()
     component_aliases = {
         'utc_time': 'Segmented Time1',
@@ -205,18 +199,13 @@ def do_system_config(site, parser):
         screen=SCREEN, component_name=component_aliases['utc_time']
         )
     time_editor.get_set_element_offset_text(
-        text=str(int(
-            sd.site_details().get_single_site_details(
-                site=site, field='UTC_offset'
-                ) *
-            -60
-            ))
+        text=str(int(mdm.Details.UTC_offset * -60))
         )
 
     # Change the comm status alarm component calculation string
-    logger_name = mapper.get_field_from_variable(
-        variable='CO2 flux', return_field='logger_name'
-        )[0]
+    logger_name = mdm.Mapper.get_variable_attributes(
+        variable='Fco2', attr='logger_name'
+        )
     comm_status_editor = parser.get_editor_by_component_name(
         screen=SCREEN, component_name=component_aliases['Comm Status Alarm']
         )
@@ -225,9 +214,9 @@ def do_system_config(site, parser):
         )
 
     # Change the no data alarm component calculation string
-    table_name = mapper.get_field_from_variable(
-        variable='CO2 flux', return_field='table_name'
-        )[0]
+    table_name = mdm.Mapper.get_variable_attributes(
+        variable='Fco2', attr='table_name'
+        )
     no_data_editor = parser.get_editor_by_component_name(
         screen=SCREEN, component_name=component_aliases['No Data Alarm']
         )
@@ -267,9 +256,7 @@ def do_system_config(site, parser):
 
     # Reconfigure the signal diagnostic plot to use the correct IRGA signal type
     signal_str = syntax_generator.get_aliased_output(
-        var_list=mapper.get_field_from_variable(
-            variable='IRGA signal', return_field='translation_name'
-            )
+        var_list=['Sig_7500']
         )
     line_plot_editor = parser.get_editor_by_component_name(
         screen=SCREEN, component_name=component_aliases['IRGA_signal_chart']
@@ -286,10 +273,10 @@ def do_system_config(site, parser):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def do_turbulent_flux_config(site, parser):
+def do_turbulent_flux_config(site, parser, mdm):
 
     SCREEN = 'Turbulent_flux'
-    mapper = vm.mapper(site=site)
+    # mapper = dm.SiteDataMapper(site=site)
     syntax_generator = rxp.RtmcSyntaxGenerator()
     component_aliases = {
         'soil_moisture_chart': 'Time Series Chart2',
@@ -301,8 +288,8 @@ def do_turbulent_flux_config(site, parser):
         }
 
     # Get the soil moisture variables
-    soil_moist_vars = mapper.get_field_from_variable(
-        variable='Soil water content', return_field='translation_name'
+    soil_moist_vars = mdm.Mapper.get_soil_moisture_variables(
+        return_field='translation_name'
         )
 
     # Reconfigure the mean soil water trace of the time series
@@ -338,8 +325,8 @@ def do_turbulent_flux_config(site, parser):
         )
 
     # Get the soil temperature variables
-    soil_T_vars = mapper.get_field_from_variable(
-        variable='Soil temperature', return_field='translation_name'
+    soil_T_vars = mdm.Mapper.get_soil_temperature_variables(
+        return_field='translation_name'
         )
     soil_T_str = syntax_generator.get_aliased_output(soil_T_vars)
 
@@ -374,10 +361,10 @@ def do_turbulent_flux_config(site, parser):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def do_radiant_flux_config(site, parser):
+def do_radiant_flux_config(site, parser, mdm):
 
     SCREEN = 'Radiant_flux'
-    mapper = vm.mapper(site=site)
+    # mapper = dm.SiteDataMapper()(site=site)
     syntax_generator = rxp.RtmcSyntaxGenerator()
     component_aliases = {
         'avail_energy_chart': 'Time Series Chart2',
@@ -385,11 +372,11 @@ def do_radiant_flux_config(site, parser):
         }
 
     # Get soil variables for available energy and energy balance calculation
-    soil_HF_list = mapper.get_field_from_variable(
-        variable='Soil heat flux at depth z', return_field='translation_name'
+    soil_HF_list = mdm.Mapper.get_soil_heat_flux_variables(
+        return_field='translation_name'
         )
-    soil_T_list = mapper.get_field_from_variable(
-        variable='Soil temperature', return_field='translation_name'
+    soil_T_list = mdm.Mapper.get_soil_temperature_variables(
+        return_field='translation_name'
         )
 
     # Reconfigure available energy plot
@@ -436,10 +423,10 @@ def do_radiant_flux_config(site, parser):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def do_soil_config(site, parser):
+def do_soil_config(site, parser, mdm):
 
     SCREEN = 'Soil'
-    mapper = vm.mapper(site=site)
+    # mapper = dm.SiteDataMapper(site=site)
     syntax_generator = rxp.RtmcSyntaxGenerator()
     component_aliases = {
         'soil_heat_flux_chart': 'Time Series Chart',
@@ -448,35 +435,38 @@ def do_soil_config(site, parser):
         }
 
     # Get soil variables for available energy and energy balance calculation
-    soil_HF_list = mapper.get_field_from_variable(
-        variable='Soil heat flux at depth z', return_field='translation_name'
+    soil_HF_list = mdm.Mapper.get_soil_heat_flux_variables(
+        return_field='translation_name'
         )
-    soil_T_list = mapper.get_field_from_variable(
-        variable='Soil temperature', return_field='translation_name'
+    soil_T_list = mdm.Mapper.get_soil_temperature_variables(
+        return_field='translation_name'
         )
 
     # Reconfigure the soil heat flux plot
-    line_plot_parser_new(
+    line_plot_parser(
         site=site,
         parser=parser,
+        mdm=mdm,
         long_name='Soil heat flux at depth z',
         screen_name=SCREEN,
         component_name=component_aliases['soil_heat_flux_chart']
         )
 
     # Reconfigure the soil temperature plot
-    line_plot_parser_new(
+    line_plot_parser(
         site=site,
         parser=parser,
+        mdm=mdm,
         long_name='Soil temperature',
         screen_name=SCREEN,
         component_name=component_aliases['soil_temperature_chart']
         )
 
     # Reconfigure the soil moisture plot
-    line_plot_parser_new(
+    line_plot_parser(
         site=site,
         parser=parser,
+        mdm=mdm,
         long_name='Soil water content',
         screen_name=SCREEN,
         component_name=component_aliases['soil_moisture_chart']
@@ -520,6 +510,10 @@ def main(site, file_name=None):
         resource='RTMC_project_template', check_exists=True
         )
     parser = rxp.rtmc_parser(path=path_to_template)
+    mdm = MetaDataManager(
+        site=site, details=True, paths=True, mapped_data_mngr=True,
+        mapper_source_field='translation_name'
+        )
 
     # Don't allow overwrite of original template file, or misnaming of extension
     if file_name:
@@ -531,13 +525,12 @@ def main(site, file_name=None):
     else:
         output_path = str(path_to_template.parent / f'{site}_std.rtmc2')
 
-
     # Edit the XML elements for each screen to reflect site variables
-    do_file_config(site=site, parser=parser)
-    do_system_config(site=site, parser=parser)
-    do_turbulent_flux_config(site=site, parser=parser)
-    do_radiant_flux_config(site=site, parser=parser)
-    do_soil_config(site=site, parser=parser)
+    do_file_config(site=site, parser=parser, mdm=mdm)
+    do_system_config(site=site, parser=parser, mdm=mdm)
+    do_turbulent_flux_config(site=site, parser=parser, mdm=mdm)
+    do_radiant_flux_config(site=site, parser=parser, mdm=mdm)
+    do_soil_config(site=site, parser=parser, mdm=mdm)
 
     # Write altered content to a new file
     parser.write_to_file(file_name=output_path)

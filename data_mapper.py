@@ -256,6 +256,84 @@ class SiteDataMapper():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
+class SiteDataManager():
+
+    def __init__(self, site):
+
+        self.site = site
+        self.path = PATHS.get_local_path(
+            resource='data', stream='flux_slow', site=site
+            )
+        self.table_df = get_file_table(site=site)
+        self.file_list = self.table_df.index.tolist()
+        self.flux_file = get_flux_file(site=self.site)
+        self.variable_lookup_table = pd.concat([
+            io.get_header_df(file=self.path / file)
+            .assign(file=file)
+            for file in self.file_list
+            ])
+
+    #--------------------------------------------------------------------------
+    def get_file_attributes(self, file, attr=None):
+
+        info = pd.Series(io.get_file_info(file=self.path / file))
+        if attr is None:
+            return info
+        return info[attr]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_extended_file_attributes(self, file=None):
+
+        full_path = self.path / file
+        return pd.Series(
+            io.get_file_info(file=full_path) |
+            io.get_start_end_dates(file=full_path) |
+            {'backups':
+             ','.join(
+                 f.name for f in io.get_eligible_concat_files(file=full_path)
+                 )
+             } |
+            {'interval': io.get_file_interval(file=full_path)}
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_start_end_dates(self, file):
+
+        return io.get_start_end_dates(file=self.path / file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_variables(self, file):
+
+        return io.get_header_df(file=self.path / file).index.tolist()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_file_interval(self, file):
+
+        return io.get_file_interval(file=self.path / file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_eligible_concat_files(self, file):
+
+        return io.get_eligible_concat_files(file=self.path / file)
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_variable_field(self, variable, field=None):
+
+        if field is None:
+            return self.variable_lookup_table.loc[variable]
+        return self.variable_lookup_table.loc[variable, field]
+    #--------------------------------------------------------------------------
+
+
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
 ### FUNCTIONS ###
 #------------------------------------------------------------------------------
 
@@ -390,7 +468,7 @@ def get_flux_file(site):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def make_table_df(site=None):
+def make_table_df(site=None, skinny=False):
     """
     Generate a dataframe that ties file names to data tables and logger info
 
@@ -431,7 +509,13 @@ def make_table_df(site=None):
             lambda x: pathlib.Path(parent_path.replace('<site>', x))
             ) / df.file_name
             )
+
+        .set_index(keys='file_name')
+        .sort_index()
         )
+
+    if skinny:
+        return df
 
     # Assign additional variables (table info, start and end dates) and return
     return (
@@ -450,8 +534,8 @@ def make_table_df(site=None):
                 ],
             index=df.index
             ))
-        .set_index(keys='file_name')
-        .sort_index()
+        # .set_index(keys='file_name')
+        # .sort_index()
         )
 #------------------------------------------------------------------------------
 
@@ -462,3 +546,26 @@ def get_mapped_site_list():
     op_sites = sd().get_operational_sites(site_name_only=True)
     return [x for x in xl.sheet_names if x in op_sites]
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+def get_file_table(site=None):
+
+    renamer = {
+        'Site': 'site', 'File name': 'file_name',
+        'Flux file name': 'flux_file_name'
+        }
+    df = (
+        pd.read_excel(
+            io=PATHS.get_local_path(resource='xl_variable_map'),
+            sheet_name='file_list',
+            usecols=list(renamer.keys()),
+            converters={'Site': lambda x: x.replace(' ', '')},
+            )
+        .rename(renamer, axis=1)
+        .set_index('file_name')
+        )
+    if site:
+        return df.loc[df.site==site].drop('site', axis=1)
+    return df
+#------------------------------------------------------------------------------
+

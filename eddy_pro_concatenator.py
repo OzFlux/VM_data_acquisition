@@ -21,7 +21,7 @@ import pathlib
 
 import numpy as np
 
-import file_functions as ff
+import file_io as io
 import file_handler as fh
 
 EP_SUMMARY_SEARCH_STR = 'EP-Summary'
@@ -105,7 +105,7 @@ class EddyProConcatConfigurator():
 
         """
 
-        return ff.get_start_end_dates(file=self.master, file_type='EddyPro')
+        return io.get_start_end_dates(file=self.master, file_type='EddyPro')
 
     def get_summary_file_dates(self):
         """
@@ -119,7 +119,7 @@ class EddyProConcatConfigurator():
         """
 
         return [
-            ff.get_start_end_dates(file=f, file_type='EddyPro')
+            io.get_start_end_dates(file=f, file_type='EddyPro')
             for f in self.summary_files
             ]
 
@@ -208,7 +208,10 @@ def main(master_file=None, slave_path=None):
         raise FileNotFoundError('No files to parse')
     ep_handler = fh.DataHandler(
         file=file_configs['master_file'],
-        concat_files=file_configs['concat_files']
+        concat_files=file_configs['concat_files'],
+        )
+    ep_handler.write_concatenation_report(
+        abs_file_path=pathlib.Path(slave_path) / 'concatenation_report.txt'
         )
     ep_handler.write_conditioned_data(
         abs_file_path=epcc.master.parent / EP_MASTER_OUTPUT_NAME,
