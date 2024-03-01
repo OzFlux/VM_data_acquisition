@@ -9,7 +9,7 @@ import pathlib
 import sys
 
 import paths_manager as pm
-import data_mapper_2 as dm
+import data_mapper as dm
 sys.path.append(str(pathlib.Path(__file__).parents[1] / 'site_details'))
 from sparql_site_details import site_details as sd
 

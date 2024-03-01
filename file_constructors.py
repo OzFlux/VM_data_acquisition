@@ -40,163 +40,6 @@ SITE_DETAILS = sd.site_details()
 
 
 ###############################################################################
-### BEGIN L1 GENERATOR CLASS ###
-###############################################################################
-
-#------------------------------------------------------------------------------
-class L1Constructor():
-
-    def __init__(self, site):
-        """
-        Simple class for generating the collated L1 file from individual TOA5
-        files, including concatenation of backup files where legal.
-
-        Parameters
-        ----------
-        site : str
-            Site name.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        self.site = site
-        self.path = PATHS.get_local_path(
-            resource='data', stream='flux_slow', site=site
-            )
-        self.table_df = dm.make_table_df(site=site)
-        if not site == 'Tumbarumba':
-            self.time_step = int(SITE_DETAILS.get_single_site_details(
-                site=site, field='time_step'
-                ))
-        else:
-            self.time_step = 30
-
-    #--------------------------------------------------------------------------
-    def get_inclusive_date_index(self, start_override=None):
-        """
-        Get an index that spans the earliest and latest dates across all files
-        to be included in the collection.
-        Note: some data e.g. soil loggers do not have the same time step as the
-        eddy covariance logger. This complicates the acquisition of a universal
-        time index, because the start and/or end times may not match the
-        expected time step for the site e.g. 15 minute files may have :15 or
-        :45 minute start / end times. We therefore force the start and end
-        timestamps of all parsed files to conform to the site time interval.
-
-        Returns
-        -------
-        pandas.core.indexes.datetimes.DatetimeIndex
-            Index with correct (site-specific) time step.
-
-        """
-
-        dict_list = []
-        for file in self.table_df.full_path:
-            file_list = [file] + io.get_eligible_concat_files(file=file)
-            for sub_file in file_list:
-                dates = io.get_start_end_dates(file=sub_file)
-                mnt_remain = np.mod(dates['start_date'].minute, self.time_step)
-                if mnt_remain:
-                    dates['start_date'] += dt.timedelta(
-                        minutes=int(self.time_step - mnt_remain)
-                        )
-                mnt_remain = np.mod(dates['end_date'].minute, self.time_step)
-                if mnt_remain:
-                    dates['end_date'] -= dt.timedelta(
-                        minutes=int(mnt_remain)
-                        )
-                dict_list.append(dates)
-        return pd.date_range(
-            start=np.array([x['start_date'] for x in dict_list]).min(),
-            end=np.array([x['end_date'] for x in dict_list]).max(),
-            freq=f'{self.time_step}T'
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_to_excel(self, concat_backups=True, na_values=''):
-        """
-        Write table files out to separate tabs in an xlsx file.
-
-        Parameters
-        ----------
-        concat_backups : bool, optional
-            Whether to concatenate backup files residing in same directory.
-            The default is True.
-        na_values : str, optional
-            The na values to fill nans with. The default is ''.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        # Set the destination
-        dest = self.path / f'{self.site}_L1.xlsx'
-
-        # Get inclusive date index to reindex all files to
-        date_idx = self.get_inclusive_date_index()
-
-        # Iterate over all files and write to separate excel workbook sheets
-        with pd.ExcelWriter(path=dest) as writer:
-            for file in self.table_df.full_path:
-
-                # Name the tab after the file (drop the dat) - it is necessary
-                # to use file name and not just the table name, because for
-                # some sites data is drawn from different loggers with same
-                # table name
-                sheet_name = file.stem
-
-                # Get the data handler (concatenate backups by default)
-                handler = fh.DataHandler(
-                    file=file, concat_files=concat_backups
-                    )
-
-                # Write info
-                (pd.DataFrame(handler.file_info.values())
-                 .T
-                 .to_excel(
-                     writer, sheet_name=sheet_name, header=False, index=False,
-                     startrow=0
-                     )
-                 )
-
-                # Write header
-                (handler.get_conditioned_headers(output_format='TOA5')
-                 .reset_index()
-                 .T
-                 .to_excel(
-                     writer, sheet_name=sheet_name, header=False, index=False,
-                     startrow=1
-                     )
-                 )
-
-                # Write data
-                (
-                    handler.get_conditioned_data(
-                        resample_intvl=f'{int(self.time_step)}T',
-                        output_format='TOA5'
-                        )
-                    .to_excel(
-                        writer, sheet_name=sheet_name, header=False,
-                        index=False, startrow=4, na_rep=na_values
-                        )
-                    )
-    #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-###############################################################################
-### END L1 GENERATOR CLASS ###
-###############################################################################
-
-
-
-###############################################################################
 ### BEGIN STATUS CONSTRUCTOR CLASS ###
 ###############################################################################
 
@@ -216,12 +59,6 @@ class DataStatusConstructor():
 
         """
 
-        self.table_df = (
-            dm.make_table_df()
-            .reset_index()
-            .set_index(keys=['site', 'station_name', 'table_name'])
-            .sort_index()
-            )
         self.site_list = dm.get_mapped_site_list()
     #--------------------------------------------------------------------------
 
@@ -239,7 +76,7 @@ class DataStatusConstructor():
 
         files, days = [], []
         for site in self.site_list:
-            file = get_latest_10Hz_file(site)
+            file = dm.get_latest_10Hz_file(site=site)
             files.append(file)
             try:
                 days.append(
@@ -270,24 +107,33 @@ class DataStatusConstructor():
 
         """
 
-        ref_dict = dict(zip(
-            self.table_df.full_path,
-            self.table_df.index.get_level_values(level='site')
-            ))
+        output_path = output_directory = PATHS.get_local_path(
+            resource='data', stream='flux_slow', as_str=True
+            )
+        table_df = dm.make_table_df(logger_info=True, extended_info=True)
         data_list = []
-        for file in ref_dict:
-            site_time = self._get_site_time(site=ref_dict[file])
+        for file in table_df.index:
+            site = table_df.loc[file, 'site']
+            full_path = pathlib.Path(
+                output_path.replace(PATHS._placeholder, site)
+                ) / file
+            site_time = self._get_site_time(site=site)
             data_list.append(
                 dp.get_file_record_stats(
-                    file=file,
+                    file=full_path,
                     site_time=site_time
                     )
                 )
-        return pd.concat(
-            [self.table_df.drop(['full_path', 'file_name', 'format'], axis=1),
-             pd.DataFrame(data_list, index=self.table_df.index)],
-            axis=1
-            ).reset_index()
+        return (
+            pd.concat(
+                [table_df, pd.DataFrame(data_list, index=table_df.index)],
+                axis=1
+                )
+            .reset_index()
+            .drop(['file_name', 'format'], axis=1)
+            .set_index(keys=['site', 'station_name', 'table_name'])
+            .reset_index()
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -345,6 +191,7 @@ class DataStatusConstructor():
                 # Prepend the run date and time to the spreadsheet
                 self._write_time_frame(xl_writer=writer, sheet=sheet_name)
 
+
                 # Output and format the results
                 (
                     data.style.apply(self._get_style_df, axis=None)
@@ -376,7 +223,7 @@ class DataStatusConstructor():
                         axis=None
                         )
                     .to_excel(
-                        writer, sheet_name=site, startrow=1
+                        writer, sheet_name=site, startrow=1, index=False
                         )
                     )
                 self._set_column_widths(
@@ -610,6 +457,177 @@ def _get_colour(n, xl_format=False):
 ### BEGIN GENERAL PUBLIC FUNCTIONS ###
 ###############################################################################
 
+
+###############################################################################
+### BEGIN L1 CONSTRUCTOR FUNCTIONS ###
+###############################################################################
+
+#------------------------------------------------------------------------------
+def construct_l1(site, concat_backups=True, na_values=''):
+    """
+    Function for generating the collated L1 file from individual TOA5 files,
+    including concatenation of backup files where legal.
+
+    Parameters
+    ----------
+    site : str
+        Site name.
+    concat_backups : Bool, optional.
+        If true, finds all backup files and concatenates the data nwith the
+        primary file. The default is True.
+    na_values : str
+        The fill values for the spreadsheet. The default is ''.
+
+    Returns
+    -------
+    None.
+
+    """
+
+
+    file_mngr = dm.FileManager(site=site)
+    time_step = SITE_DETAILS.get_single_site_details(
+        site=site, field='time_step'
+        )
+    dest = file_mngr.path / f'{site}_L1.xlsx'
+    date_idx = _get_inclusive_date_index(site=site, time_step=time_step)
+
+    # Iterate over all files and write to separate excel workbook sheets
+    with pd.ExcelWriter(path=dest) as writer:
+
+        for file in file_mngr.file_list:
+
+            # Create full path
+            full_path = file_mngr.path / file
+
+            # Name the tab after the file (drop the dat) - it is necessary
+            # to use file name and not just the table name, because for
+            # some sites data is drawn from different loggers with same
+            # table name
+            sheet_name = full_path.stem
+
+            # Get the data handler (concatenate backups by default)
+            handler = fh.DataHandler(
+                file=full_path, concat_files=concat_backups
+                )
+
+            # Write info
+            (pd.DataFrame(handler.file_info.values())
+             .T
+             .to_excel(
+                 writer, sheet_name=sheet_name, header=False, index=False,
+                 startrow=0
+                 )
+             )
+
+            # Write header
+            (handler.get_conditioned_headers(output_format='TOA5')
+             .reset_index()
+             .T
+             .to_excel(
+                 writer, sheet_name=sheet_name, header=False, index=False,
+                 startrow=1
+                 )
+             )
+
+            # Write data
+            (
+                handler.get_conditioned_data(
+                    resample_intvl=f'{int(time_step)}T',
+                    output_format='TOA5'
+                    )
+                .to_excel(
+                    writer, sheet_name=sheet_name, header=False,
+                    index=False, startrow=4, na_rep=na_values
+                    )
+                )
+#------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------
+def _get_inclusive_date_index(site, time_step):
+    """
+    Get an index that spans the earliest and latest dates across all files
+    to be included in the collection.
+    Note: some data e.g. soil loggers do not have the same time step as the
+    eddy covariance logger. This complicates the acquisition of a universal
+    time index, because the start and/or end times may not match the
+    expected time step for the site e.g. 15 minute files may have :15 or
+    :45 minute start / end times. We therefore force the start and end
+    timestamps of all parsed files to conform to the site time interval.
+
+    Returns
+    -------
+    pandas.core.indexes.datetimes.DatetimeIndex
+        Index with correct (site-specific) time step.
+
+    """
+
+    file_mngr = dm.FileManager(site=site)
+    dates_list = []
+    for file in file_mngr.file_list:
+        dates = file_mngr.get_file_start_end_dates(
+            file=file, incl_backups=True
+            )
+        mnt_remain = np.mod(dates['start_date'].minute, time_step)
+        if mnt_remain:
+            dates['start_date'] += dt.timedelta(
+                minutes=int(time_step - mnt_remain)
+                )
+        mnt_remain = np.mod(dates['end_date'].minute, time_step)
+        if mnt_remain:
+            dates['end_date'] -= dt.timedelta(
+                minutes=int(mnt_remain)
+                )
+        dates_list.append(dates)
+    return pd.date_range(
+        start=min(dates['start_date'] for dates in dates_list),
+        end=max(dates['end_date'] for dates in dates_list),
+        freq=f'{time_step}T'
+        )
+#--------------------------------------------------------------------------
+
+###############################################################################
+### END L1 CONSTRUCTOR FUNCTIONS ###
+###############################################################################
+
+
+#------------------------------------------------------------------------------
+def merge_site_data(site, concat_files=False, truncate_to_flux=False):
+
+    # Get parser
+    parser = dp.SiteDataParser(site=site, concat_files=concat_files)
+
+    # Get the data, and truncate it to the datetime bounds of the flux file if
+    # requested
+    data, headers = parser.get_data_by_variable(
+        fill_missing=True, incl_headers=True, output_format='TOA5'
+        )
+    if truncate_to_flux:
+        flux_dates = parser.Files.get_file_start_end_dates(
+            file=parser.Files.flux_file,
+            incl_backups=concat_files
+            )
+        data = data.loc[flux_dates['start_date']: flux_dates['end_date']]
+
+    # Configure for output
+    info = (
+        dict(zip(io.INFO_FIELDS, io.FILE_CONFIGS['TOA5']['dummy_info']))
+        )
+    info.update({'table_name': 'merged'})
+    output_path = output_directory = PATHS.get_local_path(
+        resource='data', stream='flux_slow', site=site
+        ) / f'{site}_merged_std.dat'
+
+    # Now output the data
+    io.write_data_to_file(
+        headers=headers,
+        data=data,
+        abs_file_path=output_path,
+        info=info,
+        output_format='TOA5'
+        )
+#------------------------------------------------------------------------------
+
 #------------------------------------------------------------------------------
 def get_latest_10Hz_file(site):
 
@@ -633,18 +651,17 @@ def make_site_info_TOA5(site):
     details = SITE_DETAILS.get_single_site_details(site=site).copy()
 
     # Get the name of the flux file
-    mapper = dm.mapper(site=site)
-    flux_file = mapper.get_flux_file(abs_path=True)
+    file_mngr = dm.FileManager(site=site)
 
     # Get the EC logger info
     logger_info = (
-        mapper.get_flux_file_attributes()
+        file_mngr.get_file_attributes(file=file_mngr.flux_file)
         [['station_name', 'logger_type', 'serial_num', 'OS_version',
          'program_name']]
         )
 
     # Get the pct missing data
-    handler = handler=fh.DataHandler(file=flux_file)
+    handler = handler=fh.DataHandler(file=file_mngr.path / file_mngr.flux_file)
     missing = pd.Series(
         {'pct_missing': handler.get_missing_records()['%_missing']}
         )
@@ -660,7 +677,7 @@ def make_site_info_TOA5(site):
         'start_year': str(details.date_commissioned.year),
         'sunrise': time_getter.get_next_sunrise().strftime('%H:%M'),
         'sunset': time_getter.get_next_sunset().strftime('%H:%M'),
-        '10Hz_file': get_latest_10Hz_file(site=site)
+        '10Hz_file': file_mngr.get_latest_10Hz_file()
         })
 
     # Make the data

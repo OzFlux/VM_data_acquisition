@@ -267,8 +267,7 @@ def generate_L1_excel(site):
 
     """
 
-    constructor = fc.L1Constructor(site=site)
-    constructor.write_to_excel()
+    constructor = fc.construct_l1(site=site)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -288,8 +287,20 @@ def generate_merged_file(site):
 
     """
 
-    merger = dp.SiteDataMerger(site=site)
-    merger.write_all_as_TOA5()
+    truncate_sites = ['CumberlandPlain', 'Yanco']
+    no_concat_sites = ['CumberlandPlain']
+
+    if site in truncate_sites:
+        truncate_to_flux = True
+    else:
+        truncate_to_flux = False
+    if site in no_concat_sites:
+        concat_files = False
+    else:
+        concat_files = True
+    fc.merge_site_data(
+        site=site, concat_files=concat_files, truncate_to_flux=truncate_to_flux
+        )
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

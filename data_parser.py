@@ -15,7 +15,7 @@ import file_handler as fh
 import file_io as io
 import met_functions as mf
 import data_mapper as dm
-import metadata_handler as mh
+from sparql_site_details import site_details as sd
 
 #------------------------------------------------------------------------------
 class SiteDataParser():
@@ -41,14 +41,17 @@ class SiteDataParser():
 
         """
 
+        # Instantiate nested classes (file manager, mapped data manager and
+        # site details)
+        self.Files = dm.FileManager(site=site)
+        self.Details = sd().get_single_site_details(site=site)
+        self.Mapper = dm.MappedDataManager(site=site)
+
+        # Set other attrs
         self.site = site
-        self.SiteManager = mh.MetaDataManager(
-            site=site, file_mngr=True,mapped_data_mngr=True
-            )
-        self.data_map = dm.SiteDataMapper(site=site)
         self._site_time_offset = dt.timedelta(
-             hours=10 - self.data_map.site_details.UTC_offset
-             )
+            hours=10 - self.Details.UTC_offset
+              )
         self.concat_files = concat_files
 
     ###########################################################################
@@ -58,14 +61,14 @@ class SiteDataParser():
     #--------------------------------------------------------------------------
     def get_file_list(self):
 
-        return self.data_map.get_file_list()
+        return self.Mapper.get_mapped_file_list()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_file_attributes(self, file='flux'):
 
         file = self._parse_file_name(file=file)
-        return self.data_map.get_file_attributes(file)
+        return self.Files.get_file_attributes(file)
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -88,13 +91,13 @@ class SiteDataParser():
 
         file = self._parse_file_name(file=file)
         site_time = dt.datetime.now() - self._site_time_offset
-        sub_series = self.data_map.get_file_attributes(file=file)
+        sub_series = self.Files.get_file_attributes(file=file)
         rslt_dict = get_file_record_stats(
-            file=self.data_map.path / file,
+            file=self.Files.path / file,
             site_time=site_time
             )
         return pd.concat([
-            sub_series.drop(['full_path', 'format']),
+            sub_series.drop('format'),
             pd.Series(rslt_dict)
             ])
     #--------------------------------------------------------------------------
@@ -142,11 +145,9 @@ class SiteDataParser():
         file = self._parse_file_name(file=file)
         return (
             self.get_data_by_variable(
-                variable_list=self.data_map.site_df.loc[
-                    (~self.data_map.site_df.Missing) &
-                    (self.data_map.site_df.file_name==file),
-                    'translation_name'
-                    ],
+                variable_list=self.Mapper.get_variable_list(
+                    by_file=file, exclude_missing=True
+                    ),
                 rng_chk=rng_chk,
                 convert=convert,
                 )
@@ -178,7 +179,7 @@ class SiteDataParser():
         """
 
         if file == 'flux':
-            return self.data_map.get_flux_file()
+            return self.Files.flux_file
         if not file in self.get_file_list():
             raise FileNotFoundError('File not documented in variable map!')
         return file
@@ -188,47 +189,47 @@ class SiteDataParser():
     ### METHODS BY VARIABLE-BASED QUERY ###
     ###########################################################################
 
-    #--------------------------------------------------------------------------
-    def get_variable_list(self):
-        """
+    # #--------------------------------------------------------------------------
+    # def get_variable_list(self):
+    #     """
 
 
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
+    #     Returns
+    #     -------
+    #     TYPE
+    #         DESCRIPTION.
 
-        """
+    #     """
 
-        return self.data_map.get_variable_list(source_field='translation_name')
-    #--------------------------------------------------------------------------
+    #     return self.Mapper.get_variable_list(source_field='translation_name')
+    # #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    def get_variable_attributes(self, variable):
-        """
+    # #--------------------------------------------------------------------------
+    # def get_variable_attributes(self, variable):
+    #     """
 
 
-        Parameters
-        ----------
-        variable : TYPE
-            DESCRIPTION.
+    #     Parameters
+    #     ----------
+    #     variable : TYPE
+    #         DESCRIPTION.
 
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
+    #     Returns
+    #     -------
+    #     TYPE
+    #         DESCRIPTION.
 
-        """
+    #     """
 
-        return self.data_map.get_variable_attributes(
-            variable=variable, source_field='translation_name'
-            )
-    #--------------------------------------------------------------------------
+    #     return self.Mapper.get_variable_attributes(
+    #         variable=variable, source_field='translation_name'
+    #         )
+    # #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_data_by_variable(
             self, variable_list=None, rng_chk=True, convert=True,
-            fill_missing=False, incl_headers=False
+            fill_missing=False, incl_headers=False, output_format=None
             ):
         """
         Get data for a given list of variables. If the list includes missing
@@ -277,6 +278,18 @@ class SiteDataParser():
         if rng_chk:
             self._apply_limits(data=data)
 
+        # Apply output formatting if requested
+        if output_format:
+            data = io.reformat_data(
+                data=data,
+                output_format=output_format
+                )
+            if incl_headers:
+                headers = io.reformat_headers(
+                    headers=headers,
+                    output_format=output_format
+                    )
+
         # Return the things
         if not incl_headers:
             return data
@@ -301,26 +314,14 @@ class SiteDataParser():
 
         """
 
-        # Check inputs
-        allowed_inputs = ['data', 'headers', 'all']
-        if not which in allowed_inputs:
-            raise KeyError(
-                f'"which" kwarg must be on of {", ".join(allowed_inputs)}'
-                )
-
         # If a list of variables is not passed, set the variable list to all
         # variables defined in the variable map.
         if variable_list is None:
-            variable_list = (
-                self.data_map.site_df.loc[
-                    ~self.data_map.site_df.Missing,
-                    'translation_name']
-                .tolist()
-                )
+            variable_list = self.Mapper.get_variable_measured_list()
 
         # Group variables by file name to minimise file access operations
         grp_obj = (
-            self.data_map.site_df
+            self.Mapper.translation_table
             .reset_index()
             .set_index(keys='translation_name')
             .loc[variable_list]
@@ -338,7 +339,7 @@ class SiteDataParser():
                 .to_dict()
                 )
             handler = fh.DataHandler(
-                file=self.data_map.path / item[0],
+                file=self.Files.path / item[0],
                 concat_files=self.concat_files,
                 )
             if which == 'data' or 'all':
@@ -346,7 +347,7 @@ class SiteDataParser():
                     handler.get_conditioned_data(
                         usecols=translation_dict,
                         resample_intvl=(
-                            f'{int(self.data_map.site_details.time_step)}T'
+                            f'{int(self.Details.time_step)}T'
                             ),
                         drop_non_numeric=True,
                         )
@@ -393,7 +394,7 @@ class SiteDataParser():
         site_time = dt.datetime.now() - self._site_time_offset
         rslt_list = []
         for variable in data.columns:
-            attrs = self.data_map.get_variable_attributes(
+            attrs = self.Mapper.get_variable_attributes(
                 variable=variable, source_field='translation_name'
                 )
             rslt_dict = {
@@ -442,7 +443,7 @@ class SiteDataParser():
         """
 
         for variable in data.columns:
-            attrs = self.data_map.get_variable_attributes(
+            attrs = self.Mapper.get_variable_attributes(
                 variable=variable,
                 source_field='translation_name'
                 )
@@ -471,7 +472,7 @@ class SiteDataParser():
         """
 
         for variable in data.columns:
-            attrs = self.data_map.get_variable_attributes(
+            attrs = self.Mapper.get_variable_attributes(
                 variable=variable,
                 source_field='translation_name'
                 )
@@ -485,7 +486,7 @@ class SiteDataParser():
 
         if not headers is None:
             headers.units = (
-                self.data_map.site_df
+                self.Mapper.translation_table
                 .set_index(keys='translation_name')
                 .loc[headers.index]
                 ['standard_units']
@@ -511,7 +512,7 @@ class SiteDataParser():
 
         """
 
-        missing_vars = self.data_map.get_missing_variables()
+        missing_vars = self.Mapper.get_variable_missing_list()
         if not missing_vars:
             return
         for var in missing_vars:
@@ -521,7 +522,7 @@ class SiteDataParser():
                 data[var] = pd.Series(np.tile(np.nan, len(data)))
             if not headers is None:
                 headers.loc[var] = {
-                    'units': self.data_map.get_variable_attributes(
+                    'units': self.Mapper.get_variable_attributes(
                         variable=var, source_field='translation_name'
                         ).standard_units,
                     'sampling': ''
@@ -553,104 +554,6 @@ class SiteDataParser():
         input_args = {arg: data[arg] for arg in req_vars}
         func = mf.get_function(variable=variable)
         return func(**input_args)
-    #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-class SiteDataMerger():
-
-    def __init__(self, site):
-
-        self.site = site
-        self.sdp = SiteDataParser(site=site)
-        self.default_output_directory = self.sdp.data_map.path
-
-    #--------------------------------------------------------------------------
-    def merge_all_as_TOA5(
-            self, truncate_start_to='flux', truncate_end_to='flux'
-            ):
-
-        data, headers = self.sdp.get_data_by_variable(
-            fill_missing=True, incl_headers=True
-            )
-        return (
-            self._convert_table_index(data=data),
-            self._convert_headers(headers=headers),
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def write_all_as_TOA5(self, abs_file_path=None):
-
-        info = (
-            dict(zip(io.INFO_FIELDS, io.FILE_CONFIGS['TOA5']['dummy_info']))
-            )
-        info.update({'table_name': 'merged'})
-        if not abs_file_path:
-            abs_file_path = (
-                self.default_output_directory / f'{self.site}_merged_std.dat'
-                )
-        data, headers = self.merge_all_as_TOA5()
-        io.write_data_to_file(
-            headers=headers,
-            data=data,
-            abs_file_path=abs_file_path,
-            info=info
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _convert_table_index(self, data):
-        """
-        Convert the data so that the index becomes the 'TIMESTAMP' variable.
-
-        Parameters
-        ----------
-        data : pd.core.frame.DataFrame
-            The data for conversion.
-
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            Converted data.
-
-        """
-
-        return data.reset_index().rename({'DATETIME': 'TIMESTAMP'}, axis=1)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _convert_headers(self, headers):
-        """
-        Insert the 'TIMESTAMP' variable and units into the headers.
-
-        Parameters
-        ----------
-        headers : pd.core.frame.DataFrame
-            The header data.
-
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            The modified headers.
-
-        """
-
-        return pd.concat([
-            pd.DataFrame(
-                data=[['TS', '']],
-                index=pd.Index(['TIMESTAMP'], name='variable'),
-                columns=['units', 'sampling']
-                ),
-            headers
-            ])
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _truncate_dates_to(self, df, truncate_start_to, truncate_end_to):
-
-        pass
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
