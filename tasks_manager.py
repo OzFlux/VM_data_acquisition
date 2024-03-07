@@ -35,6 +35,7 @@ sys.path.append(
 import data_parser as dp
 import eddy_pro_concatenator as epc
 import file_constructors as fc
+import network_status_parser as nsp
 import paths_manager as pm
 import process_10hz_data as ptd
 import profile_data_processor as pdp
@@ -170,6 +171,11 @@ class TasksManager():
                 'args': site_only
                 },
 
+            'generate_site_status_files': {
+                'func': update_site_status,
+                'args': None
+                },
+
             'process_profile_data': {
                 'func': process_profile_data,
                 'args': site_only
@@ -214,11 +220,6 @@ class TasksManager():
                 'func': ptd.main,
                 'args': {'site': site, 'system': 'under'}
                 },
-
-            'update_site_status': {
-                'func': update_site_status,
-                'args': None
-                }
 
             }
 
@@ -267,7 +268,7 @@ def generate_L1_excel(site):
 
     """
 
-    constructor = fc.construct_l1(site=site)
+    fc.construct_l1(site=site)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -328,7 +329,7 @@ def process_profile_data(site):
 #------------------------------------------------------------------------------
 def update_site_status():
     """
-    Build site status spreadsheet.
+    Build site status spreadsheet and geojson.
 
     Returns
     -------
@@ -336,7 +337,8 @@ def update_site_status():
 
     """
 
-    fc.DataStatusConstructor().write_to_excel()
+    nsp.DataStatusConstructor().write_to_excel()
+    nsp.make_status_geojson(write=True)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------

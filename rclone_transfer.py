@@ -97,9 +97,9 @@ def pull_slow_flux(site, remote_resource='nextcloud'):
 #------------------------------------------------------------------------------
 def push_status_files():
 
-    logging.info('Begin move of status spreadsheet to UQRDM')
+    logging.info('Begin move of status files to UQRDM')
     generic_move(
-        local_location=PATHS.get_local_path(resource='xl_network_status'),
+        local_location=PATHS.get_local_path(resource='network_status'),
         remote_location=PATHS.get_remote_path(resource='epcn_share'),
         timeout=180
         )
