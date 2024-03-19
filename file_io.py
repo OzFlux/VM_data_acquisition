@@ -9,6 +9,12 @@ Todo:
     to call both
 
 @author: jcutern-imchugh
+
+Contains basic file input-output functions and structural configurations for
+handling both TOA5 and EddyPro files. It has functions to retrieve both data
+and headers. It is strictly tasked with parsing files between disk and memory,
+checking only structural integrity of the files. It does NOT evaluate data
+integrity!
 """
 
 import csv

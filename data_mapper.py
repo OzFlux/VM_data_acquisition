@@ -4,6 +4,30 @@
 Created on Wed Jul  6 12:05:35 2022
 
 @author: imchugh
+
+Contains classes and functions that allow file system mapping of variables and
+files by site, so that raw data can be ingested from source into data
+processing pipelines. Note that the source for the requisite metadata is
+currently a locally-held spreadsheet, with site-based tabs mapping variables to
+standard names and units. This may change in future to a TERN-held database.
+
+The main functions are:
+    make_table_df - creates a dataframe that is the underlying basis of the
+    FileManager class (see below), and that ties attributes and variables to
+    specific files;
+    make_site_df - creates a dataframe that is the underlying basis of the
+    MappedDataManager class (see below), and that ties site-specific variable
+    naming and unit conventions to standard ones.
+
+The main classes are:
+    FileManager - lists the files collected for a given site, their absolute
+    paths, their attributes and their associated variables;
+    MappedDataManager - for a listed subset of variables (at this stage just
+    those required for the current iteration of the data visualisation),
+    provides name and unit translations.
+
+It is strictly metadata oriented - NO data evaluation found here!
+
 """
 
 #------------------------------------------------------------------------------
@@ -27,7 +51,7 @@ from sparql_site_details import site_details as sd
 
 
 #------------------------------------------------------------------------------
-PATHS = pm.paths()
+PATHS = pm.Paths()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -124,7 +148,7 @@ class FileManager():
 
         """
 
-        if not file in file_list:
+        if not file in self.file_list:
             raise FileNotFoundError(f'Could not find file {file}')
         return self.path / file
     #--------------------------------------------------------------------------
@@ -243,7 +267,7 @@ class FileManager():
     #--------------------------------------------------------------------------
     def get_file_from_raw_variable(self, variable):
         """
-        
+
 
         Parameters
         ----------
@@ -286,13 +310,6 @@ class FileManager():
         except KeyError:
             return None
     #--------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------
-# class ExtendedSiteDataManager(SiteDataManager):
-
-#     def __init__(self, site):
-
-#         super().__init__(site)
 
 class MappedDataManager():
 

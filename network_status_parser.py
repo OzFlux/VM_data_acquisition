@@ -190,7 +190,7 @@ class DataStatusConstructor():
 
         """
 
-        paths = pm.paths()
+        paths = pm.Paths()
         temp_path = paths.get_local_path(
             resource='data', stream='flux_slow', as_str=True
             )

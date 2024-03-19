@@ -30,7 +30,7 @@ import sparql_site_details as sd
 ### GLOBAL CLASSES ###
 #------------------------------------------------------------------------------
 
-PATHS = pm.paths()
+PATHS = pm.Paths()
 SITE_DETAILS = sd.site_details()
 
 

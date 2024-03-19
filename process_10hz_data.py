@@ -25,7 +25,7 @@ import sparql_site_details as sd
 #------------------------------------------------------------------------------
 ### INITIALISATIONS ###
 #------------------------------------------------------------------------------
-PATHS = pm.paths()
+PATHS = pm.Paths()
 DETAILS = sd.site_details()
 CCF_DICT = {'Format': '0', 'FileMarks': '0', 'RemoveMarks': '0',
             'RecNums': '0', 'Timestamps': '1', 'CreateNew': '0',

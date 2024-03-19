@@ -45,7 +45,7 @@ import rclone_transfer as rt
 ### INITIALISATION ###
 #------------------------------------------------------------------------------
 
-PathsManager = pm.paths()
+PathsManager = pm.Paths()
 LOG_BYTE_LIMIT = 10**6
 
 #------------------------------------------------------------------------------

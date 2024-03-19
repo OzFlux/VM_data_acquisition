@@ -23,7 +23,7 @@ import paths_manager as pm
 ### INITIAL CONFIGURATION ###
 #------------------------------------------------------------------------------
 
-PATHS = pm.paths()
+PATHS = pm.Paths()
 APP_PATH = PATHS.get_application_path(application='rclone', as_str=True)
 ARGS_LIST = [
     'copy', '--transfers', '36', '--progress', '--checksum', '--checkers',

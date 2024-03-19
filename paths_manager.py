@@ -3,6 +3,19 @@
 Created on Mon Aug  1 16:43:45 2022
 
 @author: jcutern-imchugh
+
+Contains classes and functions to find correct input / output paths for site
+and system resources, in both local and remote locations. Note that the source
+for the requisite metadata is a Windows initialisation file containing the
+paths to various resources (applications, metadata spreadsheets etc) and data
+streams. Main classes are:
+    Paths. Returns patlib.Path objects for various local and remote resourcers
+    and data streams.
+    GenericPaths. Convenience class that simply lists local resources and
+    applications as pandas series, which can be accessed using dot notation.
+    SitePaths. Convenience class that simply lists resources and applications
+    as pandas series, which can be accessed using dot notation. In contrast to
+    GenericPaths, it contains site-specific information.
 """
 
 from configparser import ConfigParser
@@ -27,7 +40,7 @@ class GenericPaths():
 
     def __init__(self):
 
-        self._Paths = paths()
+        self._Paths = Paths()
         self.local_resources = self._get_generic_resources()
         self.applications = self._get_applications()
 
@@ -98,7 +111,7 @@ class SitePaths(GenericPaths):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-class paths():
+class Paths():
 
     def __init__(self):
 
