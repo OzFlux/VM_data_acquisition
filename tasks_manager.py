@@ -59,12 +59,12 @@ def _set_logger(task, site=None):
 
     if site:
         logger_write_path = (
-            PathsManager.get_local_path(
+            PathsManager.get_local_resource_path(
                 resource='logs', site=site) / f'{site}_{task}.txt'
             )
     else:
         logger_write_path = (
-            PathsManager.get_local_path(
+            PathsManager.get_local_resource_path(
                 resource='generic_task_logs') / f'{task}.txt'
             )
     this_logger = logging.getLogger()
@@ -104,7 +104,7 @@ class TasksManager():
         """
 
         return pd.read_excel(
-            PathsManager.get_local_path(resource='xl_variable_map'),
+            PathsManager.get_local_resource_path(resource='xl_variable_map'),
             sheet_name='Tasks', index_col='Site'
             )
     #--------------------------------------------------------------------------
@@ -239,8 +239,8 @@ class TasksManager():
 #------------------------------------------------------------------------------
 def concat_EddyPro_data(site):
 
-    slave_path = PathsManager.get_local_path(
-        resource='data', site='CumberlandPlain', stream='flux_slow'
+    slave_path = PathsManager.get_local_data_path(
+        data_stream='flux_slow', site='CumberlandPlain'
         )
     master_file = slave_path / 'EP_MASTER.txt'
     try:
@@ -308,8 +308,8 @@ def generate_merged_file(site):
 def process_profile_data(site):
 
     processor = pdp.get_site_profile_class(site=site)
-    output_path = PathsManager.get_local_path(
-            resource='data', stream='profile_proc', site=site
+    output_path = PathsManager.get_local_data_path(
+        data_stream='profile_proc', site=site
             )
     processor.write_to_csv(file_name=output_path / 'storage_data.csv')
     processor.plot_time_series(

@@ -17,7 +17,7 @@ import subprocess as spc
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import paths_manager_2 as pm
+import paths_manager as pm
 
 #------------------------------------------------------------------------------
 ### INITIAL CONFIGURATION ###
@@ -52,7 +52,6 @@ def generic_move(
     try:
         check_remote_available(str(remote_location))
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
-        breakpoint()
         logging.error(e)
         logging.error(
             f'    -> remote location {remote_location} is not valid!'
@@ -149,7 +148,6 @@ def _move_site_data_stream(
     remote_path = _reformat_path_str(
         PATHS.get_remote_data_path(data_stream=stream, site=site,as_str=True)
         )
-    breakpoint()
     generic_move(
         local_location=local_path, remote_location=remote_path,
         exclude_dirs=exclude_dirs, which_way=which_way, timeout=timeout

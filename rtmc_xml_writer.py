@@ -506,7 +506,7 @@ def do_soil_config(site, parser, mdm):
 def main(site, file_name=None):
 
     # Get the RTMC XML parser
-    path_to_template = PATHS.get_local_path(
+    path_to_template = PATHS.get_local_resource_path(
         resource='RTMC_project_template', check_exists=True
         )
     parser = rxp.rtmc_parser(path=path_to_template)

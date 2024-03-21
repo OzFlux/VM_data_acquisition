@@ -26,13 +26,11 @@ import pathlib
 ### CONSTANTS ###
 #------------------------------------------------------------------------------
 
+PATHS_FILE = 'paths.ini'
 REMOTE_ALIAS_DICT = {
     'AliceSpringsMulga': 'AliceMulga', 'Longreach': 'MitchellGrassRangeland'
     }
-BASE_LOCS = ['LOCAL_PATH', 'REMOTE_PATH', 'APPLICATION_PATH']
-STREAM_DICT = {
-    'LOCAL_PATH': 'LOCAL_DATA_STREAM', 'REMOTE_PATH': 'REMOTE_DATA_STREAM'
-    }
+PLACEHOLDER = '<site>'
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -50,13 +48,11 @@ class GenericPaths():
     #--------------------------------------------------------------------------
     def _get_generic_resources(self):
 
-        return (
-            pd.Series({
-                resource: self._Paths.get_local_path(resource=resource)
-                for resource in self._Paths.get_local_resource_list()
-                })
-            .drop(['data', 'logs'])
-            )
+        return pd.Series({
+            resource: self._Paths.get_local_resource_path(
+                resource=resource, as_str=True)
+            for resource in self._Paths.list_local_resources()
+            })
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -77,35 +73,32 @@ class SitePaths(GenericPaths):
 
         super().__init__()
         self.site = site
+        self.local_resources = (
+            self.local_resources.str.replace(PLACEHOLDER, site)
+            )
         self.local_data = self._get_local_data_paths()
         self.remote_data = self._get_remote_data_paths()
-        self.local_logs = self._get_site_log_paths()
 
-
+    #--------------------------------------------------------------------------
     def _get_local_data_paths(self):
 
         return pd.Series({
-            stream: self._Paths.get_local_path(
-                resource='data', stream=stream, site=self.site
+            data_stream: self._Paths.get_local_data_path(
+                data_stream=data_stream, site=self.site
                 )
-            for stream in self._Paths.get_local_stream_list()
+            for data_stream in self._Paths.list_local_data_streams()
             })
+    #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def _get_remote_data_paths(self):
 
         return pd.Series({
-            resource: self._Paths.get_remote_path(
-                resource=resource, site=self.site
+            data_stream: self._Paths.get_remote_data_path(
+                data_stream=data_stream, site=self.site
                 )
-            for resource in self._Paths.get_remote_resource_list()
+            for data_stream in self._Paths.list_remote_data_streams()
             })
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def _get_site_log_paths(self):
-
-        return self._Paths.get_local_path(resource='logs', site='Calperum')
     #--------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -116,95 +109,171 @@ class Paths():
     def __init__(self):
 
         self._config = ConfigParser()
-        self._config.read(pathlib.Path(__file__).parent / 'paths_new.ini')
-        self._placeholder = '<site>'
-        self._base_locs = ['LOCAL_PATH', 'REMOTE_PATH', 'APPLICATION_PATH']
-        self._stream_dict = {
-            'LOCAL_PATH': 'LOCAL_DATA_STREAM',
-            'REMOTE_PATH': 'REMOTE_DATA_STREAM'
-            }
+        self._config.read(pathlib.Path(__file__).parent / PATHS_FILE)
+        self._placeholder = PLACEHOLDER
+
+    ###########################################################################
+    ### BEGIN LOCAL DATA METHODS ###
+    ###########################################################################
 
     #--------------------------------------------------------------------------
-    ### PUBLIC METHODS ###
+    def list_local_resources(self):
+        """
+        List the local resources that are defined in the .ini file.
+
+        Returns
+        -------
+        list
+            The resources.
+
+        """
+
+        return list(self._config['LOCAL_PATH'])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_local_resource_paths(self, site, incl_all=False):
+    def get_local_resource_path(self, resource, site=None, **kwargs):
+        """
+        Get the path to the local resource.
 
-        return {
-            resource: self.get_local_path(resource=resource)
-            for resource in self.get_local_resource_list()
-            }
-    #--------------------------------------------------------------------------
+        Parameters
+        ----------
+        resource : str
+            the local resource for which to return the path.
+            The default is None.
+        site : str, optional
+            Site name. The default is None.
 
-    #--------------------------------------------------------------------------
-    def get_application_path(self, application, **kwargs):
+        Returns
+        -------
+        pathlib.Path
+            Path to local resource.
 
-        return self._get_path(
-            base_location='APPLICATIONS', resource=application, **kwargs
+        """
+        kwargs.pop('data_stream', None)
+        return self.get_path(
+            base_location='LOCAL_PATH', resource=resource, site=site, **kwargs
             )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_local_path(self, **kwargs):
+    def list_local_data_streams(self):
 
-        return self._get_path(base_location='LOCAL_PATH', **kwargs)
+        return list(self._config['LOCAL_DATA'])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_local_resource_list(self):
+    def get_local_data_path(self, **kwargs):
 
-        return [x for x in self._config['LOCAL_PATH']]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_local_stream_list(self):
-
-        return [x for x in self._config['LOCAL_DATA_STREAM']]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_remote_path(self, **kwargs):
-
-        return self._get_path(base_location='REMOTE_PATH', **kwargs)
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_remote_resource_list(self):
-
-        return [x for x in self._config['REMOTE_PATH']]
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
-    def get_remote_stream_list(self):
-
-        return [x for x in self._config['REMOTE_DATA_STREAM']]
+        return self.get_path(
+            base_location='LOCAL_PATH', resource='data', **kwargs
+            )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_site_image(self, img_type, **kwargs):
 
+        kwargs.pop('subdirs', None)
         img_dict = {'tower': '<site>_tower.jpg', 'contour': '<site>_contour.png'}
-        return self._get_path(
+        return self.get_path(
                 base_location='LOCAL_PATH', resource='site_images',
-                file_name=img_dict[img_type],
-                **kwargs
+                file_name=img_dict[img_type], **kwargs
                 )
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_stream_list(self, location='local'):
+    def get_application_path(self, application, **kwargs):
 
-        location_dict = {
-            'local': 'LOCAL_DATA_STREAM', 'remote': 'REMOTE_DATA_STREAM'
+        [
+            kwargs.pop(arg, None) for arg in
+            ['data_stream', 'site' 'subdirs', 'file_name']
+            ]
+        return self.get_path(
+            base_location='APPLICATIONS', resource=application
+            )
+    #--------------------------------------------------------------------------
+
+    ###########################################################################
+    ### END LOCAL DATA METHODS ###
+    ###########################################################################
+
+    ###########################################################################
+    ### BEGIN REMOTE DATA METHODS ###
+    ###########################################################################
+
+    #--------------------------------------------------------------------------
+    def list_remote_storages(self):
+
+        return list(self._config['REMOTE_STORAGE'])
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_remote_data_path(self, data_stream, **kwargs):
+
+        storage = self._config['REMOTE_DATA_LINKAGES'][data_stream]
+        return self.get_path(
+            base_location='REMOTE_STORAGE', resource=storage,
+            data_stream=data_stream, **kwargs
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def list_remote_data_streams(self):
+
+        return list(self._config['REMOTE_DATA'])
+    #--------------------------------------------------------------------------
+
+    ###########################################################################
+    ### END REMOTE DATA METHODS ###
+    ###########################################################################
+
+    ###########################################################################
+    ### BEGIN GENERIC PUBLIC METHODS ###
+    ###########################################################################
+
+    #--------------------------------------------------------------------------
+    def get_path(self, base_location: str, resource, data_stream=None, site=None,
+                  subdirs=[], file_name=None, check_exists=False, as_str=False):
+
+        stream_dict = {
+            'LOCAL_PATH': 'LOCAL_DATA',
+            'REMOTE_STORAGE': 'REMOTE_DATA'
             }
-        stream = location_dict[location]
-        return [x for x in self._config[stream]]
+
+        if not isinstance(subdirs, list):
+            if not isinstance(subdirs, str):
+                raise TypeError('kwarg "subdirs" must be of type list or str!')
+            subdirs = [subdirs]
+        path = pathlib.Path(self._config[base_location][resource])
+        elements = [] + subdirs
+        if file_name:
+            elements.append(file_name)
+        if data_stream:
+            stream_header = stream_dict[base_location]
+            path = path / self._config[stream_header][data_stream]
+        if elements:
+            path = self._add_subdirs(path=path, subdirs_list=elements)
+        if site:
+            if base_location == 'REMOTE_PATH':
+                try:
+                    site = REMOTE_ALIAS_DICT[site]
+                except KeyError:
+                    pass
+            path = pathlib.Path(self._insert_site_str(target_obj=path, site=site))
+        if check_exists:
+            self._check_exists(path=path)
+        if as_str:
+            return str(path)
+        return path
     #--------------------------------------------------------------------------
 
-    #--------------------------------------------------------------------------
-    ### PRIVATE METHODS ###
-    #--------------------------------------------------------------------------
+    ###########################################################################
+    ### END GENERIC PUBLIC METHODS ###
+    ###########################################################################
+
+    ###########################################################################
+    ### BEGIN PRIVATE METHODS ###
+    ###########################################################################
 
     #--------------------------------------------------------------------------
     def _add_subdirs(self, path, subdirs_list):
@@ -222,42 +291,15 @@ class Paths():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _get_path(self, base_location, resource, stream=None, site=None,
-                  subdirs=[], file_name=None, check_exists=False, as_str=False):
-
-        if not isinstance(subdirs, list):
-            if not isinstance(subdirs, str):
-                raise TypeError('kwarg "subdirs" must be of type list or str!')
-            subdirs = [subdirs]
-        path = pathlib.Path(self._config[base_location][resource])
-        elements = [] + subdirs
-        if file_name:
-            elements.append(file_name)
-        if stream:
-            stream_header = self._stream_dict[base_location]
-            path = path / self._config[stream_header][stream]
-        if elements:
-            path = self._add_subdirs(path=path, subdirs_list=elements)
-        if site:
-            if base_location == 'REMOTE_PATH':
-                try:
-                    site = REMOTE_ALIAS_DICT[site]
-                except KeyError:
-                    pass
-            path = pathlib.Path(self._insert_site_str(target_obj=path, site=site))
-        if check_exists:
-            self._check_exists(path=path)
-        if as_str:
-            return str(path)
-        return path
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def _insert_site_str(self, target_obj, site):
 
         if isinstance(target_obj, pathlib.Path):
-            return pathlib.Path(str(target_obj).replace(self._placeholder, site))
-        return target_obj.replace(self._placeholder, site)
+            return pathlib.Path(str(target_obj).replace(PLACEHOLDER, site))
+        return target_obj.replace(PLACEHOLDER, site)
     #--------------------------------------------------------------------------
+
+    ###########################################################################
+    ### END PRIVATE METHODS ###
+    ###########################################################################
 
 #------------------------------------------------------------------------------

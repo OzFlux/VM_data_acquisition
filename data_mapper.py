@@ -84,8 +84,8 @@ class FileManager():
         """
 
         self.site = site
-        self.path = PATHS.get_local_path(
-            resource='data', stream='flux_slow', site=site
+        self.path = PATHS.get_local_data_path(
+            data_stream='flux_slow', site=site
             )
         df = _get_file_df()
         self.file_list = df.loc[df.site==site].index.tolist()
@@ -600,7 +600,7 @@ def make_site_df(site, table_df=None):
     """
 
     # Get stuff
-    map_path = PATHS.get_local_path(resource='xl_variable_map')
+    map_path = PATHS.get_local_resource_path(resource='xl_variable_map')
     if table_df is None:
         table_df = (
             make_table_df(site=site, logger_info=True).drop('site', axis=1)
@@ -696,7 +696,7 @@ def get_flux_file(site):
 
     rslt = (
         pd.read_excel(
-            io=PATHS.get_local_path(resource='xl_variable_map'),
+            io=PATHS.get_local_resource_path(resource='xl_variable_map'),
             sheet_name='file_list'
             )
         .set_index('Site')
@@ -734,8 +734,8 @@ def make_table_df(site=None, logger_info=False, extended_info=False):
         return df.index.tolist()
 
     # Create full file paths as iterator for data retrieval
-    parent_path = PATHS.get_local_path(
-        resource='data', stream='flux_slow', as_str=True
+    parent_path = PATHS.get_local_data_path(
+        data_stream='flux_slow', as_str=True
         )
     paths_list = (
         df.site.apply(
@@ -762,7 +762,7 @@ def make_table_df(site=None, logger_info=False, extended_info=False):
 #------------------------------------------------------------------------------
 def get_mapped_site_list():
 
-    xl = pd.ExcelFile(PATHS.get_local_path(resource='xl_variable_map'))
+    xl = pd.ExcelFile(PATHS.get_local_resource_path(resource='xl_variable_map'))
     op_sites = sd().get_operational_sites(site_name_only=True)
     return [x for x in xl.sheet_names if x in op_sites]
 #------------------------------------------------------------------------------
@@ -770,9 +770,8 @@ def get_mapped_site_list():
 #------------------------------------------------------------------------------
 def get_latest_10Hz_file(site):
 
-    data_path = PATHS.get_local_path(
-        resource='data', stream='flux_fast', site=site,
-        subdirs=['TOB3']
+    data_path = PATHS.get_local_data_path(
+        data_stream='flux_fast', site=site, subdirs=['TOB3']
         )
     try:
         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
@@ -812,7 +811,7 @@ def _get_file_df():
     renamer = {'Site': 'site', 'File name': 'file_name'}
     return (
         pd.read_excel(
-            io=PATHS.get_local_path(resource='xl_variable_map'),
+            io=PATHS.get_local_resource_path(resource='xl_variable_map'),
             sheet_name='file_list',
             usecols=list(renamer.keys()),
             converters={'Site': lambda x: x.replace(' ', '')},

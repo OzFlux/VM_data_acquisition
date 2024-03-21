@@ -498,29 +498,25 @@ def get_path(site, system, data, io):
 
     ref_dict = {
         'raw': {
-            'input': PATHS.get_local_path(
-                resource='data',
-                stream=STREAM_DICT[system],
+            'input': PATHS.get_local_data_path(
+                data_stream=STREAM_DICT[system],
                 subdirs=['TMP', 'TOB3'],
                 site=site
                 ),
-            'output': PATHS.get_local_path(
-                resource='data',
-                stream=STREAM_DICT[system],
+            'output': PATHS.get_local_data_path(
+                data_stream=STREAM_DICT[system],
                 subdirs=['TOB3'],
                 site=site
                 )
             },
          'converted': {
-            'input': PATHS.get_local_path(
-                resource='data',
-                stream=STREAM_DICT[system],
+            'input': PATHS.get_local_data_path(
+                data_stream=STREAM_DICT[system],
                 subdirs=['TMP', 'TOA5'],
                 site=site
                 ),
-            'output': PATHS.get_local_path(
-                resource='data',
-                stream=STREAM_DICT[system],
+            'output': PATHS.get_local_data_path(
+                data_stream=STREAM_DICT[system],
                 subdirs=['TOA5'],
                 site=site
                 )
@@ -587,7 +583,8 @@ def run_CardConvert(site, system):
     app_path = str(PATHS.get_application_path(application='CardConvert'))
     system_name = get_system_name(site=site, system=system)
     path_to_file = (
-        PATHS.get_local_path(resource='ccf_config') / f'TOA5_{system_name}.ccf'
+        PATHS.get_local_resource_path(resource='ccf_config') /
+        f'TOA5_{system_name}.ccf'
         )
     spc_args = [app_path, f'runfile={path_to_file}']
     return spc.run(spc_args, capture_output=True)
@@ -623,7 +620,7 @@ def write_ccf_file(site, time_step, system='main', overwrite=True):
 
     system_name = get_system_name(site=site, system=system)
     path_to_config = (
-        PATHS.get_local_path(resource='ccf_config') /
+        PATHS.get_local_resource_path(resource='ccf_config') /
         f'TOA5_{system_name}.ccf'
         )
 

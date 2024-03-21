@@ -195,9 +195,10 @@ def merge_site_data(site, concat_files=False, truncate_to_flux=False):
         dict(zip(io.INFO_FIELDS, io.FILE_CONFIGS['TOA5']['dummy_info']))
         )
     info.update({'table_name': 'merged'})
-    output_path = PATHS.get_local_path(
-        resource='data', stream='flux_slow', site=site
-        ) / f'{site}_merged_std.dat'
+    output_path = (
+        PATHS.get_local_data_path(data_stream='flux_slow', site=site) /
+        f'{site}_merged_std.dat'
+        )
 
     # Now output the data
     io.write_data_to_file(
@@ -208,18 +209,6 @@ def merge_site_data(site, concat_files=False, truncate_to_flux=False):
         output_format='TOA5'
         )
 #------------------------------------------------------------------------------
-
-# #------------------------------------------------------------------------------
-# def get_latest_10Hz_file(site):
-
-#     data_path = PATHS.get_local_path(
-#         resource='data', stream='flux_fast', site=site, subdirs=['TOB3']
-#         )
-#     try:
-#         return max(data_path.rglob('TOB3*.dat'), key=os.path.getctime).name
-#     except ValueError:
-#         return 'No files'
-# #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def make_site_info_TOA5(site):
@@ -290,7 +279,8 @@ def make_site_info_TOA5(site):
 
     # Set the output path
     output_path = (
-        PATHS.get_local_path(resource='site_details') / f'{site}_details.dat'
+        PATHS.get_local_resource_path(resource='site_details') /
+        f'{site}_details.dat'
         )
 
     # Write to file
