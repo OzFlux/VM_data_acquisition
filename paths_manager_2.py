@@ -180,8 +180,12 @@ class Paths():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_application_path(self, application):
+    def get_application_path(self, application, **kwargs):
 
+        [
+            kwargs.pop(arg, None) for arg in
+            ['data_stream', 'site' 'subdirs', 'file_name']
+            ]
         return self.get_path(
             base_location='APPLICATIONS', resource=application
             )

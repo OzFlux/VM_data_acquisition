@@ -17,20 +17,20 @@ import subprocess as spc
 ### CUSTOM IMPORTS ###
 #------------------------------------------------------------------------------
 
-import paths_manager as pm
+import paths_manager_2 as pm
 
 #------------------------------------------------------------------------------
 ### INITIAL CONFIGURATION ###
 #------------------------------------------------------------------------------
 
 PATHS = pm.Paths()
-APP_PATH = PATHS.get_application_path(application='rclone', as_str=True)
+APP_PATH = PATHS.get_application_path(application='rclone')
 ARGS_LIST = [
     'copy', '--transfers', '36', '--progress', '--checksum', '--checkers',
     '48', '--timeout', '0'
     ]
 ALLOWED_STREAMS = ['flux_slow', 'flux_fast', 'rtmc']
-ALLOWED_REMOTES = PATHS.get_remote_resource_list()
+ALLOWED_REMOTES = PATHS.list_remote_storages()
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
@@ -52,6 +52,7 @@ def generic_move(
     try:
         check_remote_available(str(remote_location))
     except (spc.TimeoutExpired, spc.CalledProcessError) as e:
+        breakpoint()
         logging.error(e)
         logging.error(
             f'    -> remote location {remote_location} is not valid!'
@@ -84,12 +85,11 @@ def generic_move(
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def pull_slow_flux(site, remote_resource='nextcloud'):
+def pull_slow_flux(site):
 
     logging.info(f'Begin retrieval of {site} slow data from UQRDM')
     _move_site_data_stream(
-        site=site, stream='flux_slow', remote_resource=remote_resource,
-        which_way='from_remote'
+        site=site, stream='flux_slow', which_way='from_remote'
         )
     logging.info('Done')
 #------------------------------------------------------------------------------
@@ -99,8 +99,8 @@ def push_status_files():
 
     logging.info('Begin move of status files to UQRDM')
     generic_move(
-        local_location=PATHS.get_local_path(resource='network_status'),
-        remote_location=PATHS.get_remote_path(resource='epcn_share'),
+        local_location=PATHS.get_local_resource_path(resource='network_status'),
+        remote_location=PATHS.get_remote_data_path(data_stream='epcn_share'),
         timeout=180
         )
     logging.info('Done.')
@@ -110,60 +110,46 @@ def push_status_files():
 def push_fast_flux(site):
 
     logging.info(f'Begin move of {site} fast data to UQRDM flux archive')
-    _move_site_data_stream(
-        site=site, stream='flux_fast', remote_resource='ten_Hz_archive',
-        exclude_dirs=['TMP']
-        )
+    _move_site_data_stream(site=site, stream='flux_fast', exclude_dirs=['TMP'])
     logging.info('Done.')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def push_slow_flux(site, remote_resource='nextcloud'):
+def push_slow_flux(site):
 
     logging.info(f'Begin move of {site} slow flux data to UQRDM')
-    _move_site_data_stream(
-        site=site, stream='flux_slow', remote_resource=remote_resource
-        )
+    _move_site_data_stream(site=site, stream='flux_slow')
     logging.info('Done.')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def push_profile_processed(site, remote_resource='nextcloud'):
+def push_profile_processed(site):
 
     logging.info(f'Begin move of {site} processed profile data to UQRDM')
-    _move_site_data_stream(
-        site=site, stream='profile_proc', remote_resource=remote_resource
-        )
+    _move_site_data_stream(site=site, stream='profile_proc')
     logging.info('Done.')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def push_rtmc(site, remote_resource='nextcloud'):
+def push_rtmc(site):
 
     logging.info(f'Begin move of {site} RTMC images to UQRDM')
-    _move_site_data_stream(
-        site=site, stream='rtmc', remote_resource=remote_resource
-        )
+    _move_site_data_stream(site=site, stream='rtmc')
     logging.info('Done.')
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
 def _move_site_data_stream(
-        site, stream, remote_resource, exclude_dirs=None,
-        which_way='to_remote', timeout=600
+        site, stream, exclude_dirs=None, which_way='to_remote', timeout=600
         ):
 
     local_path = _reformat_path_str(
-        PATHS.get_local_path(
-            site=site, resource='data', stream=stream, as_str=True
-            )
+        PATHS.get_local_data_path(site=site, data_stream=stream, as_str=True)
         )
     remote_path = _reformat_path_str(
-        PATHS.get_remote_path(
-            resource=remote_resource, stream=stream, site=site,
-            as_str=True
-            )
+        PATHS.get_remote_data_path(data_stream=stream, site=site,as_str=True)
         )
+    breakpoint()
     generic_move(
         local_location=local_path, remote_location=remote_path,
         exclude_dirs=exclude_dirs, which_way=which_way, timeout=timeout
