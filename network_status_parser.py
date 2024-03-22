@@ -19,7 +19,11 @@ import sparql_site_details as sd
 
 
 VARIABLE_LIST = ['Fco2', 'Fh', 'Fe', 'Fsd']
-site_list = dm.get_mapped_site_list()
+GENERIC_DATA_PATH = pm.Paths().get_local_data_path(
+    data_stream='flux_slow', as_str=True
+    )
+PLACEHOLDER = pm.PLACEHOLDER
+SITE_LIST = dm.get_mapped_site_list()
 
 
 def make_status_geojson(write=False):
@@ -41,7 +45,6 @@ def make_status_geojson(write=False):
 
     """
 
-    site_list = dm.get_mapped_site_list()
     reference_data = sd.make_df()
     json_obj = geojson.FeatureCollection(
         [
@@ -53,7 +56,7 @@ def make_status_geojson(write=False):
                     ]),
                 properties=_get_station_status(site)
                 )
-            for site in site_list
+            for site in SITE_LIST
             ]
         )
     json_obj['metadata'] = {
@@ -78,7 +81,6 @@ def _write_status_geojson(rslt):
     None.
 
     """
-
     output_path = (
         pm.GenericPaths().local_resources.network_status / 'network_status.json'
         )
@@ -132,7 +134,7 @@ def get_10Hz_status():
     """
 
     files, days = [], []
-    for site in site_list:
+    for site in SITE_LIST:
         file = dm.get_latest_10Hz_file(site=site)
         files.append(file)
         try:
@@ -147,7 +149,7 @@ def get_10Hz_status():
         except ValueError:
             days.append(None)
     return pd.DataFrame(
-        zip(site_list, files, days),
+        zip(SITE_LIST, files, days),
         columns=['site', 'file_name', 'days_since_last_record']
         )
 #--------------------------------------------------------------------------
@@ -190,16 +192,12 @@ class DataStatusConstructor():
 
         """
 
-        paths = pm.Paths()
-        temp_path = paths.get_local_path(
-            resource='data', stream='flux_slow', as_str=True
-            )
         table_df = dm.make_table_df(logger_info=True, extended_info=True)
         data_list = []
         for file in table_df.index:
             site = table_df.loc[file, 'site']
             full_path = pathlib.Path(
-                temp_path.replace(paths._placeholder, site)
+                GENERIC_DATA_PATH.replace(PLACEHOLDER, site)
                 ) / file
             data_list.append(
                 dp.get_file_record_stats(
@@ -270,7 +268,7 @@ class DataStatusConstructor():
                     )
 
             # Iterate over sites...
-            for site in site_list:
+            for site in SITE_LIST:
 
                 print (site)
                 # Prepend the run date and time to the spreadsheet

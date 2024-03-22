@@ -9,7 +9,7 @@ and system resources, in both local and remote locations. Note that the source
 for the requisite metadata is a Windows initialisation file containing the
 paths to various resources (applications, metadata spreadsheets etc) and data
 streams. Main classes are:
-    Paths. Returns patlib.Path objects for various local and remote resourcers
+    Paths. Returns pathlib.Path objects for various local and remote resourcers
     and data streams.
     GenericPaths. Convenience class that simply lists local resources and
     applications as pandas series, which can be accessed using dot notation.
@@ -50,7 +50,8 @@ class GenericPaths():
 
         return pd.Series({
             resource: self._Paths.get_local_resource_path(
-                resource=resource, as_str=True)
+                resource=resource
+                )
             for resource in self._Paths.list_local_resources()
             })
     #--------------------------------------------------------------------------
@@ -105,8 +106,19 @@ class SitePaths(GenericPaths):
 
 #------------------------------------------------------------------------------
 class Paths():
+    """
+
+    """
 
     def __init__(self):
+        """
+        Create the configreader object and placeholder str as attributes.
+
+        Returns
+        -------
+        None.
+
+        """
 
         self._config = ConfigParser()
         self._config.read(pathlib.Path(__file__).parent / PATHS_FILE)
@@ -158,12 +170,35 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def list_local_data_streams(self):
+        """
+        List the available local data streams defined in the .ini file.
+
+        Returns
+        -------
+        list
+            The data streams.
+
+        """
 
         return list(self._config['LOCAL_DATA'])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_local_data_path(self, **kwargs):
+        """
+        Returns the local data path for the given data stream.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            See get_path method for documentation of kwargs.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to local data.
+
+        """
 
         return self.get_path(
             base_location='LOCAL_PATH', resource='data', **kwargs
@@ -171,7 +206,23 @@ class Paths():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def get_site_image(self, img_type, **kwargs):
+    def get_site_image_path(self, img_type, **kwargs):
+        """
+        Get the path to site image.
+
+        Parameters
+        ----------
+        img_type : str
+            Either 'tower' or 'contour'.
+        **kwargs : dict
+            See get_path method for documentation of kwargs.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to local image.
+
+        """
 
         kwargs.pop('subdirs', None)
         img_dict = {'tower': '<site>_tower.jpg', 'contour': '<site>_contour.png'}
@@ -182,7 +233,39 @@ class Paths():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def list_applications(self):
+        """
+        List the available local applications defined in the .ini file.
+
+        Returns
+        -------
+        list
+            The applications.
+
+        """
+
+        return list(self._config['APPLICATIONS'])
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def get_application_path(self, application, **kwargs):
+        """
+        Get the path to application.
+
+        Parameters
+        ----------
+        application : str
+            Application name.
+        **kwargs : dict
+            See get_path method for documentation of kwargs. Note that kwargs
+            'data_stream', 'site' 'subdirs' and 'file_name' do not apply.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to application.
+
+        """
 
         [
             kwargs.pop(arg, None) for arg in
@@ -203,12 +286,37 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def list_remote_storages(self):
+        """
+        List the available remote storages defined in the .ini file.
+
+        Returns
+        -------
+        list
+            The storages.
+
+        """
 
         return list(self._config['REMOTE_STORAGE'])
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
     def get_remote_data_path(self, data_stream, **kwargs):
+        """
+        Returns the remote data path for the given data stream.
+
+        Parameters
+        ----------
+        data_stream : str
+            The data stream for which to return the path.
+        **kwargs : dict
+            See get_path method for documentation of kwargs.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to remote data.
+
+        """
 
         storage = self._config['REMOTE_DATA_LINKAGES'][data_stream]
         return self.get_path(
@@ -219,6 +327,15 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def list_remote_data_streams(self):
+        """
+        List the available remote data streams defined in the .ini file.
+
+        Returns
+        -------
+        list
+            The data streams.
+
+        """
 
         return list(self._config['REMOTE_DATA'])
     #--------------------------------------------------------------------------
@@ -232,8 +349,43 @@ class Paths():
     ###########################################################################
 
     #--------------------------------------------------------------------------
-    def get_path(self, base_location: str, resource, data_stream=None, site=None,
-                  subdirs=[], file_name=None, check_exists=False, as_str=False):
+    def get_path(self, base_location, resource, data_stream=None, site=None,
+                 subdirs=[], file_name=None, check_exists=False,
+                 as_str=False
+                 ):
+        """
+        Return the path to resources or data.
+
+        Parameters
+        ----------
+        base_location : str
+            The level of the ini file under which to find the resource.
+        resource : str
+            The resource to grab.
+        data_stream : str, optional
+            DESCRIPTION. The default is None.
+        site : TYPE, optional
+            DESCRIPTION. The default is None.
+        subdirs : TYPE, optional
+            DESCRIPTION. The default is [].
+        file_name : TYPE, optional
+            DESCRIPTION. The default is None.
+        check_exists : TYPE, optional
+            DESCRIPTION. The default is False.
+        as_str : TYPE, optional
+            DESCRIPTION. The default is False.
+
+        Raises
+        ------
+        TypeError
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
 
         stream_dict = {
             'LOCAL_PATH': 'LOCAL_DATA',
@@ -277,6 +429,22 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def _add_subdirs(self, path, subdirs_list):
+        """
+
+
+        Parameters
+        ----------
+        path : TYPE
+            DESCRIPTION.
+        subdirs_list : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        path : TYPE
+            DESCRIPTION.
+
+        """
 
         for subdir in subdirs_list:
             path = path / subdir

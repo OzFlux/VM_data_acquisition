@@ -127,7 +127,7 @@ class CSILoggerMonitor():
         """
 
         cmd_str = _data_query_builder(
-            mode='most_recent',
+            mode='most-recent',
             config_str=f'&p1={recs_back}',
             table=table,
             variable = f'.{variable}' if variable else ''
@@ -211,7 +211,6 @@ class CSILoggerMonitor():
 def get_data_by_date_range(
     IP_addr, start_date, end_date, table, variable=None
     ):
-
     cmd_str = _data_query_builder(
         mode='date-range',
         config_str=(
@@ -261,11 +260,9 @@ def _retrieve_data(IP_addr, cmd_str):
 def _do_request(IP_addr, cmd_str):
 
     rslt = requests.get(
-        (
-            ENCAPS_CMD_STR
-            .replace('<IP_addr>', IP_addr)
-            .replace('<cmd>', cmd_str)
-            ),
+        ENCAPS_CMD_STR
+        .replace('<IP_addr>', IP_addr)
+        .replace('<cmd>', cmd_str),
         stream=True
         )
     if not rslt.status_code == 200:

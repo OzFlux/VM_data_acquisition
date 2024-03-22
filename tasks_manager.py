@@ -201,7 +201,7 @@ class TasksManager():
                 'args': site_only
                 },
 
-            'Rclone_push_rtmc_rdm': {
+            'Rclone_push_rtmc_sftpgo': {
                 'func': rt.push_rtmc,
                 'args': site_only
                 },
