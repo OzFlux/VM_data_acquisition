@@ -109,7 +109,9 @@ def push_status_files():
 def push_fast_flux(site):
 
     logging.info(f'Begin move of {site} fast data to UQRDM flux archive')
-    _move_site_data_stream(site=site, stream='flux_fast', exclude_dirs=['TMP'])
+    _move_site_data_stream(
+        site=site, stream='flux_fast', exclude_dirs=['TMP'], timeout=1200
+        )
     logging.info('Done.')
 #------------------------------------------------------------------------------
 
