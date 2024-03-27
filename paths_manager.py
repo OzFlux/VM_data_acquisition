@@ -430,19 +430,19 @@ class Paths():
     #--------------------------------------------------------------------------
     def _add_subdirs(self, path, subdirs_list):
         """
-
+        Concatenate path with listed subdirectories.
 
         Parameters
         ----------
-        path : TYPE
-            DESCRIPTION.
-        subdirs_list : TYPE
-            DESCRIPTION.
+        path : pathlib.Path
+            The existing path to which to concatenate subdirectories.
+        subdirs_list : list
+            List of subdirectories.
 
         Returns
         -------
-        path : TYPE
-            DESCRIPTION.
+        path : pathlib.Path
+            The concatenated path.
 
         """
 
@@ -453,6 +453,24 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def _check_exists(self, path):
+        """
+        Check a given path exists.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            The path to check.
+
+        Raises
+        ------
+        FileNotFoundError
+            Raised if does not exist.
+
+        Returns
+        -------
+        None.
+
+        """
 
         if not path.exists():
             raise FileNotFoundError('No such path!')
@@ -460,6 +478,22 @@ class Paths():
 
     #--------------------------------------------------------------------------
     def _insert_site_str(self, target_obj, site):
+        """
+
+
+        Parameters
+        ----------
+        target_obj : pathlib.Path
+            DESCRIPTION.
+        site : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
 
         if isinstance(target_obj, pathlib.Path):
             return pathlib.Path(str(target_obj).replace(PLACEHOLDER, site))
