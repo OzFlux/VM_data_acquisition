@@ -75,7 +75,9 @@ class SitePaths(GenericPaths):
         super().__init__()
         self.site = site
         self.local_resources = (
-            self.local_resources.str.replace(PLACEHOLDER, site)
+            self.local_resources.apply(
+                lambda x: pathlib.Path(str(x).replace(PLACEHOLDER, site))
+                )
             )
         self.local_data = self._get_local_data_paths()
         self.remote_data = self._get_remote_data_paths()
