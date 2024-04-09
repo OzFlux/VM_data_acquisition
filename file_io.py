@@ -12,10 +12,10 @@ Todo:
     to call both
 
 Contains basic file input-output functions and structural configurations for
-handling both TOA5 and EddyPro files. In general, and where relevant, 
-intermediary data products are pandas DataFrames. The module has functions to 
-retrieve both data and headers. It is strictly tasked with parsing files 
-between disk and memory, checking only structural integrity of the files. 
+handling both TOA5 and EddyPro files. In general, and where relevant,
+intermediary data products are pandas DataFrames. The module has functions to
+retrieve both data and headers. It is strictly tasked with parsing files
+between disk and memory, checking only structural integrity of the files.
 It does NOT evaluate data integrity!
 """
 
@@ -25,6 +25,7 @@ import os
 from typing import Callable
 
 import numpy as np
+from numpy.typing import ArrayLike
 import pandas as pd
 import pathlib
 
@@ -91,12 +92,12 @@ def get_data(
         file: str | pathlib.Path, file_type: str=None, usecols: list=None
         ) -> pd.core.frame.DataFrame:
     """Read data from file.
-    
+
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched.
-        usecols (list, optional): The subset of columns to keep. If None, keep 
+        usecols (list, optional): The subset of columns to keep. If None, keep
             all.
         Defaults to None.
 
@@ -155,7 +156,7 @@ def _integrity_checks(df: pd.core.frame.DataFrame, non_numeric: list):
     Args:
       df: dataframe containing the data.
       non_numeric: column names to ignore when coercing to numeric type.
-   
+
     """
 
     # Coerce non-numeric data in numeric columns
@@ -178,7 +179,7 @@ def get_file_headers(
         file: str | pathlib.Path, begin: int, end: int, sep: str=','
         ) -> list:
     """Get a list of the header strings.
-    
+
     Args:
         file: absolute path of file to parse.
         begin: line number of first header line.
@@ -186,9 +187,9 @@ def get_file_headers(
         sep: text separation character.
 
     Returns:
-        List of sublists, each sublist containing the text elements of a header 
+        List of sublists, each sublist containing the text elements of a header
             line.
-    
+
     """
 
     line_list = []
@@ -209,12 +210,12 @@ def get_header_df(
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched.
 
     Returns:
         The file header content.
-    
+
     """
 
     # If file type not supplied, detect it.
@@ -240,22 +241,22 @@ def get_header_df(
 
 #------------------------------------------------------------------------------
 def get_file_info(
-        file: str | pathlib.Path, file_type: str=None, 
+        file: str | pathlib.Path, file_type: str=None,
         dummy_override: bool=False
-        ) -> list(str):
+        ) -> list:
     """Get the information from the first line of the TOA5 file. If EddyPro file
     OR dummy_override, just grab the defaults from the configuration dictionary.
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched.
-        dummy_override: Whether to just retrieve the default info. The default 
+        dummy_override: Whether to just retrieve the default info. The default
             is False.
 
     Returns:
         Dictionary of elements.
-    
+
     """
 
     # If file type not supplied, detect it.
@@ -315,7 +316,7 @@ def get_file_type_configs(
     """Get the configuration dictionary for the file type.
 
     Args:
-      file_type: if specified, must be either `TOA5` or 
+      file_type: if specified, must be either `TOA5` or
           `EddyPro`. If None, file_type is fetched. Default is None.
       return_field:  the specific field to return (as str). If None, return all
           (as dict) with fields as keys. Default is None.
@@ -326,7 +327,7 @@ def get_file_type_configs(
 
     Returns:
         file type configuration field or fields.
-    
+
     """
 
     if not file_type:
@@ -342,27 +343,27 @@ def get_file_type_configs(
 
 #------------------------------------------------------------------------------
 def write_data_to_file(
-        headers: pd.DataFrame, data: pd.DataFrame, 
-        abs_file_path: str | pathlib.Path, output_format:str=None, 
+        headers: pd.DataFrame, data: pd.DataFrame,
+        abs_file_path: str | pathlib.Path, output_format:str=None,
         info: dict=None
         ):
-    """Write headers and data to file. Checks only for consistency between 
-    headers and data column names (no deeper analysis of consistency with 
+    """Write headers and data to file. Checks only for consistency between
+    headers and data column names (no deeper analysis of consistency with
                                    output format).
 
     Args:
       headers: the dataframe containing the headers as columns.
       data: the dataframe containing the data.
       abs_file_path: absolute path (including file name) to write to.
-      output_format: if specified, must be either `TOA5` or `EddyPro`. The 
+      output_format: if specified, must be either `TOA5` or `EddyPro`. The
           default is None.
-      info: the file info to write as first header line. Only required if 
-          outputting TOA5, and retrieves file type-specific dummy input if not 
+      info: the file info to write as first header line. Only required if
+          outputting TOA5, and retrieves file type-specific dummy input if not
           specified. The default is None.
 
     Returns:
         None.
-    
+
     """
 
     # Cross-check header / data column consistency
@@ -420,7 +421,7 @@ def _check_data_header_consistency(headers: pd.DataFrame, data: pd.DataFrame):
 
     Returns:
         None
-    
+
     """
 
     headers_list = headers.index.tolist()
@@ -435,7 +436,33 @@ def _check_data_header_consistency(headers: pd.DataFrame, data: pd.DataFrame):
             )
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def read_excel(
+        file: str | pathlib.Path, sheet_name: str, usecols: list=None,
+        converters: Callable=None,
+        ) -> pd.DataFrame:
+    """
 
+
+    Args:
+        file (str | pathlib.Path): DESCRIPTION.
+        sheet_name (str): DESCRIPTION.
+        usecols (list, optional): DESCRIPTION. Defaults to None.
+        converters (Callable, optional): DESCRIPTION. Defaults to None.
+         (TYPE): DESCRIPTION.
+
+    Returns:
+        TYPE: DESCRIPTION.
+
+    """
+
+    return pd.read_excel(
+        io=file,
+        sheet_name=sheet_name,
+        usecols=usecols,
+        converters=converters
+        )
+#------------------------------------------------------------------------------
 
 ###############################################################################
 ### END FILE READ / WRITE FUNCTIONS ###
@@ -447,20 +474,18 @@ def _check_data_header_consistency(headers: pd.DataFrame, data: pd.DataFrame):
 ### BEGIN FILE FORMATTING FUNCTIONS ###
 ###############################################################################
 
-
-
 #------------------------------------------------------------------------------
 def get_formatter(file_type: str, which: str) -> Callable:
     """
 
     Args:
         file_type: must be either `TOA5` or `EddyPro`.
-        which: must be one of `read_line`, `write_line`, `read_date` and 
+        which: must be one of `read_line`, `write_line`, `read_date` and
             `write_date`.
 
     Returns:
         function determined by `which` arg.
-    
+
     """
 
     formatter_dict = {
@@ -481,9 +506,9 @@ def get_formatter(file_type: str, which: str) -> Callable:
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _EddyPro_line_read_formatter(line: str) -> list(str):
-    """Parses a line string of EddyPro format into a list of elements. 
-    
+def _EddyPro_line_read_formatter(line: str) -> list:
+    """Parses a line string of EddyPro format into a list of elements.
+
     Args:
         line: single data line from EddyPro file.
 
@@ -497,9 +522,9 @@ def _EddyPro_line_read_formatter(line: str) -> list(str):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _EddyPro_line_write_formatter(line_list: list(str)):
-    """Parses a list of elements into a line string of EddyPro format. 
-    
+def _EddyPro_line_write_formatter(line_list: list):
+    """Parses a list of elements into a line string of EddyPro format.
+
     Args:
         line_list: list of elements (as str).
 
@@ -507,15 +532,15 @@ def _EddyPro_line_write_formatter(line_list: list(str)):
         single data line for EddyPro file.
 
     """
-    
+
     joiner = lambda x: FILE_CONFIGS['EddyPro']['separator'].join(x) + '\n'
     return joiner(line_list)
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _EddyPro_date_read_formatter(line_list: list(str)) -> dt.datetime:
-    """Parses a list of date strings of EddyPro format into a pydatetime. 
-    
+def _EddyPro_date_read_formatter(line_list: list) -> dt.datetime:
+    """Parses a list of date strings of EddyPro format into a pydatetime.
+
     Args:
         line_list: separate elements of an EddyPro data line string.
 
@@ -532,13 +557,13 @@ def _EddyPro_date_read_formatter(line_list: list(str)) -> dt.datetime:
 
 #------------------------------------------------------------------------------
 def _EddyPro_date_write_formatter(py_date: dt.datetime, which: str) -> str:
-    """Parses a pydatetime into a string of EddyPro datetime format. 
-    
+    """Parses a pydatetime into a string of EddyPro datetime format.
+
     Args:
         py_date: pydatetime for conversion.
-        which: must be either `date` or `time` 
+        which: must be either `date` or `time`
             (EddyPro files list them separately).
-            
+
     Returns:
         the constructed EddyPro datetime.
 
@@ -552,8 +577,8 @@ def _EddyPro_date_write_formatter(py_date: dt.datetime, which: str) -> str:
 
 #------------------------------------------------------------------------------
 def _TOA5_line_read_formatter(line: str) -> dt.datetime:
-    """Parses a line string of TOA5 format into a list of elements. 
-    
+    """Parses a line string of TOA5 format into a list of elements.
+
     Args:
         line: single data line from TOA5 file.
 
@@ -567,9 +592,9 @@ def _TOA5_line_read_formatter(line: str) -> dt.datetime:
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _TOA5_line_write_formatter(line_list: list(str)) -> str:
-    """Parses a list of elements into a line string of TOA5 format. 
-    
+def _TOA5_line_write_formatter(line_list: list) -> str:
+    """Parses a list of elements into a line string of TOA5 format.
+
     Args:
         line_list: list of elements (as str).
 
@@ -585,8 +610,8 @@ def _TOA5_line_write_formatter(line_list: list(str)) -> str:
 
 #------------------------------------------------------------------------------
 def _TOA5_date_read_formatter(line_list: list) -> dt.datetime:
-    """Parses a list of date strings of TOA5 format into a pydatetime. 
-    
+    """Parses a list of date strings of TOA5 format into a pydatetime.
+
     Args:
         line_list: separate elements of an TOA5 data line string.
 
@@ -603,13 +628,13 @@ def _TOA5_date_read_formatter(line_list: list) -> dt.datetime:
 
 #------------------------------------------------------------------------------
 def _TOA5_date_write_formatter(py_date, which='TIMESTAMP'):
-    """Parses a pydatetime into a string of TOA5 datetime format. 
-    
+    """Parses a pydatetime into a string of TOA5 datetime format.
+
     Args:
         py_date: pydatetime for conversion.
-        which: must be either `date` or `time` 
+        which: must be either `date` or `time`
             (TOA5 files list them separately).
-            
+
     Returns:
         the constructed TOA5 datetime.
 
@@ -619,8 +644,8 @@ def _TOA5_date_write_formatter(py_date, which='TIMESTAMP'):
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _generic_date_constructor(date_elems: list(str)) -> dt.datetime:
-    """Construct a date from a list of date elements using the prescribed date 
+def _generic_date_constructor(date_elems: list) -> dt.datetime:
+    """Construct a date from a list of date elements using the prescribed date
     format.
 
     Args:
@@ -636,7 +661,7 @@ def _generic_date_constructor(date_elems: list(str)) -> dt.datetime:
 
 #------------------------------------------------------------------------------
 def reformat_data(data: pd.DataFrame, output_format: str) -> pd.DataFrame:
-    """Take a dataset of generic intermediary data format and turn it into 
+    """Take a dataset of generic intermediary data format and turn it into
     either TOA5 or EddyPro data.
 
     Args:
@@ -644,8 +669,8 @@ def reformat_data(data: pd.DataFrame, output_format: str) -> pd.DataFrame:
         output_format: the output format (must be `TOA5` or `EddyPro`).
 
     Returns:
-        the reformatted data.  
-        
+        the reformatted data.
+
     Raises:
         TypeError: Raised if the data does not have a datetime index.
 
@@ -676,8 +701,8 @@ def _TOA5ify_data(data: pd.DataFrame) -> pd.DataFrame:
         data: the data to be reformatted.
 
     Returns:
-        the reformatted data.  
-    
+        the reformatted data.
+
     """
 
     # Create the date outputs
@@ -695,8 +720,8 @@ def _EPify_data(data: pd.DataFrame) -> pd.DataFrame:
         data: the data to be reformatted.
 
     Returns:
-        the reformatted data.  
-    
+        the reformatted data.
+
     """
 
     # Check whether DATAH and filename columns are present - if so, leave them
@@ -728,7 +753,7 @@ def reformat_headers(headers: pd.DataFrame, output_format: str) -> pd.DataFrame:
 
     Returns:
         thereformatted headers.
-    
+
     """
 
     # Initialisation stuff
@@ -757,7 +782,7 @@ def _EPify_headers(headers: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         the reformatted headers.
-    
+
     """
 
     # Create EddyPro-specific headers
@@ -775,7 +800,7 @@ def _EPify_headers(headers: pd.DataFrame) -> pd.DataFrame:
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _TOA5ify_headers(headers):
+def _TOA5ify_headers(headers: pd.DataFrame) -> pd.DataFrame:
     """Convert headers to TOA5 format.
 
     Args:
@@ -783,7 +808,7 @@ def _TOA5ify_headers(headers):
 
     Returns:
         the reformatted headers.
-    
+
     """
 
     # Create TOA5-specific headers
@@ -816,17 +841,17 @@ def _TOA5ify_headers(headers):
 #------------------------------------------------------------------------------
 def get_dates(
         file: str | pathlib.Path, file_type: str=None
-        ) -> list(dt.datetime):
+        ) -> list:
     """Date parser only.
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched. Defaults to None.
 
     Returns:
         list of dates.
-    
+
     """
 
     # If file type not supplied, detect it.
@@ -866,12 +891,12 @@ def get_start_end_dates(file: str | pathlib.Path, file_type: str=None) -> dict:
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched. Defaults to None.
 
     Returns:
         dictionary containing start and end dates.
-    
+
     """
 
     # If file type not supplied, detect it.
@@ -939,12 +964,12 @@ def get_eligible_concat_files(
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched. Defaults to None.
 
     Returns:
         list of available backup files.
-    
+
     """
 
     funcs_dict = {
@@ -969,7 +994,7 @@ def get_TOA5_backups(file: str | pathlib.Path) -> list:
 
     Returns:
         list of available backup files.
-    
+
     """
 
     file_to_parse = _check_file_exists(file=file)
@@ -985,7 +1010,7 @@ def get_EddyPro_files(file: str | pathlib.Path) -> list:
 
     Returns:
         list of available backup files.
-   
+
     """
 
     file_to_parse = _check_file_exists(file=file)
@@ -1016,12 +1041,12 @@ def get_file_interval(file: str | pathlib.Path, file_type: str=None) -> int:
 
     Args:
         file: absolute path of file to parse.
-        file_type: if specified, must be either `TOA5` or 
+        file_type: if specified, must be either `TOA5` or
             `EddyPro`. If None, file_type is fetched. Defaults to None.
 
     Returns:
         the inferred file interval.
-    
+
     """
 
     # If file type not supplied, detect it.
@@ -1033,7 +1058,7 @@ def get_file_interval(file: str | pathlib.Path, file_type: str=None) -> int:
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def get_datearray_interval(datearray: np.typing.ArrayLike) -> int:
+def get_datearray_interval(datearray: ArrayLike) -> int:
     """Attempts to infer the likely time interval from non-monotonic time stamps.
 
     Args:
@@ -1097,11 +1122,11 @@ def _check_format(fmt):
     """Check format is valid.
 
     Args:
-      fmt: the format string. 
+      fmt: the format string.
 
     Raises:
         NotImplementedError: raised if format not recognised.
-        
+
     Returns:
         None
 
