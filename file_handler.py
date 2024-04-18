@@ -232,54 +232,6 @@ class DataHandler():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def _get_gap_distribution(self):
-        """
-        List of gap lengths and their frequencies (counts).
-
-        Returns
-        -------
-        pd.core.frame.DataFrame
-            Dataframe with number of records as index and count as column.
-
-        """
-
-        # If file is TOA5, it will have a column AND an index named TIMESTAMP,
-        # so dump the variable if so
-        local_data = self.data.copy()
-        try:
-            local_data.drop('TIMESTAMP', axis=1, inplace=True)
-        except KeyError:
-            pass
-
-        # Get instances of duplicate indices OR records, and remove
-        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
-        local_data = (
-            local_data[~dupes]
-            .reset_index()
-            ['DATETIME']
-            )
-
-        # Get gaps
-        gap_series = (
-            (local_data - local_data.shift())
-            .astype('timedelta64[s]')
-            .replace(self.interval, np.nan)
-            .dropna()
-            )
-        gap_series /= self.interval
-        unique_gaps = gap_series.unique().astype('int64')
-        counts = [len(gap_series[gap_series==x]) for x in unique_gaps]
-        return (
-            pd.DataFrame(
-                data=zip(unique_gaps - 1, counts),
-                columns=['n_records', 'count']
-                )
-            .set_index(keys='n_records')
-            .sort_index()
-            )
-    #--------------------------------------------------------------------------
-
-    #--------------------------------------------------------------------------
     def get_missing_records(self, raise_if_single_record=False):
         """
         Get simple statistics for missing records
@@ -292,27 +244,89 @@ class DataHandler():
 
         """
 
-        if self.interval is None:
-            if raise_if_single_record:
-                raise TypeError('Analysis not applicable to single record!')
-            return {
-                'n_missing': np.nan,
-                '%_missing': np.nan,
-                'gap_distribution': np.nan
-                }
-        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
-        local_data = self.data[~dupes]
+        data = self._get_non_duplicate_data()
         complete_index = pd.date_range(
-            start=local_data.index[0],
-            end=local_data.index[-1],
+            start=data.index[0],
+            end=data.index[-1],
             freq=f'{self.interval}T'
             )
-        n_missing = len(complete_index) - len(local_data)
+        n_missing = len(complete_index) - len(data)
         return {
             'n_missing': n_missing,
             '%_missing': round(n_missing / len(complete_index) * 100, 2),
-            'gap_distribution': self._get_gap_distribution()
             }
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_gap_bounds(self):
+
+        data, gap_series = self._init_gap_analysis()
+        return pd.concat(
+            [
+                gap_series.reset_index().n_records,
+                pd.DataFrame(
+                    data=[
+                        data.iloc[x-1: x+1].astype(str).tolist()
+                        for x in gap_series.index
+                        ],
+                    columns=['last_preceding', 'first_succeeding']
+                    )
+                ],
+            axis=1
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def get_gap_distribution(self):
+
+        gap_series = self._init_gap_analysis()[1]
+        unique_gaps = gap_series.unique()
+        counts = [len(gap_series[gap_series==x]) for x in unique_gaps]
+        return (
+            pd.DataFrame(
+                data=zip(unique_gaps - 1, counts),
+                columns=['n_records', 'count']
+                )
+            .set_index(keys='n_records')
+            .sort_index()
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _init_gap_analysis(self):
+
+        # If file is TOA5, it will have a column AND an index named TIMESTAMP,
+        # so dump the variable if so
+        data = self._get_non_duplicate_data()
+        try:
+            data = data.drop('TIMESTAMP', axis=1)
+        except KeyError:
+            pass
+
+        # Get instances of duplicate indices OR records, and remove
+        data = data.reset_index()['DATETIME']
+
+        # Get gaps as n_records (exclude gaps equal to measurement interval!)
+        gap_series = (
+            (data - data.shift())
+            .astype('timedelta64[s]')
+            .replace(self.interval, np.nan)
+            .dropna()
+            .apply(lambda x: x.total_seconds() / (60 * self.interval))
+            .astype(int)
+            .rename('n_records')
+            )
+        gap_series = gap_series[gap_series!=1]
+        return data, gap_series
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def _get_non_duplicate_data(self):
+
+        if self.interval is None:
+            raise TypeError('Analysis not applicable to single record!')
+        dupes = self.get_duplicate_indices() | self.get_duplicate_records()
+        return self.data[~dupes]
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
