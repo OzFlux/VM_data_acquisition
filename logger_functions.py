@@ -21,6 +21,7 @@ import pandas as pd
 ###############################################################################
 
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+SECONDARY_TIME_FORMAT = TIME_FORMAT + '.%f'
 ALLOWED_QUERY_MODES = [
     'most-recent', 'date-range', 'since-time', 'since-record', 'backfill'
     ]
@@ -268,6 +269,24 @@ def _wrangle_data(IP_addr: str, cmd_substr: str) -> pd.DataFrame:
         )
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def get_logger_info(IP_addr: str) -> dict:
+
+    # Build the query substring
+    cmd_substr = build_query_str(
+        mode='most-recent',
+        config_str='&p1=1',
+        table='status',
+        )
+
+
+    cmd_str = build_cmd_str(IP_addr=IP_addr, cmd_substr=cmd_substr)
+    content = json.loads(do_request(cmd_str=cmd_str))
+    info_dict = content['head']['environment']
+    info_dict.update({'prog_sig': content['head']['signature']})
+    return content['head']['environment']
+#------------------------------------------------------------------------------
+
 ###############################################################################
 ### END DATA QUERY SECTION ###
 ###############################################################################
@@ -444,7 +463,9 @@ def do_request(cmd_str: str) -> dict:
 
     rslt = requests.get(cmd_str, stream=True, timeout=30)
     if not rslt.status_code == 200:
-        raise RuntimeError(f'Failed (status code {rslt.status_code})!')
+        raise RuntimeError(
+            f'Request {cmd_str} failed with status code {rslt.status_code}!'
+            )
     return rslt.content
 #------------------------------------------------------------------------------
 
@@ -513,10 +534,14 @@ def _convert_time_to_logger_format(time):
 
 def _convert_time_from_logger_format(time_str):
 
-    return dt.datetime.strptime(
-        time_str.replace('T', ' '),
-        TIME_FORMAT
-        )
+    eval_str = time_str.replace('T', ' ')
+    try:
+        return dt.datetime.strptime(eval_str, TIME_FORMAT)
+    except ValueError as e:
+        try:
+            return dt.datetime.strptime(eval_str, SECONDARY_TIME_FORMAT)
+        except ValueError:
+            raise e
 
 ###############################################################################
 ### END PRIVATE FUNCTION SECTION ###

@@ -5,6 +5,8 @@ Created on Tue Apr  9 15:29:34 2024
 @author: jcutern-imchugh
 """
 
+import pandas as pd
+
 import file_io as io
 from paths_manager import GenericPaths as gp
 import logger_functions as lf
@@ -31,19 +33,16 @@ class ConnectionsManager():
               .sort_index()
               )
         self.sites = df.index.unique().dropna().tolist()
-        self.modem_table = df[MODEM_FIELDS]
         self.modem_fields = MODEM_FIELDS
+        self.modem_table = df[MODEM_FIELDS]
+        self.logger_fields = (
+            [LOGGER_FIELDS[0]] +
+            [x.replace('logger_', '') for x in LOGGER_FIELDS[1:]]
+            )
         self.logger_table = (
             df[LOGGER_FIELDS]
-            .rename(
-                dict(zip(
-                    LOGGER_FIELDS[1:],
-                    [x.replace('logger_', '') for x in LOGGER_FIELDS[1:]]
-                    )),
-                axis=1
-                )
+            .rename(dict(zip(LOGGER_FIELDS, self.logger_fields)), axis=1)
             )
-        self.logger_fields = LOGGER_FIELDS
 
     def get_site_logger_list(self, site):
 
@@ -71,14 +70,40 @@ class ConnectionsManager():
 
 class LoggerDataManager():
 
-    def __init__(self, site, logger):
+    def __init__(self, site):
 
         conns = ConnectionsManager()
-        self.logger_details = conns.get_site_logger_details(
-            site=site, logger=logger
-            )
-        self.lookup_table = lf.build_lookup_table(
-            IP_addr=self.logger_details['IP_addr']
+        self.logger_details = conns.get_site_logger_details(site=site)
+        self.lookup_table = self._build_expanded_lookup_table(
             )
 
-    # def
+    def _build_expanded_lookup_table(self):
+
+        df_list = []
+        for logger in self.logger_details.index:
+            df = lf.build_lookup_table(
+                IP_addr=self.logger_details.loc[logger, 'IP_addr']
+                )
+            df['logger'] = logger
+            df_list.append(df)
+        return (
+            pd.concat(df_list)
+            [['units', 'process', 'table', 'logger']]
+            .fillna('')
+            )
+
+    def get_variable_attributes(self, variable, field=None):
+
+        if not field:
+            return self.lookup_table.loc[variable]
+        return self.lookup_table.loc[variable, field]
+
+    def get_table_variables(self, table, list_only=False):
+
+        sub_df = (
+            self.lookup_table.loc[self.lookup_table.table==table]
+            .drop('table', axis=1)
+            )
+        if list_only:
+            return sub_df.index.tolist()
+        return sub_df
