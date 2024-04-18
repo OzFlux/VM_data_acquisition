@@ -233,7 +233,7 @@ def do_system_config(site, parser, mdm):
             screen=SCREEN, component_name=component_aliases['contour_image']
             )
         img_editor.get_set_element_ImgName(
-            text=str(PATHS.get_site_image(
+            text=str(PATHS.get_site_image_path(
                 site=site, img_type='contour', check_exists=True
                 ))
             )
@@ -246,7 +246,7 @@ def do_system_config(site, parser, mdm):
             screen=SCREEN, component_name=component_aliases['tower_image']
             )
         img_editor.get_set_element_ImgName(
-            text=str(PATHS.get_site_image(
+            text=str(PATHS.get_site_image_path(
                 site=site, img_type='tower', check_exists=True
                 ))
             )
