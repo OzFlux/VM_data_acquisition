@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Apr  9 15:29:34 2024
+Created on Fri Apr 12 12:32:42 2024
+
+This file contains code to generate the yaml configuration files that is
+required to generate L1 netcdf files. At PRESENT, the files just read info from
+an excel file, but ULTIMATELY the files will hopefully be generated from a
+web-based UI where the PI can enter the requisite info.
 
 @author: jcutern-imchugh
 """
@@ -9,23 +14,50 @@ import json
 import pandas as pd
 import pathlib
 import yaml
+from configobj import ConfigObj
 
 import file_io as io
-from paths_manager import GenericPaths as gp
-import paths_manager as pm
-import logger_functions as lf
+from paths_manager import Paths
+from sparql_site_details import site_details
 
+GLOBAL_ATTRS = [
+    'Conventions', 'acknowledgement', 'altitude',  'canopy_height', 'comment',
+    'contact', 'data_link', 'featureType', 'fluxnet_id', 'history',
+    'institution', 'latitude', 'license', 'license_name', 'longitude',
+    'metadata_link', 'ozflux_link', 'publisher_name', 'references',
+    'site_name', 'site_pi', 'soil', 'source', 'time_step', 'time_zone',
+    'title', 'tower_height', 'vegetation'
+    ]
 
+GENERIC_GLOBAL_ATTRS = {
+    'Conventions': 'CF-1.8',
+    'acknowledgement': 'This work used eddy covariance data collected by '
+    'the TERN Ecosystem \nProcesses facility. Ecosystem Processes would '
+    'like to acknowledge the financial support of the \nAustralian Federal '
+    'Government via the National Collaborative Research Infrastructure '
+    'Scheme \nand the Education Investment Fund.',
+    'comment': 'CF metadataOzFlux standard variable names',
+    'featureType': 'timeSeries',
+    'license': 'https://creativecommons.org/licenses/by/4.0/',
+    'license_name': 'CC BY 4.0',
+    'metadata_link': 'http://www.ozflux.org.au/monitoringsites/<site>/index.html',
+    'ozflux_link': 'http://ozflux.org.au/',
+    'publisher_name': 'TERN Ecosystem ProcessesOzFlux',
+    }
 
-paths = pm.Paths()
+ALIAS_DICT = {'elevation': 'altitude'}
+
+PathsManager = Paths()
+Details = site_details()
 
 ###############################################################################
 ### BEGIN MULTI-SITE CONFIGURATION GENERATOR SECTION ###
 ###############################################################################
 
 class ConfigsGenerator():
-    """Class to read and interrogate data from excel file, and write
-    operational configuration files - mostly used if config input data changes!
+    """Class to read and interrogate hardware configuration from excel file,
+    and write operational configuration files - mostly used if config input
+    data changes!
     """
 
     def __init__(self):
@@ -134,7 +166,7 @@ class ConfigsGenerator():
         """
 
         details = self.get_site_logger_details(site=site, logger=logger)
-        dir_path = paths.get_local_data_path(
+        dir_path = PathsManager.get_local_data_path(
             site=site, data_stream='flux_slow'
             )
         rslt = {
@@ -170,11 +202,7 @@ class ConfigsGenerator():
                 logger:
                     self.get_site_logger_details(
                         site=site, logger=logger
-                        ).to_dict() |
-                    {'table_map': self.map_tables_to_files(
-                        site=site, logger=logger, paths_as_str=True
-                        )
-                        }
+                         ).to_dict()
                 for logger in self.get_site_logger_list(site=site)
                 }
             }
@@ -199,8 +227,10 @@ class ConfigsGenerator():
 
         fmt_dict = {'yaml': 'yml', 'json': 'json'}
         out_file = (
-            paths.get_local_resource_path(resource='L1_config_files') /
-            f'{site}_configs.{fmt_dict[write_fmt]}'
+            PathsManager.get_local_resource_path(
+                resource='config_files', subdirs=['Hardware']
+                ) /
+            f'{site}_hardware.{fmt_dict[write_fmt]}'
             )
         rslt = self.build_configs_dict(site=site)
         with open(file=out_file, mode='w', encoding='utf-8') as f:
@@ -234,10 +264,8 @@ class ConfigsGenerator():
 
         """
 
-
-
         details = self.get_site_logger_details(site=site, logger=logger)
-        dir_path = paths.get_local_data_path(
+        dir_path = PathsManager.get_local_data_path(
             site=site, data_stream='flux_slow'
             )
         rslt = {
@@ -262,7 +290,9 @@ def _read_excel_fields(sheet_name):
 
     return (
         io.read_excel(
-            file=gp().local_resources.xl_connections_manager,
+            file=PathsManager.get_local_resource_path(
+                resource='xl_connections_manager'
+                ),
             sheet_name=sheet_name
             )
         .set_index(keys='Site')
@@ -274,186 +304,202 @@ def _read_excel_fields(sheet_name):
 ### END MULTI-SITE CONFIGURATION GENERATOR SECTION ###
 ###############################################################################
 
+class PFPL1CntlToXl():
+    """Class to convert L1 control files to excel workbooks (one sheet contains
+    the global fields, one sheet contains the variable fields). The 'Variables'
+    sheet then needs to be manually amended so that the 'sheet' field is
+    replaced with information about the logger and table that record the given
+    variable.
+    """
+
+    def __init__(self, filename):
+
+        self.config=ConfigObj(filename)
+        self.site = self.config['Global']['site_name']
 
 
-###############################################################################
-### BEGIN SINGLE SITE CONFIGURATION READER SECTION ###
-###############################################################################
-
-#------------------------------------------------------------------------------
-class SiteConfigsReader():
-    """Class to read and interrogate data from site-specific config file"""
-
-    #--------------------------------------------------------------------------
-    def __init__(self, site: str, read_fmt: str='yaml'):
+    def get_variable_table(self) -> pd.DataFrame:
         """
-        Do inits - read the json file.
+        Grab all the variable attributes from the L1 control file.
+
+        Returns:
+            The variable attributes.
+
+        """
+
+        return (
+            pd.concat(
+                [
+                    pd.DataFrame(
+                        [self.config['Variables'][key]['Attr'] for key in
+                         self.config['Variables'].keys()]
+                        ),
+                    pd.DataFrame(
+                        [self.config['Variables'][key]['xl'] for key in
+                         self.config['Variables'].keys()]
+                        )
+                    ],
+                axis=1
+                )
+            .set_index(key for key in self.config['Variables'].keys())
+            .rename({'sheet': 'table'}, axis=1)
+            )
+
+    def get_globals_series(self):
+        """
+        Grab all the global attributes from the L1 control file.
+
+        Returns:
+            The global attributes.
+
+        """
+
+        return pd.Series(
+            dict(zip(
+                self.config['Global'].keys(),
+                [''.join(x) for x in self.config['Global'].values()]
+                ))
+            )
+
+    def write_variables_to_excel(self, xl_write_path: pathlib.Path | str):
+        """
+        Generate an excel file containing the global and variable configs.
 
         Args:
-            site: name of site.
+            xl_write_path: path to write excel file to.
 
         Returns:
             None.
 
         """
 
-        fmt_dict = {'yaml': 'yml', 'json': 'json'}
-        expected_path = (
-            paths.get_local_resource_path(resource='L1_config_files') /
-            f'{site}_configs.{fmt_dict[read_fmt]}'
+        vars_df = self.get_variable_table()
+        globals_series = self.get_globals_series()
+        with pd.ExcelWriter(path=xl_write_path) as writer:
+            globals_series.to_excel(writer, sheet_name='Global_attrs')
+            vars_df.to_excel(writer, sheet_name='Variable_attrs')
+
+def pfp_std_names_to_yaml():
+    """
+    Write yml configuration file of pfp naming conventions.
+
+    Returns:
+        None.
+
+    """
+
+    io_path = PathsManager.get_local_resource_path(
+        resource='config_files', subdirs=['Globals']
+        )
+    data = (
+        io.read_excel(
+            file=io_path / 'std_names.xlsx',
+            sheet_name='names'
             )
-        with open(file=expected_path) as f:
-            if read_fmt == 'yaml':
-                rslt = yaml.safe_load(f)
-            elif read_fmt == 'json':
-                rslt = json.load(f)
-            else:
-                raise NotImplementedError('Unrecognised format!')
-        self.configs = rslt
-    #--------------------------------------------------------------------------
+        .fillna('')
+        .apply(lambda x: x.str.strip())
+        .set_index(keys='pfp_name')
+        .T
+        .to_dict()
+        )
+    with open(file=io_path / 'std_names.yml', mode='w', encoding='utf-8') as f:
+        yaml.dump(data=data, stream=f, sort_keys=False)
 
-    #--------------------------------------------------------------------------
-    def get_logger_list(self) -> list:
-        """
-        Get list of loggers.
+def PFPL1XlToYaml(site: str):
+    """
+    Read the excel file containing the variable configurations and generate
+    a yaml file.
 
-        Args:
-            site: name of site.
+    Args:
+        site: name of site.
 
-        Returns:
-            List of loggers.
+    Returns:
+        None.
 
-        """
+    """
 
-        return list(self.configs['loggers'].keys())
-    #--------------------------------------------------------------------------
+    variable_path = PathsManager.get_local_resource_path(
+        resource='config_files', subdirs=['Variables']
+        )
 
-    #--------------------------------------------------------------------------
-    def get_logger_details(
-            self, logger: str=None, field: str=None
-            ) -> pd.DataFrame | pd.Series | str:
-        """
-        Get details of loggers.
-
-        Args:
-            logger: logger name for which to return details. Defaults to None.
-            field: field to return. Defaults to None.
-
-        Returns:
-            Logger details. If optional kwargs are not specified, returns a
-            string. If logger is specified, return a series.
-            If field is specified, return a str.
-
-        """
-
-        sub_df = (
-            pd.DataFrame(self.configs['loggers'])
-            .drop('table_map')
-            .T
+    df = (
+        io.read_excel(
+            file=variable_path / f'{site}_variables.xlsx',
+            sheet_name='Variable_attrs'
             )
-        if not logger is None:
-            sub_df = sub_df.loc[logger]
-        if not field is None:
-            sub_df = sub_df[[field]]
-        if not field:
-            return sub_df
-        return sub_df[field]
-    #--------------------------------------------------------------------------
+        .set_index(keys='Variable')
+        .drop(['long_name', 'standard_name'], axis=1)
+        )
 
-    #--------------------------------------------------------------------------
-    def get_modem_details(self, field: str=None) -> pd.Series | str:
-        """
-        Get details of modem.
+    with open(
+            file=variable_path / f'{site}_variables.yml', mode='w',
+            encoding='utf-8'
+            ) as f:
+        yaml.dump(data=df.T.to_dict(), stream=f, sort_keys=False)
 
-        Args:
-            field: field to return. Defaults to None.
+def get_L1_site_global_attrs(site: str) -> dict:
+    """
 
-        Returns:
-            Details of modem.
 
-        """
+    Args:
+        site (TYPE): DESCRIPTION.
 
-        modem_fields = pd.Series(self.configs['modem'])
-        if field is None:
-            return modem_fields
-        return modem_fields[field]
-    #--------------------------------------------------------------------------
+    Returns:
+        TYPE: DESCRIPTION.
 
-    #--------------------------------------------------------------------------
-    def get_table_to_file_map(
-            self, logger:str, raise_if_no_file: bool=True,
-            paths_as_str: bool=False
-            ) -> dict:
-        """
-        Tie table names to local file locations.
+    """
 
-        Args:
-            logger: logger name for which to provide mapping.
-            raise_if_no_file: raise exception if the file does not exist. Defaults to True.
-            paths_as_str: output paths as strings (instead of pathlib). Defaults to False.
+    subset = [
+        'fluxnet_id', 'latitude', 'longitude', 'elevation', 'time_step',
+        'time_zone'
+        ]
+    return (
+        Details.get_single_site_details(site=site)
+        [subset]
+        .rename(ALIAS_DICT)
+        .to_dict()
+        )
 
-        Raises:
-            FileNotFoundError: DESCRIPTION.
+def get_L1_generic_global_attrs(site: str) -> dict:
+    """
+    Retrieve the attributes that are either not site-specific - or are
+    predictably so - from a yaml configuration file.
 
-        Returns:
-            Dictionary mapping table (key) to absolute file path (value).
+    Args:
+        site: name of site for which to get attrs.
 
-        """
+    Returns:
+        the attrs.
 
-        rslt = self.configs['loggers'][logger]['table_map']
-        if raise_if_no_file or not paths_as_str:
-            fmt_rslt = {
-                key: pathlib.Path(value) for key, value in rslt.items()
-                }
-        if raise_if_no_file:
-            for key, value in fmt_rslt.items():
-                if not value.exists():
-                    raise FileNotFoundError(
-                        f'No file named {value} exists for table {key}!'
-                        )
-        if paths_as_str:
-            return pd.Series(rslt)
-        return pd.Series(fmt_rslt)
-    #--------------------------------------------------------------------------
+    """
 
-#------------------------------------------------------------------------------
+    with open(file=_get_generic_globals_file()) as f:
+        rslt = json.load(f)
+    rslt['metadata_link'] = rslt['metadata_link'].replace('<site>', site)
+    return rslt
 
-class LoggerDataManager():
+def write_L1_generic_global_attrs():
+    """
+    Write the generic global attributes dictionary to a file in json format.
 
-    def __init__(self, site):
+    Returns:
+        None.
 
-        conns = ConfigsManager()
-        self.logger_details = conns.get_site_logger_details(site=site)
-        self.lookup_table = self._build_expanded_lookup_table(
-            )
+    """
 
-    def _build_expanded_lookup_table(self):
+    with open(file=_get_generic_globals_file(), mode='w', encoding='utf-8') as f:
+        json.dump(GENERIC_GLOBAL_ATTRS, f, indent=4)
 
-        df_list = []
-        for logger in self.logger_details.index:
-            df = lf.build_lookup_table(
-                IP_addr=self.logger_details.loc[logger, 'IP_addr']
-                )
-            df['logger'] = logger
-            df_list.append(df)
-        return (
-            pd.concat(df_list)
-            [['units', 'process', 'table', 'logger']]
-            .fillna('')
-            )
+def _get_generic_globals_file() -> str | pathlib.Path:
+    """
+    Return the absolute path of the global generic attributes file.
 
-    def get_variable_attributes(self, variable, field=None):
+    Returns:
+        The path.
 
-        if not field:
-            return self.lookup_table.loc[variable]
-        return self.lookup_table.loc[variable, field]
+    """
 
-    def get_table_variables(self, table, list_only=False):
-
-        sub_df = (
-            self.lookup_table.loc[self.lookup_table.table==table]
-            .drop('table', axis=1)
-            )
-        if list_only:
-            return sub_df.index.tolist()
-        return sub_df
+    return (
+        PathsManager.get_local_resource_path(resource='L1_config_files') /
+        'generic_global_attrs.json'
+        )
