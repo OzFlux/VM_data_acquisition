@@ -5,14 +5,13 @@ Created on Tue Apr  9 15:29:34 2024
 @author: jcutern-imchugh
 """
 
-import json
 import numpy as np
 import pandas as pd
 import pathlib
 import yaml
 
+import config_getters as cg
 import paths_manager as pm
-import logger_functions as lf
 
 paths = pm.Paths()
 VALID_DEVICES = ['SONIC', 'IRGA', 'RAD']
@@ -26,7 +25,7 @@ VALID_SUFFIXES = {
 ###############################################################################
 
 #------------------------------------------------------------------------------
-class VariableManager():
+class MetaDataManager():
     """Class to read and interrogate variable data from site-specific config file"""
 
     #--------------------------------------------------------------------------
@@ -44,36 +43,77 @@ class VariableManager():
 
         """
 
+        # Set basic attrs
         self.site = site
+        self.data_path = (
+            paths.get_local_data_path(site=site, data_stream='flux_slow')
+            )
 
         # Make the variable configuration dict
-        self.variable_configs = get_site_variable_configs(site=site)
+        self.variable_configs = cg.get_site_variable_configs(site=site)
         self.variables = list(self.variable_configs.keys())
 
         # Make lookup tables
         self.variable_lookup_table = make_variable_lookup_table(site=site)
+
+        # Get flux instrumewnt types
+        self.irga_type = self._get_inst_type('IRGA')
+        self.sonic_type = self._get_inst_type('SONIC')
 
         # Private inits
         self._NAME_MAP = {'site_name': 'name', 'pfp_name': 'pfp_name'}
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def list_files(self, full_path=True):
+    def _get_inst_type(self, inst):
+
+        var_list = [x for x in self.variable_lookup_table.index if inst in x]
+        inst_list = self.variable_lookup_table.loc[var_list].instrument.unique()
+        if not len(inst_list) == 1:
+            raise RuntimeError(
+                'More than one instrument specified as instrument attribute '
+                f'for {inst} device variable ({", ".join(inst_list)})'
+                )
+        return inst_list[0]
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def list_tables(self):
         """
 
-
-        Args:
-            full_path (TYPE, optional): DESCRIPTION. Defaults to True.
 
         Returns:
             TYPE: DESCRIPTION.
 
         """
 
-        target_var = 'file'
-        if full_path:
-            target_var = 'path'
-        return self.variable_lookup_table[target_var].unique().tolist()
+        return self.variable_lookup_table.table.unique().tolist()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def map_tables_to_files(
+        self, table: str | list=None, abs_path: bool=False
+        ) -> dict:
+
+        if table is None:
+            table = self.list_tables()
+
+        s = (
+            pd.Series(
+                data=self.variable_lookup_table.file.tolist(),
+                index=self.variable_lookup_table.table.tolist()
+                )
+            .drop_duplicates()
+            .loc[table]
+            )
+
+        if abs_path:
+            return (
+                s.apply(lambda x: self.data_path / x)
+                .to_dict()
+                )
+
+        return s.to_dict()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -127,14 +167,14 @@ class VariableManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
-    def translate_variables_by_file(
-            self, file: str, source_field: str='site_name'
+    def translate_variables_by_table(
+            self, table: str, source_field: str='site_name'
             ) -> dict:
         """
         Maps the translation between site names and pfp names for a specific file.
 
         Args:
-            file: name of file for which to fetch translations.
+            table: name of table for which to fetch translations.
             source_field (optional): the source field for the variable name
             (either 'pfp_name' or 'site_name'). Defaults to 'site_name'.
 
@@ -148,7 +188,7 @@ class VariableManager():
             )
         df = self._index_translator(use_index=source_field)
         return (
-            df.loc[df.file==file]
+            df.loc[df.table==table]
             [translate_to]
             .to_dict()
             )
@@ -480,30 +520,9 @@ class PFPNameParser():
 
 #------------------------------------------------------------------------------
 
-
-
-#------------------------------------------------------------------------------
-def get_site_hardware_configs(site: str) -> dict:
-    """
-    Get the site hardware configuration file content.
-
-    Args:
-        site: name of site for which to return hardware configuration dictionary.
-
-    Returns:
-        Hardware configurations.
-
-    """
-
-    hardware_path = (
-        paths.get_local_resource_path(
-            resource='config_files', subdirs=['Hardware']
-            ) /
-        f'{site}_hardware.yml'
-        )
-    with open(file=hardware_path) as f:
-        return yaml.safe_load(f)
-#------------------------------------------------------------------------------
+###############################################################################
+### BEGIN SITE-SPECIFIC HARDWARE CONFIGURATION FUNCTIONS ###
+###############################################################################
 
 #--------------------------------------------------------------------------
 def get_logger_list(site: str) -> list:
@@ -518,7 +537,7 @@ def get_logger_list(site: str) -> list:
 
     """
 
-    hardware_configs = get_site_hardware_configs(site)
+    hardware_configs = cg.get_site_hardware_configs(site)
     return list(hardware_configs['loggers'].keys())
 #--------------------------------------------------------------------------
 
@@ -543,7 +562,7 @@ def map_logger_tables_to_files(
 
     """
 
-    hardware_configs = get_site_hardware_configs(site=site)
+    hardware_configs = cg.get_site_hardware_configs(site=site)
     data_path = paths.get_local_data_path(site=site, data_stream='flux_slow')
     logger_list = list(hardware_configs['loggers'].keys())
     if not logger is None:
@@ -563,7 +582,10 @@ def map_logger_tables_to_files(
     if raise_if_no_file:
         for record in df.index:
             file = df.loc[record, 'file']
-            abs_path = pathlib.Path(data_path / file)
+            try:
+                abs_path = pathlib.Path(data_path / file)
+            except TypeError:
+                breakpoint()
             if not abs_path.exists():
                 raise FileNotFoundError(
                     f'No file named {file} exists for table {record[0]}!'
@@ -586,35 +608,22 @@ def get_modem_details(site: str, field: str=None) -> pd.Series | str:
 
     """
 
-    hardware_configs = get_site_hardware_configs(site=site)
+    hardware_configs = cg.get_site_hardware_configs(site=site)
     modem_fields = pd.Series(hardware_configs['modem'])
     if field is None:
         return modem_fields
     return modem_fields[field]
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-def get_site_variable_configs(site: str) -> dict:
-    """
-    Get the site variable configuration file content.
+###############################################################################
+### END SITE-SPECIFIC HARDWARE CONFIGURATION FUNCTIONS ###
+###############################################################################
 
-    Args:
-        site: site for which to return variable configuration dictionary.
 
-    Returns:
-        Dictionary with variable attributes.
 
-    """
-
-    variable_path = (
-        paths.get_local_resource_path(
-            resource='config_files', subdirs=['Variables']
-            ) /
-        f'{site}_variables.yml'
-        )
-    with open(file=variable_path) as f:
-        return yaml.safe_load(f)
-#------------------------------------------------------------------------------
+###############################################################################
+### BEGIN SITE-SPECIFIC VARIABLE CONFIGURATION FUNCTIONS ###
+###############################################################################
 
 #------------------------------------------------------------------------------
 def make_variable_lookup_table(site):
@@ -631,7 +640,7 @@ def make_variable_lookup_table(site):
     """
 
     # Make the basic variable table
-    variable_configs = get_site_variable_configs(site=site)
+    variable_configs = cg.get_site_variable_configs(site=site)
     vars_df = pd.DataFrame(variable_configs).T
     vars_df.index.name = 'pfp_name'
 
@@ -667,3 +676,7 @@ def make_variable_lookup_table(site):
         axis=1
         )
 #------------------------------------------------------------------------------
+
+###############################################################################
+### END SITE-SPECIFIC VARIABLE CONFIGURATION FUNCTIONS ###
+###############################################################################
