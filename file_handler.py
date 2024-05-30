@@ -515,9 +515,13 @@ class DataHandler():
 
 #------------------------------------------------------------------------------
 
+
+
 ###############################################################################
-### FUNCTIONS ###
+### BEGIN INIT FUNCTIONS ###
 ###############################################################################
+
+
 
 #------------------------------------------------------------------------------
 def _get_handler_elements(file, concat_files=False):
@@ -613,3 +617,53 @@ def _get_single_file_data(file, fallback=False):
         '_configs': configs
         }
 #------------------------------------------------------------------------------
+
+###############################################################################
+### END INIT FUNCTIONS ###
+###############################################################################
+
+
+
+###############################################################################
+### BEGIN PUBLIC FUNCTIONS ###
+###############################################################################
+
+#------------------------------------------------------------------------------
+def merge_data(files: list | dict) -> pd.core.frame.DataFrame:
+    """
+    Merge and align data from different files.
+
+    Args:
+        files: the absolute path of the files to parse.
+        If a list, all variables returned; if a dict, file is value, and key
+        is passed to the file_handler. That key can be a list of variables, or
+        a dictionary mapping translation of variable names (see file handler
+        documentation).
+
+    Returns:
+        merged data.
+
+    """
+
+    df_list = []
+    for file in files:
+        try:
+            usecols = files[file]
+        except TypeError:
+            usecols = None
+        data_handler = DataHandler(file=file, concat_files=True)
+        df_list.append(
+            data_handler.get_conditioned_data(
+                usecols=usecols, drop_non_numeric=True,
+                monotonic_index=True
+                )
+            )
+    return (
+        pd.concat(df_list, axis=1)
+        .rename_axis('time')
+        )
+#------------------------------------------------------------------------------
+
+###############################################################################
+### END PUBLIC FUNCTIONS ###
+###############################################################################
