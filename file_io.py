@@ -464,6 +464,14 @@ def read_excel(
         )
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+def get_file_n_lines(file):
+
+    with open(file, 'rb') as f:
+        return sum(1 for _ in f)
+#------------------------------------------------------------------------------
+
+
 ###############################################################################
 ### END FILE READ / WRITE FUNCTIONS ###
 ###############################################################################
@@ -942,7 +950,35 @@ def get_start_end_dates(file: str | pathlib.Path, file_type: str=None) -> dict:
     return {'start_date': start_date, 'end_date': end_date}
 #------------------------------------------------------------------------------
 
+def find_date(file, date: dt.datetime, file_type: str=None):
 
+
+    line_formatter = get_formatter(file_type=file_type, which='read_line')
+    date_formatter = get_formatter(file_type=file_type, which='read_date')
+    with open(file, 'rb') as f:
+        end_date = None
+        f.seek(2, os.SEEK_END)
+        lines_back = 0
+        while True:
+            try:
+                if f.read(1) == b'\n':
+                    pos = f.tell()
+                    line = f.readline().decode()
+                    try:
+                        end_date = (
+                            date_formatter(
+                                line_formatter(line)
+                                )
+                            )
+                        if end_date < date:
+                            return lines_back
+                        lines_back += 1
+                        f.seek(pos - f.tell(), os.SEEK_CUR)
+                    except ValueError:
+                        f.seek(pos - f.tell(), os.SEEK_CUR)
+                f.seek(-2, os.SEEK_CUR)
+            except OSError:
+                break
 
 ###############################################################################
 ### END DATE HANDLING FUNCTIONS ###
