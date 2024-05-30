@@ -43,6 +43,9 @@ GENERIC_GLOBAL_ATTRS = {
     'metadata_link': 'http://www.ozflux.org.au/monitoringsites/<site>/index.html',
     'ozflux_link': 'http://ozflux.org.au/',
     'publisher_name': 'TERN Ecosystem ProcessesOzFlux',
+    'processing_level': 'L1',
+    'data_link': 'http://data.ozflux.org.au/',
+    'site_name': '<site>'
     }
 
 ALIAS_DICT = {'elevation': 'altitude'}
@@ -65,7 +68,25 @@ class ConfigsGenerator():
         self.modem_table = _read_excel_fields(sheet_name='Modems')
         self.modem_fields = self.modem_table.columns.tolist()
         self.sites = self.modem_table.index.tolist()
-        self.logger_table = _read_excel_fields(sheet_name='Loggers')
+        self.logger_table = (
+            pd.read_excel(
+                io=PathsManager.get_local_resource_path(
+                    resource='xl_connections_manager'
+                    ),
+                sheet_name='Loggers',
+                dtype={
+                    field: 'Int64' for field in
+                    ['serial_num', 'tcp_port', 'pakbus_addr']
+                    }
+                )
+            .set_index(keys='Site')
+            .sort_index()
+            )
+        self.logger_table.tables = (
+            self.logger_table.tables
+            .fillna('')
+            .apply(lambda x: x.split(','))
+            )
         self.logger_fields = self.logger_table.columns.tolist()
 
     def get_site_logger_list(self, site: str) -> list:
@@ -143,45 +164,6 @@ class ConfigsGenerator():
             .unique()
             .tolist()
             )
-
-    def map_tables_to_files(
-            self, site: str, logger:str, raise_if_no_file: bool=True,
-            paths_as_str: bool=False
-            ) -> dict:
-        """
-        Tie table names to local file locations.
-
-        Args:
-            site: name of site.
-            logger: logger: logger name for which to provide mapping.
-            raise_if_no_file: raise exception if the file does not exist. Defaults to True.
-            paths_as_str: output paths as strings (instead of pathlib). Defaults to False.
-
-        Raises:
-            FileNotFoundError: DESCRIPTION.
-
-        Returns:
-            Dictionary mapping table (key) to absolute file path (value).
-
-        """
-
-        details = self.get_site_logger_details(site=site, logger=logger)
-        dir_path = PathsManager.get_local_data_path(
-            site=site, data_stream='flux_slow'
-            )
-        rslt = {
-            table: dir_path / f'{site}_{logger}_{table}.dat'
-            for table in details['tables'].split(',')
-            }
-        if raise_if_no_file:
-            for key, val in rslt.items():
-                if not val.exists():
-                    raise FileNotFoundError(
-                        f'No file named {val} exists for table {key}!'
-                        )
-        if paths_as_str:
-            return {key: str(value) for key, value in rslt.items()}
-        return rslt
 
     #--------------------------------------------------------------------------
     def build_configs_dict(self, site: str) -> dict:
@@ -286,14 +268,15 @@ class ConfigsGenerator():
 #------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-def _read_excel_fields(sheet_name):
+def _read_excel_fields(sheet_name, dtype={}):
 
     return (
-        io.read_excel(
-            file=PathsManager.get_local_resource_path(
+        pd.read_excel(
+            io=PathsManager.get_local_resource_path(
                 resource='xl_connections_manager'
                 ),
-            sheet_name=sheet_name
+            sheet_name=sheet_name,
+            dtype=dtype
             )
         .set_index(keys='Site')
         .sort_index()
@@ -460,24 +443,6 @@ def get_L1_site_global_attrs(site: str) -> dict:
         .to_dict()
         )
 
-def get_L1_generic_global_attrs(site: str) -> dict:
-    """
-    Retrieve the attributes that are either not site-specific - or are
-    predictably so - from a yaml configuration file.
-
-    Args:
-        site: name of site for which to get attrs.
-
-    Returns:
-        the attrs.
-
-    """
-
-    with open(file=_get_generic_globals_file()) as f:
-        rslt = json.load(f)
-    rslt['metadata_link'] = rslt['metadata_link'].replace('<site>', site)
-    return rslt
-
 def write_L1_generic_global_attrs():
     """
     Write the generic global attributes dictionary to a file in json format.
@@ -488,7 +453,7 @@ def write_L1_generic_global_attrs():
     """
 
     with open(file=_get_generic_globals_file(), mode='w', encoding='utf-8') as f:
-        json.dump(GENERIC_GLOBAL_ATTRS, f, indent=4)
+        yaml.dump(data=GENERIC_GLOBAL_ATTRS, stream=f, sort_keys=False)
 
 def _get_generic_globals_file() -> str | pathlib.Path:
     """
@@ -500,6 +465,8 @@ def _get_generic_globals_file() -> str | pathlib.Path:
     """
 
     return (
-        PathsManager.get_local_resource_path(resource='L1_config_files') /
-        'generic_global_attrs.json'
+        PathsManager.get_local_resource_path(
+            resource='config_files', subdirs=['Globals']
+            ) /
+        'generic_global_attrs.yml'
         )
