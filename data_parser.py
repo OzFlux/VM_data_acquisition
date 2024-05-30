@@ -581,7 +581,6 @@ def get_file_record_stats(file, site_time, concat_files=True):
 
     handler = fh.DataHandler(file=file)
     rslt_dict = handler.get_missing_records()
-    rslt_dict.pop('gap_distribution')
     days_since_last_rec = (
         site_time - handler.data.index[-1].to_pydatetime()
         ).days
