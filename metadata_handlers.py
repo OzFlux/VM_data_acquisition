@@ -8,10 +8,12 @@ Created on Tue Apr  9 15:29:34 2024
 import numpy as np
 import pandas as pd
 import pathlib
-import yaml
 
 import config_getters as cg
+import file_io as io
 import paths_manager as pm
+from sparql_site_details import site_details
+
 
 paths = pm.Paths()
 VALID_DEVICES = ['SONIC', 'IRGA', 'RAD']
@@ -45,6 +47,7 @@ class MetaDataManager():
 
         # Set basic attrs
         self.site = site
+        self.site_details = site_details().get_single_site_details(site=site)
         self.data_path = (
             paths.get_local_data_path(site=site, data_stream='flux_slow')
             )
@@ -78,6 +81,15 @@ class MetaDataManager():
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
+    def get_file_attrs(self, file):
+
+        return (
+            io.get_file_info(file=self.data_path / file) |
+            io.get_start_end_dates(file=self.data_path / file)
+            )
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
     def list_tables(self):
         """
 
@@ -88,6 +100,12 @@ class MetaDataManager():
         """
 
         return self.variable_lookup_table.table.unique().tolist()
+    #--------------------------------------------------------------------------
+
+    #--------------------------------------------------------------------------
+    def list_files(self):
+
+        return self.variable_lookup_table.file.unique().tolist()
     #--------------------------------------------------------------------------
 
     #--------------------------------------------------------------------------
@@ -277,12 +295,7 @@ class PFPNameParser():
         """
 
         # Load yaml and create attribute lookup table
-        with open(
-                paths.get_local_resource_path(
-                    resource='config_files', subdirs=['Globals']
-                    ) / 'std_names.yml'
-                ) as f:
-            rslt = yaml.safe_load(f)
+        rslt = cg.get_pfp_std_names()
         self.lookup_table = pd.DataFrame(rslt).T.rename_axis('pfp_name')
 
         # List of valid variable identifier substrings
