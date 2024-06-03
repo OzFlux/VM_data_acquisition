@@ -629,7 +629,9 @@ def _get_single_file_data(file, fallback=False):
 ###############################################################################
 
 #------------------------------------------------------------------------------
-def merge_data(files: list | dict) -> pd.core.frame.DataFrame:
+def merge_data(
+        files: list | dict, concat_files: bool=False
+        ) -> pd.core.frame.DataFrame:
     """
     Merge and align data from different files.
 
@@ -651,7 +653,7 @@ def merge_data(files: list | dict) -> pd.core.frame.DataFrame:
             usecols = files[file]
         except TypeError:
             usecols = None
-        data_handler = DataHandler(file=file, concat_files=True)
+        data_handler = DataHandler(file=file, concat_files=concat_files)
         df_list.append(
             data_handler.get_conditioned_data(
                 usecols=usecols, drop_non_numeric=True,
