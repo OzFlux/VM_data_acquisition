@@ -32,7 +32,7 @@ import pandas as pd
 sys.path.append(
     str(pathlib.Path(__file__).parent.parent.resolve() / 'profile')
     )
-import data_parser as dp
+import ds_builder as dbuild
 import eddy_pro_concatenator as epc
 import file_constructors as fc
 import network_status_parser as nsp
@@ -158,6 +158,11 @@ class TasksManager():
 
             'generate_L1_excel': {
                 'func': generate_L1_excel,
+                'args': site_only
+                },
+
+            'generate_L1_nc': {
+                'func': dbuild.append_to_current_nc_file,
                 'args': site_only
                 },
 
