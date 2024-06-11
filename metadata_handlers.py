@@ -9,13 +9,12 @@ import numpy as np
 import pandas as pd
 import pathlib
 
-import config_getters as cg
+import configs_manager as cm
 import file_io as io
-import paths_manager as pm
 from sparql_site_details import site_details
 
 
-paths = pm.Paths()
+paths = cm.PathsManager()
 VALID_DEVICES = ['SONIC', 'IRGA', 'RAD']
 VALID_LOC_UNITS = ['cm', 'm']
 VALID_SUFFIXES = {
@@ -49,11 +48,13 @@ class MetaDataManager():
         self.site = site
         self.site_details = site_details().get_single_site_details(site=site)
         self.data_path = (
-            paths.get_local_data_path(site=site, data_stream='flux_slow')
+            paths.get_local_stream_path(
+                site=site, resource='data', stream='flux_slow'
+                )
             )
 
         # Make the variable configuration dict
-        self.variable_configs = cg.get_site_variable_configs(site=site)
+        self.variable_configs = cm.get_site_configs(site=site, which='variables')
         self.variables = list(self.variable_configs.keys())
 
         # Make lookup tables
@@ -295,7 +296,7 @@ class PFPNameParser():
         """
 
         # Load yaml and create attribute lookup table
-        rslt = cg.get_pfp_std_names()
+        rslt = cm.get_global_configs(which='pfp_std_names')
         self.lookup_table = pd.DataFrame(rslt).T.rename_axis('pfp_name')
 
         # List of valid variable identifier substrings
@@ -550,7 +551,7 @@ def get_logger_list(site: str) -> list:
 
     """
 
-    hardware_configs = cg.get_site_hardware_configs(site)
+    hardware_configs = cm.get_site_configs(site=site, which='hardware')
     return list(hardware_configs['loggers'].keys())
 #--------------------------------------------------------------------------
 
@@ -575,8 +576,10 @@ def map_logger_tables_to_files(
 
     """
 
-    hardware_configs = cg.get_site_hardware_configs(site=site)
-    data_path = paths.get_local_data_path(site=site, data_stream='flux_slow')
+    hardware_configs = cm.get_site_configs(site=site, which='hardware')
+    data_path = paths.get_local_stream_path(
+        site=site, resource='data', stream='flux_slow'
+        )
     logger_list = list(hardware_configs['loggers'].keys())
     if not logger is None:
         logger_list = [logger]
@@ -621,7 +624,7 @@ def get_modem_details(site: str, field: str=None) -> pd.Series | str:
 
     """
 
-    hardware_configs = cg.get_site_hardware_configs(site=site)
+    hardware_configs = cm.get_site_configs(site=site, which='hardware')
     modem_fields = pd.Series(hardware_configs['modem'])
     if field is None:
         return modem_fields
@@ -653,7 +656,7 @@ def make_variable_lookup_table(site):
     """
 
     # Make the basic variable table
-    variable_configs = cg.get_site_variable_configs(site=site)
+    variable_configs = cm.get_site_configs(site=site, which='variables')
     vars_df = pd.DataFrame(variable_configs).T
     vars_df.index.name = 'pfp_name'
 
